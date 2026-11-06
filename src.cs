@@ -400,6 +400,9 @@ namespace QRSnap
         public static int MtIdle = DefaultMtIdle;
         public const int DefaultMtMaskAlpha = 100;       // 译文遮罩不透明度（0-100，100=完全不透明）
         public static int MtMaskAlpha = DefaultMtMaskAlpha;
+        public const string MtModeEfficiency = "efficiency";   // 效率：遮罩块直接盖住原文
+        public const string MtModeRealistic = "realistic";     // 拟真：擦掉原字、按背景补洞、再画译文
+        public static string MtMode = MtModeEfficiency;
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -485,6 +488,15 @@ namespace QRSnap
             return v;
         }
 
+        // 译文模式：效率 / 拟真，其余一律按效率
+        public static string NormalizeMtMode(string v)
+        {
+            if (v == null) return MtModeEfficiency;
+            string s = v.Trim().ToLowerInvariant();
+            if (s == MtModeRealistic || s == "real" || s == "拟真") return MtModeRealistic;
+            return MtModeEfficiency;
+        }
+
         public static void Load()
         {
             HotkeyQr = DefaultHotkeyQr;
@@ -507,6 +519,7 @@ namespace QRSnap
             MtPerf = MtPerfBalanced;
             MtIdle = DefaultMtIdle;
             MtMaskAlpha = DefaultMtMaskAlpha;
+            MtMode = MtModeEfficiency;
             Legacy = false;
             try
             {
@@ -558,6 +571,7 @@ namespace QRSnap
                         int av;
                         if (int.TryParse(v, out av)) MtMaskAlpha = NormalizeMtMaskAlpha(av);
                     }
+                    else if (k.Equals("mtmode", StringComparison.OrdinalIgnoreCase)) MtMode = NormalizeMtMode(v);
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
@@ -591,6 +605,7 @@ namespace QRSnap
             sb.Append("mtperf=").Append(MtPerf).Append("\r\n");
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
+            sb.Append("mtmode=").Append(MtMode).Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -2083,6 +2098,33 @@ namespace QRSnap
             // 按行数均分到检测框：以前是从第 i 行一直拼到末尾，导致第一个框吃掉所有行
             int nBoxes = boxes.Count;
             int nLines = lines.Count;
+            // 行数对不上（微信把一整条导航栏拆成 6 行、检测只给 1 行）时，
+            // 按序号均分会让后面所有行整体错位，译文就糊到别的行上。
+            // 这种情况直接改用 PP-OCR 自己的「框+字」结果，几何位置才是对的。
+            if (pp != null && (nLines != nBoxes) && nLines > 0)
+            {
+                try
+                {
+                    List<PpOcr.Seg> ps = pp.RecognizeSegments(bmp);
+                    if (ps != null && ps.Count >= 2)
+                    {
+                        segs.Clear();
+                        for (int i = 0; i < ps.Count; i++)
+                        {
+                            PpOcr.Seg s = ps[i];
+                            if (s.Text == null || s.Text.Trim().Length == 0) continue;
+                            OcrSegment seg = new OcrSegment();
+                            seg.Text = s.Text;
+                            seg.Box = new Rectangle(s.X, s.Y, s.W, s.H);
+                            seg.Angle = s.Angle;
+                            seg.Order = s.Order;
+                            segs.Add(seg);
+                        }
+                        if (segs.Count > 0) return;
+                    }
+                }
+                catch (Exception) { }
+            }
             for (int i = 0; i < nBoxes; i++)
             {
                 int from = (int)((long)i * nLines / nBoxes);
