@@ -66,7 +66,7 @@
       if (demo) demo.style.background = "rgba(14,18,26," + (a / 100).toFixed(2) + ")";
       if ($("lblMtAlpha")) $("lblMtAlpha").textContent = a + "%";
     }
-    if (c.dl && c.dl.running) showDl(c.dl.status, c.dl.percent);
+    if (c.dl && c.dl.running) { /* 下载功能已下线 */ }
 
     if (document.activeElement !== $("rgOpacity")) $("rgOpacity").value = c.opacity != null ? c.opacity : 30;
     if (document.activeElement !== $("rgFrost")) $("rgFrost").value = c.frost != null ? c.frost : 3;
@@ -380,50 +380,6 @@
     });
   }
 
-  /* ---------------- 模型下载（GitHub → 自动导入 → 清理临时文件） ---------------- */
-  let dlQueue = [];
-  let dlResolve = null;
-  let dlActive = false;
-
-  function showDl(text, percent) {
-    const box = $("dlProgress");
-    if (!box) return;
-    box.style.display = "";
-    $("dlText").textContent = text || "准备下载…";
-    $("dlBar").style.width = (percent > 0 ? Math.min(percent, 100) : 0) + "%";
-  }
-
-  function hideDl() {
-    const box = $("dlProgress");
-    if (box) box.style.display = "none";
-  }
-
-  function dlDone() {
-    const r = dlResolve;
-    dlResolve = null;
-    if (r) r();
-  }
-
-  function startDownload(keys) {
-    if (!keys || !keys.length) return;
-    dlQueue = dlQueue.concat(keys);
-    if (dlActive) return;
-    dlActive = true;
-    nextDownload();
-  }
-
-  async function nextDownload() {
-    const key = dlQueue.shift();
-    if (!key) { dlActive = false; setTimeout(hideDl, 2000); return; }
-    showDl("准备下载…", 0);
-    try { await api("downloadmodel", { key }); } catch (e) { toast("下载失败：" + e); }
-    // 进度靠后端推 dl-progress，收到 running=false 才开始下一个
-    await new Promise((res) => {
-      dlResolve = res;
-      setTimeout(() => { if (dlResolve === res) { dlResolve = null; res(); } }, 900000);
-    });
-  }
-
   /* ---------------- 初始化 ---------------- */
   async function boot() {
     $("btnQr").addEventListener("click", () => capture("qr"));
@@ -467,17 +423,6 @@
     $("swMtBar").addEventListener("change", (e) => setConfig({ mtbar: e.target.checked }));
     $("selMtPerf").addEventListener("change", (e) => setConfig({ mtperf: e.target.value }));
 
-    if ($("btnDownloadMt")) {
-      $("btnDownloadMt").addEventListener("click", () => startDownload(["mt"]));
-    }
-    if ($("btnDownloadModels")) {
-      $("btnDownloadModels").addEventListener("click", () => {
-        const e = (S && S.engine) || {};
-        const keys = ((e.list) || []).filter((it) => it && !it.ready).map((it) => it.key);
-        if (!keys.length) { toast("本机 OCR 模型都齐了，不用再下"); return; }
-        startDownload(keys);
-      });
-    }
     $("numMtIdle").addEventListener("change", (e) => {
       let v = parseInt(e.target.value, 10);
       if (isNaN(v) || v < 0) v = 0;
@@ -589,15 +534,6 @@
           let s = data;
           if (typeof s === "string") { try { s = JSON.parse(s); } catch (e) { return; } }
           applyState(s);
-        });
-        jade.on("dl-progress", (data) => {
-          let d = data;
-          if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) { return; } }
-          if (!d) return;
-          if (d.running) { showDl(d.status, d.percent); return; }
-          showDl(d.status, 100);
-          if (d.status && d.status.indexOf("已装好") === 0) toast(d.status);
-          setTimeout(dlDone, 150);
         });
       } catch (e) { /* 事件 API 不可用时静默降级 */ }
     }
