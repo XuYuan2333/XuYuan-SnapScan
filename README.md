@@ -19,11 +19,11 @@
 
 | 你想要的 | 下载 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（**推荐**） | `XuYuan-SnapScan-v1.1.5-微信OCR.zip` | 28.8 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | `XuYuan-SnapScan-v1.1.5-PP-OCR-极速.zip` | 12.3 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | `XuYuan-SnapScan-v1.1.5-PP-OCR-标准.zip` | 31.8 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | `XuYuan-SnapScan-v1.1.5-PP-OCR-高精.zip` | 102.8 MB | PP-OCR medium，体积最大 |
-| 完全不想下模型 | `XuYuan-SnapScan-v1.1.5-仅WindowsOCR.zip` | 6.9 MB | 只用系统自带 OCR |
+| 中文最准（**推荐**） | `SnapScan-v1.1.5-WeChatOCR.zip` | 28.8 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | `SnapScan-v1.1.5-PP-OCR-Tiny.zip` | 12.3 MB | PP-OCR tiny，约 200 ms |
+| 均衡（中英混排都稳） | `SnapScan-v1.1.5-PP-OCR-Small.zip` | 31.8 MB | PP-OCR small |
+| 高精度（小字、复杂排版） | `SnapScan-v1.1.5-PP-OCR-Medium.zip` | 102.8 MB | PP-OCR medium，体积最大 |
+| 完全不想下模型 | `SnapScan-v1.1.5-WindowsOCR-only.zip` | 6.9 MB | 只用系统自带 OCR |
 
 想同时要多个引擎，就下多个包，把它们 `OCR Model` 目录里的子文件夹互相拷到一起即可
 （例如把 `PP-OCR\tiny` 拷进微信 OCR 包的 `OCR Model\PP-OCR\` 下），设置里就会多出一项。
