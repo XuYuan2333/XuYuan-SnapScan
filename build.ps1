@@ -27,7 +27,7 @@ Start-Sleep -Milliseconds 700
 
 Push-Location -LiteralPath $root
 try {
-    & $csc /nologo /target:winexe /platform:x64 /optimize+ `
+    & $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 `
         /win32icon:app.ico `
         /win32manifest:app.manifest `
         /resource:zxing.dll,ZXing.Net.dll `
@@ -38,6 +38,7 @@ try {
         /resource:web\app.js,WEB_JS `
         "/resource:$jade,JADEVIEWDLL" `
         /r:zxing.dll /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Core.dll `
+        /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
         "/r:$ort" "/r:$mem" "/r:$netstd" `
         "/out:$out" src.cs ui_jade.cs PpOcr.cs
 } finally {
