@@ -1,35 +1,32 @@
-# 下载说明 · XuYuan-SnapScan v1.1.7
+# 下载说明 · XuYuan-SnapScan v1.1.8
 
-程序本体和模型分开：**本体每次更新都要，模型只下一次。**
+本体和模型分开：**本体每次更新都要换，模型只下一次。**
+模型包现在不含 exe，是一份纯模型 zip，在软件里点「导入模型包」就能装；PP-OCR 三档会顺带把推理库放到 exe 旁边。
 
 ## 三步装好
 
-1. 下 `SnapScan-v1.1.7-Body.zip`（本体，约 4.7 MB），解压得到 `QRSnap.exe`
-2. 按下表挑一个模型包，解压到**同一个文件夹**（解压完 `QRSnap.exe` 旁边要有 `OCR Model` 文件夹）
-3. 双击 `QRSnap.exe` 就能用，不用装 Python、不用装微信
+1. 下 `SnapScan-v1.1.8-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
+2. 想要哪个引擎，就下对应的模型包 zip —— **不用解压，原样留着**
+3. 打开 `QRSnap.exe` → 右上角齿轮 → 设置里「识别引擎」→ 点「导入模型包」→ 选中刚下的 zip
 
-以后出新版本，只把新的 `QRSnap.exe` 覆盖过去就行，模型包不用再下。
+导入完列表里那一项立刻变黑可选，不用重启软件。
 
-## 模型包怎么挑（这 5 个固定在 v1.1.6，不会随版本重发）
+不想下模型也能用：本体直接跑，用 Windows 系统自带 OCR 兜底。
+
+## 模型包怎么挑
 
 | 你想要的 | 下载这个文件 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（推荐） | SnapScan-v1.1.6-WeChatOCR.zip | 24.4 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | SnapScan-v1.1.6-PP-OCR-Tiny.zip | 12.3 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | SnapScan-v1.1.6-PP-OCR-Small.zip | 31.8 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | SnapScan-v1.1.6-PP-OCR-Medium.zip | 102.8 MB | PP-OCR medium，体积最大 |
-| 完全不想下模型 | SnapScan-v1.1.6-WindowsOCR-only.zip | 2.5 MB | 只用系统自带 OCR |
+| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.8.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.8.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
+| 均衡（中英混排都稳） | SnapScan-Model-PP-OCR-Small-v1.1.8.zip | 29.3 MB | PP-OCR small |
+| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.8.zip | 100.3 MB | PP-OCR medium，体积最大 |
+| 完全不想下模型 | （不下） | 0 | 用 Windows 系统自带 OCR |
 
-模型包都在 v1.1.6 那个 Release 里：
-https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.6
-
-包里的 `QRSnap.exe` 是旧版，用最新本体的 exe 覆盖掉即可（覆盖后设置、模型都不用重新弄）。
-
-想同时用多个引擎：下多个模型包，把它们 OCR Model 里的子文件夹互相拷到一起即可
-（例如把 PP-OCR\tiny 拷进微信 OCR 包的 OCR Model\PP-OCR\ 下），设置里就会多出一项。
+想同时用多个引擎：把几个模型包依次导入一遍就行，互不覆盖，设置里会一项项多出来。
 没有模型的引擎在设置里是置灰的，看得到、选不了。
 
 注意：
-1. 五个模型包解压出来都是同一个 QRSnap.exe，只能留一份在跑，别同时开两个。
-2. 模型跟着 OCR Model 目录走，不要把这个目录改名或挪到别处；程序只认它自己旁边这一份。
-3. OCR Model\WeChat 里是腾讯的二进制（微信 OCR 引擎与模型），版权归腾讯，公开分发或商用请自行评估授权。
+1. 模型包导入后会落到 `QRSnap.exe` 同级的 `OCR Model` 目录里，这个目录不要改名或挪走，程序只认它自己旁边这一份。
+2. 以后出新版本，只把新的 `QRSnap.exe` 覆盖过去，模型不用再导一次。
+3. `OCR Model\WeChat` 里是腾讯的二进制（微信 OCR 引擎与模型），版权归腾讯，公开分发或商用请自行评估授权。
