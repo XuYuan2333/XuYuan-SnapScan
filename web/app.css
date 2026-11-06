@@ -1,4 +1,4 @@
-/* XuYuan-SnapScan · Web UI
+﻿/* XuYuan-SnapScan · Web UI
    浅色毛玻璃 + 蓝色主色，全部可读性优先 */
 
 :root {
@@ -471,4 +471,28 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .side::-webkit-scrollbar, .dra
   font-size: 12px;
   color: #5b6070;
   word-break: break-all;
+}
+/* 译文遮罩不透明度：彩虹底 + 实时预览 */
+.mask-preview {
+  margin: 8px 0 10px;
+  border-radius: 12px;
+  padding: 14px;
+  background: linear-gradient(135deg, #ff6b6b, #ffa94d, #ffd43b, #51cf66, #4dabf7, #9775fa, #f783ac);
+}
+.mask-demo {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  background: rgba(14, 18, 26, 1);
+  color: #f6f9ff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  transition: background .12s linear;
+}
+/* 不透明度滑杆：让滑块在 0% / 100% 时正好贴到两端 */
+.field.slider #rngMtAlpha {
+  width: calc(100% + 15px);
+  margin: 0 -7px;
 }
