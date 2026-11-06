@@ -259,6 +259,8 @@ namespace QRSnap
             {
                 int id = (int)m.WParam;
                 Log("WM_HOTKEY id=" + id);
+                // 识别期间 UI 线程在泵消息，这时再按热键会叠出一轮新截屏，直接忽略
+                if (_pumping) { Log("WM_HOTKEY ignored while busy id=" + id); return; }
                 if (id == ID_QR) HotkeyCapture("qr");
                 else if (id == ID_OCR) HotkeyCapture("ocr");
                 return;
@@ -321,6 +323,44 @@ namespace QRSnap
 
         internal sealed class CaptureResult { public string Json; }
 
+        // 识别是 CPU 活，但提示条窗口的动画和绘制全靠本线程的消息泵。
+        // 直接在 UI 线程里同步识别，ShowBusy 一帧都画不出来就被 ShowDone 换掉，
+        // 用户只会看到“识字完成”，看不到“正在识字”。所以识别丢到后台线程，
+        // UI 线程这边泵消息，让提示条该淡入就淡入、该转圈就转圈。
+        private bool _pumping;
+
+        private void RunPumped(Action work, int minVisibleMs)
+        {
+            Exception error = null;
+            _pumping = true;
+            try
+            {
+                Thread worker = new Thread(delegate()
+                {
+                    try { work(); }
+                    catch (Exception ex) { error = ex; }
+                });
+                worker.IsBackground = true;
+                worker.Start();
+
+                long start = Environment.TickCount;
+                while (worker.IsAlive)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(3);
+                }
+                // 快到肉眼看不见结果的（比如二维码）也保证「识别中」露个面，
+                // 不然一闪而过反而像没提示
+                while ((Environment.TickCount - start) < minVisibleMs)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(3);
+                }
+            }
+            finally { _pumping = false; }
+            if (error != null) throw error;
+        }
+
         private CaptureResult CaptureOnUi(string mode)
         {
             Log("capture start " + mode);
@@ -351,16 +391,34 @@ namespace QRSnap
             if (mode == "qr")
             {
                 if (_toast != null) _toast.ShowBusy("正在识码…");
-                string info;
-                text = QrDecoder.Decode(crop, out info);
+                string qrText = null;
+                string qrInfo = string.Empty;
+                RunPumped(delegate()
+                {
+                    qrText = QrDecoder.Decode(crop, out qrInfo);
+                }, 320);
+                text = qrText;
                 engine = "二维码";
-                detail = info;
+                detail = qrInfo;
                 ok = !string.IsNullOrEmpty(text);
             }
             else
             {
-                if (_toast != null) _toast.ShowBusy("正在识字…  " + (Ocr.EffectiveEngine() == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR"));
-                text = Ocr.Recognize(crop, out engine, out ms, out detail);
+                string busyEngine = Ocr.EffectiveEngine() == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR";
+                if (_toast != null) _toast.ShowBusy("正在识字…  " + busyEngine);
+
+                string recText = string.Empty;
+                string recEngine = string.Empty;
+                string recDetail = string.Empty;
+                long recMs = 0;
+                RunPumped(delegate()
+                {
+                    recText = Ocr.Recognize(crop, out recEngine, out recMs, out recDetail);
+                }, 320);
+                text = recText;
+                engine = recEngine;
+                detail = recDetail;
+                ms = recMs;
                 ok = !string.IsNullOrEmpty(text);
             }
             crop.Dispose();
