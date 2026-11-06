@@ -2770,6 +2770,15 @@ namespace QRSnap
         private float _animT;
         private int _restTop;                // 静止时的最终 Top
 
+        // 布局常量都是按 96 dpi 写的，而字体会按系统缩放渲染（150% 下 9.5pt 会画成 1.5 倍高）。
+        // 不换算的话，框子还是 96 dpi 的尺寸，字却变大了，尾巴就被裁掉。统一按 DPI 比例缩放。
+        private float _scale = 1f;
+
+        private int S(int v)
+        {
+            return (int)Math.Round(v * _scale);
+        }
+
         public ToastForm()
         {
             FormBorderStyle = FormBorderStyle.None;
@@ -2857,10 +2866,26 @@ namespace QRSnap
         private void SetText(string text)
         {
             _text = text;
-            Size size = TextRenderer.MeasureText(text, Font);
-            int w = PAD_X * 2 + ICON_SIZE + GAP + size.Width + 10;
-            if (w < 150) w = 150;
-            Size = new Size(w, BOX_H);
+            // 以前用 TextRenderer（GDI）量宽度、用 Graphics.DrawString（GDI+）画字，
+            // 两种度量对同一条字符串给出不同宽度，GDI+ 更宽，尾巴就被裁掉了
+            // （“正在识字…  Windows 内置 OCR” 的 OCR 看不到）。这里统一按 GDI+ 量。
+            int textW;
+            using (Graphics g = CreateGraphics())
+            {
+                if (g != null)
+                {
+                    _scale = g.DpiX / 96f;
+                    textW = (int)Math.Ceiling(g.MeasureString(text, Font).Width);
+                }
+                else
+                {
+                    _scale = 1f;
+                    textW = TextRenderer.MeasureText(text, Font).Width;
+                }
+            }
+            int w = S(PAD_X) * 2 + S(ICON_SIZE) + S(GAP) + textW + S(8);
+            if (w < S(150)) w = S(150);
+            Size = new Size(w, S(BOX_H));
         }
 
         // 居中靠下：在鼠标所在那块屏上水平居中，离工作区底边留一点距离
@@ -2868,8 +2893,8 @@ namespace QRSnap
         {
             Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
             Left = wa.Left + (wa.Width - Width) / 2;
-            if (Left < wa.Left + 8) Left = wa.Left + 8;
-            _restTop = wa.Bottom - Height - 56;
+            if (Left < wa.Left + S(8)) Left = wa.Left + S(8);
+            _restTop = wa.Bottom - Height - S(56);
             Top = _restTop;
         }
 
@@ -2887,14 +2912,14 @@ namespace QRSnap
                 if (_animT >= 1f) { _animT = 1f; _anim = 0; }
                 float t = EaseOut(_animT);
                 Opacity = 0.95f * t;
-                Top = _restTop + (int)(SLIDE_PX * (1f - t));
+                Top = _restTop + (int)(S(SLIDE_PX) * (1f - t));
             }
             else if (_anim == 2)
             {
                 _animT += 0.10f;
                 if (_animT >= 1f) { HideToast(); return; }
                 Opacity = 0.95f * (1f - _animT);
-                Top = _restTop + (int)(8f * _animT);
+                Top = _restTop + (int)(S(8) * _animT);
             }
 
             if (_state == STATE_BUSY)
@@ -2914,7 +2939,7 @@ namespace QRSnap
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            int r = 10;
+            int r = S(10);
             using (GraphicsPath path = Rounded(0, 0, Width, Height, r))
             {
                 Region = new Region(path);
@@ -2946,26 +2971,32 @@ namespace QRSnap
             {
                 g.FillRectangle(bg, ClientRectangle);
             }
-            using (GraphicsPath edge = Rounded(0, 0, Width - 1, Height - 1, 9))
+            using (GraphicsPath edge = Rounded(0, 0, Width - 1, Height - 1, S(9)))
             using (Pen pen = new Pen(Color.FromArgb(72, 86, 106), 1F))
             {
                 g.DrawPath(pen, edge);
             }
 
-            int cy = (Height - ICON_SIZE) / 2;
-            int cx = PAD_X;
+            int box = S(ICON_SIZE);
+            int cy = (Height - box) / 2;
+            int cx = S(PAD_X);
+
+            // 图标按 96 dpi 的逻辑尺寸画，再整体缩放到当前 DPI，免得 150% 缩放时图标歪掉
+            GraphicsState gs = g.Save();
+            g.TranslateTransform((float)cx, (float)cy);
+            g.ScaleTransform(_scale, _scale);
 
             if (_state == STATE_BUSY)
             {
                 using (Pen track = new Pen(Color.FromArgb(74, 82, 100), 2F))
                 {
-                    g.DrawEllipse(track, cx, cy, ICON_SIZE - 2, ICON_SIZE - 2);
+                    g.DrawEllipse(track, 0f, 0f, ICON_SIZE - 2, ICON_SIZE - 2);
                 }
                 using (Pen arc = new Pen(Color.FromArgb(96, 165, 250), 2F))
                 {
                     arc.StartCap = LineCap.Round;
                     arc.EndCap = LineCap.Round;
-                    g.DrawArc(arc, cx, cy, ICON_SIZE - 2, ICON_SIZE - 2, _angle, 110f);
+                    g.DrawArc(arc, 0f, 0f, ICON_SIZE - 2, ICON_SIZE - 2, _angle, 110f);
                 }
             }
             else
@@ -2975,36 +3006,35 @@ namespace QRSnap
                 {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
-                    float bx = cx + 1f;
-                    float by = cy + 1f;
                     if (_ok)
                     {
                         g.DrawLines(pen, new PointF[]
                         {
-                            new PointF(bx + 1f, by + 8f),
-                            new PointF(bx + 5.5f, by + 12.5f),
-                            new PointF(bx + 13f, by + 3f)
+                            new PointF(2f, 9f),
+                            new PointF(6.5f, 13.5f),
+                            new PointF(14f, 4f)
                         });
                     }
                     else
                     {
                         g.DrawLines(pen, new PointF[]
                         {
-                            new PointF(bx + 3f, by + 3f),
-                            new PointF(bx + 12f, by + 13f)
+                            new PointF(4f, 4f),
+                            new PointF(13f, 14f)
                         });
                         g.DrawLines(pen, new PointF[]
                         {
-                            new PointF(bx + 12f, by + 3f),
-                            new PointF(bx + 3f, by + 13f)
+                            new PointF(13f, 4f),
+                            new PointF(4f, 14f)
                         });
                     }
                 }
             }
+            g.Restore(gs);
 
             using (SolidBrush fg = new SolidBrush(Color.FromArgb(240, 243, 248)))
             {
-                g.DrawString(_text, Font, fg, (float)(cx + ICON_SIZE + GAP), (float)((Height - Font.Height) / 2));
+                g.DrawString(_text, Font, fg, (float)(cx + box + S(GAP)), (float)((Height - Font.Height) / 2));
             }
         }
 
