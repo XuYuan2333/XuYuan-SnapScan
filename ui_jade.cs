@@ -404,7 +404,7 @@ namespace QRSnap
             }
             else
             {
-                string busyEngine = Ocr.EffectiveEngine() == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR";
+                string busyEngine = Ocr.EffectiveName();
                 if (_toast != null) _toast.ShowBusy("正在识字…  " + busyEngine);
 
                 string recText = string.Empty;
