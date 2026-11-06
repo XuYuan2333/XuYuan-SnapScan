@@ -143,13 +143,15 @@ namespace QRSnap
     internal sealed class NativeShell : Form
     {
         const int WM_HOTKEY = 0x0312;
-        const int ID_QR = 1, ID_OCR = 2;
+        const int ID_QR = 1, ID_OCR = 2, ID_MT = 3, ID_HIDE = 4;
 
         private ToastForm _toast;
         private readonly System.Windows.Forms.Timer _watch;
         private bool _seenWindow;
         private uint _modsQr = Native.MOD_CONTROL | Native.MOD_ALT, _vkQr = (uint)Keys.D;
         private uint _modsOcr = Native.MOD_CONTROL | Native.MOD_ALT, _vkOcr = (uint)Keys.X;
+        private uint _modsMt = Native.MOD_CONTROL | Native.MOD_ALT, _vkMt = (uint)Keys.F;
+        private uint _modsHide = Native.MOD_CONTROL | Native.MOD_ALT, _vkHide = (uint)Keys.G;
 
         internal Action<string, string> OnCaptured;   // (mode, json)
 
@@ -207,17 +209,22 @@ namespace QRSnap
         {
             Native.UnregisterHotKey(Handle, ID_QR);
             Native.UnregisterHotKey(Handle, ID_OCR);
+            Native.UnregisterHotKey(Handle, ID_MT);
+            Native.UnregisterHotKey(Handle, ID_HIDE);
 
             uint m, k;
             if (HotkeyText.TryParse(AppConfig.HotkeyQr, out m, out k)) { _modsQr = m; _vkQr = k; }
             if (HotkeyText.TryParse(AppConfig.HotkeyOcr, out m, out k)) { _modsOcr = m; _vkOcr = k; }
-            if (m == 0 && k == 0) { }
+            if (HotkeyText.TryParse(AppConfig.HotkeyMt, out m, out k)) { _modsMt = m; _vkMt = k; }
+            if (HotkeyText.TryParse(AppConfig.HotkeyHide, out m, out k)) { _modsHide = m; _vkHide = k; }
 
-            TryRegister(ID_QR, _modsQr, _vkQr, true);
-            TryRegister(ID_OCR, _modsOcr, _vkOcr, false);
+            TryRegister(ID_QR, _modsQr, _vkQr, "qr");
+            TryRegister(ID_OCR, _modsOcr, _vkOcr, "ocr");
+            TryRegister(ID_MT, _modsMt, _vkMt, "mt");
+            TryRegister(ID_HIDE, _modsHide, _vkHide, "hide");
         }
 
-        private void TryRegister(int id, uint mods, uint vk, bool isQr)
+        private void TryRegister(int id, uint mods, uint vk, string which)
         {
             if (mods == 0) mods = Native.MOD_CONTROL | Native.MOD_ALT;
             bool ok = Native.RegisterHotKey(Handle, id, mods | Native.MOD_NOREPEAT, vk);
@@ -237,8 +244,10 @@ namespace QRSnap
                     }
                 }
             }
-            if (isQr) { _modsQr = mods; _vkQr = vk; AppConfig.HotkeyQr = HotkeyText.Format(mods, vk); }
-            else { _modsOcr = mods; _vkOcr = vk; AppConfig.HotkeyOcr = HotkeyText.Format(mods, vk); }
+            if (which == "qr") { _modsQr = mods; _vkQr = vk; AppConfig.HotkeyQr = HotkeyText.Format(mods, vk); }
+            else if (which == "ocr") { _modsOcr = mods; _vkOcr = vk; AppConfig.HotkeyOcr = HotkeyText.Format(mods, vk); }
+            else if (which == "mt") { _modsMt = mods; _vkMt = vk; AppConfig.HotkeyMt = HotkeyText.Format(mods, vk); }
+            else { _modsHide = mods; _vkHide = vk; AppConfig.HotkeyHide = HotkeyText.Format(mods, vk); }
         }
 
         internal static void Log(string msg)
@@ -263,6 +272,13 @@ namespace QRSnap
                 if (_pumping) { Log("WM_HOTKEY ignored while busy id=" + id); return; }
                 if (id == ID_QR) HotkeyCapture("qr");
                 else if (id == ID_OCR) HotkeyCapture("ocr");
+                else if (id == ID_MT) HotkeyCapture("mt");
+                else if (id == ID_HIDE)
+                {
+                    // 全局显隐：Ctrl+Alt+G 关掉全部译文 / 再按一次恢复
+                    TransOverlay.Toggle();
+                    Log("hide toggle showing=" + TransOverlay.IsShowing);
+                }
                 return;
             }
             base.WndProc(ref m);
@@ -270,6 +286,12 @@ namespace QRSnap
 
         private void HotkeyCapture(string mode)
         {
+            // 翻译是独立功能：没装模型 / 开关关着时，热键只提示，不去截图
+            if (mode == "mt" && !(AppConfig.Translate && MtRunner.Ready))
+            {
+                if (_toast != null) _toast.ShowDone(MtRunner.Ready ? "翻译功能已关闭" : "没有可用的翻译模型", false);
+                return;
+            }
             // 框选还没结束又按了一次热键：直接忽略。否则会叠出好几层遮罩，
             // Esc 只能关掉最上面那层，看起来就像“按了没反应”。
             if (!JadeHost.TryEnterCapture()) return;
@@ -370,6 +392,7 @@ namespace QRSnap
             // 截屏前先把提示条收掉。原来这里直接 ShowBusy，结果上一轮还没消失的
             // “识别完成 / 正在识别”会被一起拍进截图里，框选时也能看到这块残留。
             if (_toast != null) _toast.HideToast();
+            TransOverlay.HideOverlay();
             try { Native.FlushComposition(); } catch (Exception) { }
             Thread.Sleep(40);
 
@@ -387,6 +410,7 @@ namespace QRSnap
             string detail = string.Empty;
             long ms = 0;
             bool ok;
+            int mtLines = 0;
 
             if (mode == "qr")
             {
@@ -405,7 +429,11 @@ namespace QRSnap
             else
             {
                 string busyEngine = Ocr.EffectiveName();
+                // 识字和翻译是两个独立功能：只有"截图翻译"这一路才叠译文
+                bool wantMt = mode == "mt" && AppConfig.Translate && MtRunner.Ready;
                 if (_toast != null) _toast.ShowBusy("正在识字…  " + busyEngine);
+
+                List<OcrSegment> segs = wantMt ? new List<OcrSegment>() : null;
 
                 string recText = string.Empty;
                 string recEngine = string.Empty;
@@ -413,13 +441,29 @@ namespace QRSnap
                 long recMs = 0;
                 RunPumped(delegate()
                 {
-                    recText = Ocr.Recognize(crop, out recEngine, out recMs, out recDetail);
+                    recText = Ocr.Recognize(crop, out recEngine, out recMs, out recDetail, segs);
                 }, 320);
                 text = recText;
                 engine = recEngine;
                 detail = recDetail;
                 ms = recMs;
                 ok = !string.IsNullOrEmpty(text);
+
+                if (wantMt && ok)
+                {
+                    try
+                    {
+                        if (_toast != null) _toast.ShowBusy("正在翻译…");
+                        int shown = TranslateAndShow(segs, session.Selection);
+                        if (shown > 0) mtLines = shown;
+                        else detail = detail + "；翻译：没有可对齐的文本行";
+                    }
+                    catch (Exception exMt)
+                    {
+                        detail = detail + "；翻译失败：" + exMt.Message;
+                        Log("translate fail " + exMt.Message);
+                    }
+                }
             }
             crop.Dispose();
 
@@ -429,7 +473,8 @@ namespace QRSnap
                 catch (Exception) { }
             }
 
-            if (_toast != null) _toast.ShowDone(ok ? (mode == "qr" ? "识码完成" : "识字完成") : "没有识别到内容", ok);
+            string doneWord = mode == "qr" ? "识码完成" : (mtLines > 0 ? "翻译完成" : "识字完成");
+            if (_toast != null) _toast.ShowDone(ok ? doneWord : "没有识别到内容", ok);
 
             string json = "{"
                 + "\"ok\":" + J.B(ok)
@@ -439,6 +484,7 @@ namespace QRSnap
                 + ",\"detail\":" + J.S(detail)
                 + ",\"ms\":" + J.N(ms)
                 + ",\"copied\":" + J.B(ok && AppConfig.AutoCopy && !string.IsNullOrEmpty(text))
+                + ",\"mtLine\":" + J.N(mtLines)
                 + "}";
 
             CaptureResult cr = new CaptureResult();
@@ -446,9 +492,128 @@ namespace QRSnap
             return cr;
         }
 
+        // 逐行翻译并原地铺译文；返回画出来的行数
+        private int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect)
+        {
+            if (segs == null || segs.Count == 0) return 0;
+            string tgt = AppConfig.TargetLang;
+            StringBuilder all = new StringBuilder();
+            for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
+            string src = LangDetect.Detect(all.ToString());
+            if (string.IsNullOrEmpty(src)) return 0;
+            if (src == tgt) throw new Exception("这段文字看起来已经是" + MtRouter.NameOf(tgt) + "，不需要翻译");
+
+            List<TransOverlay.Item> items = new List<TransOverlay.Item>();
+            string err = null;
+            RunPumped(delegate()
+            {
+                try
+                {
+                    MtRouter router = MtRunner.Router;
+                    string[] plan = router.PlanFor(src, tgt, AppConfig.MtPair);
+                    if (plan.Length == 0)
+                    {
+                        err = "缺少 " + MtRouter.NameOf(src) + "→" + MtRouter.NameOf(tgt) + " 的模型，装一个再试";
+                        return;
+                    }
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment s = segs[i];
+                        if (s.Text == null || s.Text.Trim().Length == 0) continue;
+                        string route;
+                        string tr = router.Translate(s.Text, src, tgt, AppConfig.MtPair, out route);
+                        if (string.IsNullOrEmpty(tr)) continue;
+                        TransOverlay.Item it = new TransOverlay.Item();
+                        it.Box = s.Box;
+                        it.Angle = s.Angle;
+                        it.Text = tr;
+                        items.Add(it);
+                        Log("mt line box=" + s.Box.X + "," + s.Box.Y + "," + s.Box.Width + "," + s.Box.Height
+                            + " ang=" + s.Angle + " | " + s.Text + " => " + tr);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    err = ex.Message;
+                }
+            }, 260);
+
+            if (err != null) throw new Exception(err);
+            if (items.Count == 0) return 0;
+            TransOverlay.Show(screenRect, items);
+            Log("translate shown lines=" + items.Count + " src=" + src + " tgt=" + tgt);
+            return items.Count;
+        }
+
         public void DisposeShell()
         {
-            try { Native.UnregisterHotKey(Handle, ID_QR); Native.UnregisterHotKey(Handle, ID_OCR); } catch (Exception) { }
+            try
+            {
+                Native.UnregisterHotKey(Handle, ID_QR);
+                Native.UnregisterHotKey(Handle, ID_OCR);
+                Native.UnregisterHotKey(Handle, ID_MT);
+                Native.UnregisterHotKey(Handle, ID_HIDE);
+            }
+            catch (Exception) { }
+        }
+    }
+
+    // 翻译模型路由的进程级单例：模型走 MT Model 目录，第一次用到才加载
+    internal static class MtRunner
+    {
+        private static MtRouter _router;
+        private static string _root;
+        private static readonly object L = new object();
+
+        public static MtRouter Router
+        {
+            get
+            {
+                lock (L)
+                {
+                    string root = AppConfig.MtRoot();
+                    if (_router == null || !string.Equals(_root, root, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (_router != null) { try { _router.Dispose(); } catch (Exception) { } }
+                        _router = new MtRouter(root);
+                        _root = root;
+                    }
+                    return _router;
+                }
+            }
+        }
+
+        public static bool Ready
+        {
+            get
+            {
+                try { return Router.AvailablePairs().Count > 0; }
+                catch (Exception) { return false; }
+            }
+        }
+
+        public static List<string> Pairs()
+        {
+            try { return Router.AvailablePairs(); }
+            catch (Exception) { return new List<string>(); }
+        }
+
+        // 模型列表：界面上「翻译模型」那一栏用（含没装全的，置灰显示）
+        public static List<MtModelInfo> Models()
+        {
+            try { return Router.Models(); }
+            catch (Exception) { return new List<MtModelInfo>(); }
+        }
+
+        // 换了模型目录内容后重新建一次路由，别让旧缓存挡住新装的模型
+        public static void Invalidate()
+        {
+            lock (L)
+            {
+                if (_router != null) { try { _router.Dispose(); } catch (Exception) { } }
+                _router = null;
+                _root = null;
+            }
         }
     }
 
@@ -617,10 +782,12 @@ namespace QRSnap
             Bind("recheck", OnRecheck);
             Bind("pickwx", OnPickWx);
             Bind("importmodel", OnImportModel);
+            Bind("downloadmodel", OnDownloadModel);
             Bind("capture", OnCapture);
             Bind("clipcopy", OnCopy);
             Bind("win", OnWin);
             Bind("hotkey", OnHotkey);
+            Bind("hidetrans", OnHideTrans);
 
             string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan", "jade-data");
             Directory.CreateDirectory(dataDir);
@@ -717,7 +884,6 @@ namespace QRSnap
         {
             if (e == AppConfig.EngineWeChat) return "微信 OCR";
             if (e == AppConfig.EnginePpTiny) return "PP-OCR 极速";
-            if (e == AppConfig.EnginePpSmall) return "PP-OCR 标准";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
             return "Windows OCR";
         }
@@ -728,7 +894,6 @@ namespace QRSnap
         {
             if (e == AppConfig.EngineWeChat) return "推荐";
             if (e == AppConfig.EnginePpTiny) return "轻量 · 快";
-            if (e == AppConfig.EnginePpSmall) return "均衡";
             if (e == AppConfig.EnginePpMedium) return "高精度";
             return "系统兜底";
         }
@@ -774,7 +939,7 @@ namespace QRSnap
             bool firstOpt = true;
             string[] keys = new string[] {
                 AppConfig.EngineWeChat, AppConfig.EnginePpTiny,
-                AppConfig.EnginePpSmall, AppConfig.EnginePpMedium, AppConfig.EngineSystem };
+                AppConfig.EnginePpMedium, AppConfig.EngineSystem };
             for (int i = 0; i < keys.Length; i++)
             {
                 string k = keys[i];
@@ -797,11 +962,54 @@ namespace QRSnap
             sb.Append(",\"wxdir\":").Append(J.S(AppConfig.WeChatDir));
             sb.Append(",\"opacity\":").Append(AppConfig.BackOpacity);
             sb.Append(",\"frost\":").Append(AppConfig.Frost);
+            sb.Append(",\"mtbar\":").Append(J.B(AppConfig.MtBar));
+            sb.Append(",\"mtperf\":").Append(J.S(AppConfig.MtPerf));
+            sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
+            sb.Append(",\"dl\":{\"running\":").Append(J.B(ModelDownload.Running));
+            sb.Append(",\"key\":").Append(J.S(ModelDownload.CurrentKey));
+            sb.Append(",\"status\":").Append(J.S(ModelDownload.Status));
+            sb.Append(",\"percent\":").Append(ModelDownload.Percent).Append("}");
+            sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
             sb.Append("}");
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
-            sb.Append(",\"ocr\":").Append(J.S(HotkeyOcrText())).Append("}");
+            sb.Append(",\"ocr\":").Append(J.S(HotkeyOcrText()));
+            sb.Append(",\"mt\":").Append(J.S(AppConfig.HotkeyMt));
+            sb.Append(",\"hide\":").Append(J.S(AppConfig.HotkeyHide)).Append("}");
             sb.Append(",\"runtime\":{\"webview\":").Append(J.B(true));
-            sb.Append(",\"win11\":").Append(J.B(IsWin11())).Append("}}");
+            sb.Append(",\"win11\":").Append(J.B(IsWin11())).Append("}");
+            sb.Append(",\"mt\":{");
+            sb.Append("\"on\":").Append(J.B(AppConfig.Translate));
+            sb.Append(",\"lang\":").Append(J.S(AppConfig.TargetLang));
+            sb.Append(",\"root\":").Append(J.S(AppConfig.MtRoot()));
+            sb.Append(",\"selected\":").Append(J.S(AppConfig.MtPair));
+            List<MtModelInfo> models = MtRunner.Models();
+            bool anyReady = false;
+            for (int i = 0; i < models.Count; i++) if (models[i].Ready) { anyReady = true; break; }
+            sb.Append(",\"ready\":").Append(J.B(anyReady));
+            sb.Append(",\"models\":[");
+            for (int i = 0; i < models.Count; i++)
+            {
+                MtModelInfo m = models[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":").Append(J.S(m.Name));
+                sb.Append(",\"src\":").Append(J.S(m.Src));
+                sb.Append(",\"tgt\":").Append(J.S(m.Tgt));
+                sb.Append(",\"pair\":").Append(J.S(m.Pair));
+                sb.Append(",\"label\":").Append(J.S(m.Multi ? (m.Label != null && m.Label.Length > 0 ? m.Label : m.Name) : (MtRouter.NameOf(m.Src) + " → " + MtRouter.NameOf(m.Tgt))));
+                sb.Append(",\"note\":").Append(J.S(m.Name + "  ·  " + m.Pair));
+                sb.Append(",\"ready\":").Append(J.B(m.Ready));
+                sb.Append("}");
+            }
+            sb.Append("]");
+            List<string> pairs = MtRunner.Pairs();
+            sb.Append(",\"pairs\":[");
+            for (int i = 0; i < pairs.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(J.S(pairs[i]));
+            }
+            sb.Append("]}");
+            sb.Append("}");
             return sb.ToString();
         }
 
@@ -816,7 +1024,7 @@ namespace QRSnap
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
                 return "v" + v.Major + "." + v.Minor + "." + v.Build + "." + v.Revision;
             }
-            catch (Exception) { return "v1.1.8.0"; }
+            catch (Exception) { return "v1.1.9.0"; }
         }
 
         private static string HotkeyQrText() { return AppConfig.HotkeyQr; }
@@ -849,6 +1057,29 @@ namespace QRSnap
                     else if (k == "restoreqr") AppConfig.RestoreAfterQr = v == "true" || v == "1";
                     else if (k == "autocopy") AppConfig.AutoCopy = v == "true" || v == "1";
                     else if (k == "wxdir") AppConfig.WeChatDir = v;
+                    else if (k == "translate") AppConfig.Translate = v == "true" || v == "1";
+                    else if (k == "mtbar")
+                    {
+                        AppConfig.MtBar = v == "true" || v == "1";
+                        if (!AppConfig.MtBar) TransOverlay.HideBar();   // 关掉开关时把已经画出来的控制条一起收掉
+                    }
+                    else if (k == "mtperf")
+                    {
+                        string old = AppConfig.MtPerf;
+                        AppConfig.MtPerf = AppConfig.NormalizeMtPerf(v);
+                        if (old != AppConfig.MtPerf) { try { LlamaMt.Shutdown(); } catch (Exception) { } }   // 换档位要重启服务才会换线程数
+                    }
+                    else if (k == "mtidle")
+                    {
+                        int iv;
+                        if (int.TryParse(v, out iv)) AppConfig.MtIdle = AppConfig.NormalizeMtIdle(iv);
+                    }
+                    else if (k == "mtlang") { if (v != null && v.Trim().Length > 0) AppConfig.TargetLang = v.Trim().ToLowerInvariant(); }
+                    else if (k == "mtpair")
+                    {
+                        AppConfig.MtPair = v == null ? string.Empty : v.Trim();
+                        MtRunner.Invalidate();   // 换模型要重建路由，别拿旧缓存
+                    }
                     else if (k == "opacity")
                     {
                         int ov;
@@ -861,13 +1092,20 @@ namespace QRSnap
                     }
                 }
                 AppConfig.Save();
+                if (!AppConfig.Translate) TransOverlay.HideOverlay();
             }
             catch (Exception) { }
             return Reply(BuildState());
         }
 
-        private static IntPtr OnPickWx(uint win, IntPtr msg)
+        // 关译文：主界面按钮 / 再次触发识别时都走这里
+        private static IntPtr OnHideTrans(uint win, IntPtr msg)
         {
+            TransOverlay.HideOverlay();
+            return Reply("{\"ok\":true}");
+        }
+
+        private static IntPtr OnPickWx(uint win, IntPtr msg)        {
             // 微信 OCR 只认随包的 OCR Model\WeChat，不再允许指定目录
             Ocr.ProbeForce();
             return Reply(BuildState());
@@ -931,6 +1169,120 @@ namespace QRSnap
             }
         }
 
+        // ---------- 翻译模型导入 ----------
+        // 一个翻译模型目录 = 一堆 onnx + tokenizer.json。HF 下来的包常把权重放在 onnx\ 子目录里，
+        // 也可能是 "opus-mt-en-zh" 这种不叫语言对的名字，这里统一认一遍再摆正。
+        private static bool LooksLikeMtModel(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+            bool tok = File.Exists(Path.Combine(dir, "tokenizer.json"));
+            if (!tok) return false;
+            return mt_hasOnnx(dir) || mt_hasOnnx(Path.Combine(dir, "onnx"));
+        }
+
+        private static bool mt_hasOnnx(string dir)
+        {
+            if (!Directory.Exists(dir)) return false;
+            foreach (string f in Directory.GetFiles(dir, "*.onnx"))
+            {
+                string n = Path.GetFileName(f).ToLowerInvariant();
+                if (n.StartsWith("encoder") || n.StartsWith("decoder")) return true;
+            }
+            return false;
+        }
+
+        private static bool IsLangCode(string s)
+        {
+            if (s == null || s.Length < 2 || s.Length > 3) return false;
+            for (int i = 0; i < s.Length; i++) if (s[i] < 'a' || s[i] > 'z') return false;
+            return true;
+        }
+
+        // 从 "en-zh" / "opus-mt-en-zh" / "opus_mt_en_zh" 里猜语言对
+        private static bool GuessPair(string name, out string src, out string tgt)
+        {
+            src = tgt = null;
+            if (string.IsNullOrEmpty(name)) return false;
+            string[] parts = name.ToLowerInvariant().Split(new char[] { '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = parts.Length - 2; i >= 0; i--)
+            {
+                if (IsLangCode(parts[i]) && IsLangCode(parts[i + 1]))
+                {
+                    src = parts[i]; tgt = parts[i + 1];
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string SidecarValue(string dir, string key)
+        {
+            try
+            {
+                string f = Path.Combine(dir, "model.json");
+                if (!File.Exists(f)) return "";
+                string s = File.ReadAllText(f);
+                int k = s.IndexOf("\"" + key + "\"", StringComparison.OrdinalIgnoreCase);
+                if (k < 0) return "";
+                int c = s.IndexOf(':', k);
+                if (c < 0) return "";
+                int q1 = s.IndexOf('"', c + 1);
+                if (q1 < 0) return "";
+                int q2 = s.IndexOf('"', q1 + 1);
+                if (q2 < 0) return "";
+                return s.Substring(q1 + 1, q2 - q1 - 1).Trim().ToLowerInvariant();
+            }
+            catch (Exception) { return ""; }
+        }
+
+        private static string MtDirName(string from, string fallback)
+        {
+            string dirName = Path.GetFileName(from);
+            string src, tgt;
+            if (GuessPair(dirName, out src, out tgt) && dirName.Length <= 24) return dirName.ToLowerInvariant();
+            src = SidecarValue(from, "src");
+            tgt = SidecarValue(from, "tgt");
+            if (IsLangCode(src) && IsLangCode(tgt)) return src + "-" + tgt;
+            if (GuessPair(fallback, out src, out tgt)) return src + "-" + tgt;
+            if (!string.IsNullOrEmpty(dirName)) return dirName;
+            return "model";
+        }
+
+        private static void InstallMtDir(string from, string fallbackName, List<string> got)
+        {
+            string custom = AppConfig.MtDir != null ? AppConfig.MtDir.Trim() : string.Empty;
+            if (custom.Length == 0)
+            {
+                try
+                {
+                    string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), AppConfig.MtFolderName);
+                    if (!Directory.Exists(beside)) Directory.CreateDirectory(beside);
+                }
+                catch (Exception) { }
+            }
+            string root = AppConfig.MtRoot();
+            if (!Directory.Exists(root)) Directory.CreateDirectory(root);
+
+            string name = MtDirName(from, fallbackName);
+            string dest = Path.Combine(root, name);
+            CopyTree(from, dest);
+
+            // onnx\ 里的权重平移到模型目录根，MtModel 只认根上的文件
+            string sub = Path.Combine(dest, "onnx");
+            if (Directory.Exists(sub))
+            {
+                foreach (string f in Directory.GetFiles(sub))
+                    File.Copy(f, Path.Combine(dest, Path.GetFileName(f)), true);
+            }
+            got.Add("翻译模型 " + name);
+            MtRunner.Invalidate();
+        }
+
+        internal static string ImportForTest(string zipPath)
+        {
+            return ImportModelZip(zipPath);
+        }
+
         private static string ImportModelZip(string zipPath)
         {
             // 模型根还没建过时，就在 exe 旁边建（符合“导入到软件目录”的直觉）
@@ -959,8 +1311,8 @@ namespace QRSnap
                 string pp = Path.Combine(src, "PP-OCR");
                 if (Directory.Exists(pp))
                 {
-                    string[] tiers = new string[] { "tiny", "small", "medium" };
-                    string[] labels = new string[] { "PP-OCR 极速", "PP-OCR 标准", "PP-OCR 高精" };
+                    string[] tiers = new string[] { "tiny", "medium" };
+                    string[] labels = new string[] { "PP-OCR 极速", "PP-OCR 高精" };
                     for (int i = 0; i < tiers.Length; i++)
                     {
                         string t = Path.Combine(pp, tiers[i]);
@@ -970,8 +1322,93 @@ namespace QRSnap
                     }
                 }
 
+                string mt = Path.Combine(src, AppConfig.MtFolderName);
+                if (Directory.Exists(mt))
+                {
+                    string[] pairs = Directory.GetDirectories(mt);
+                    if (pairs.Length == 0) pairs = new string[] { mt };
+                    for (int i = 0; i < pairs.Length; i++)
+                    {
+                        string name = Path.GetFileName(pairs[i]);
+                        InstallMtDir(pairs[i], name, got);
+                    }
+                }
+                else
+                {
+                    // 单独一个翻译模型包：整个解压目录、或里面某个子目录就是模型本体
+                    string zipName = Path.GetFileNameWithoutExtension(zipPath);
+                    List<string> candidates = new List<string>();
+                    if (LooksLikeMtModel(src)) candidates.Add(src);
+                    foreach (string d in Directory.GetDirectories(tmp, "*", SearchOption.AllDirectories))
+                        if (LooksLikeMtModel(d)) candidates.Add(d);
+                    for (int i = 0; i < candidates.Count; i++)
+                    {
+                        string d = candidates[i];
+                        if (d.Length == 0) continue;
+                        // 已经被上一层的模型目录覆盖了就不再重复搬
+                        bool nested = false;
+                        for (int j = 0; j < i; j++)
+                        {
+                            if (d.StartsWith(candidates[j] + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) { nested = true; break; }
+                        }
+                        if (nested) continue;
+                        InstallMtDir(d, zipName, got);
+                    }
+                }
+
+                // GGUF 翻译模型：一个文件覆盖多语种方向，包里任意位置的 *.gguf 都装到 MT Model 根上
+                List<string> ggufs = new List<string>();
+                try
+                {
+                    foreach (string f in Directory.GetFiles(tmp, "*.gguf", SearchOption.AllDirectories))
+                    {
+                        long len = 0;
+                        try { len = new FileInfo(f).Length; } catch (Exception) { }
+                        if (len >= 50L * 1024L * 1024L) ggufs.Add(f);
+                    }
+                }
+                catch (Exception) { }
+                if (ggufs.Count > 0)
+                {
+                    string mtRoot = AppConfig.MtRoot();
+                    if (!Directory.Exists(mtRoot)) Directory.CreateDirectory(mtRoot);
+                    for (int i = 0; i < ggufs.Count; i++)
+                    {
+                        string fn = Path.GetFileName(ggufs[i]);
+                        try
+                        {
+                            File.Copy(ggufs[i], Path.Combine(mtRoot, fn), true);
+                            got.Add("翻译模型 " + Path.GetFileNameWithoutExtension(fn));
+                        }
+                        catch (Exception) { }
+                    }
+                    MtRunner.Invalidate();
+                }
+
+                // 包里要是带了 llama.cpp 运行时（llama-server.exe），一起放到 exe 旁边的 llama 目录
+                string srv = null;
+                try
+                {
+                    string[] hs = Directory.GetFiles(tmp, "llama-server.exe", SearchOption.AllDirectories);
+                    if (hs.Length > 0) srv = hs[0];
+                }
+                catch (Exception) { }
+                if (srv != null)
+                {
+                    try
+                    {
+                        string llamaDir = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "llama");
+                        if (!Directory.Exists(llamaDir)) Directory.CreateDirectory(llamaDir);
+                        string from = Path.GetDirectoryName(srv);
+                        foreach (string f in Directory.GetFiles(from))
+                            File.Copy(f, Path.Combine(llamaDir, Path.GetFileName(f)), true);
+                        got.Add("llama.cpp 运行时");
+                    }
+                    catch (Exception) { }
+                }
+
                 if (got.Count == 0)
-                    return "这个压缩包里没找到模型（要 OCR Model\\WeChat 或 PP-OCR\\tiny/small/medium），换一个模型包试试";
+                    return "这个压缩包里没找到模型（要 OCR Model\\WeChat、PP-OCR\\tiny/small/medium，或一个翻译模型目录 / 一个 .gguf 翻译模型），换一个模型包试试";
 
                 // PP-OCR 的模型包还会带一份推理库（onnxruntime 等），一起放到 exe 旁边
                 string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
@@ -1012,8 +1449,7 @@ namespace QRSnap
         }
 
         private static IntPtr OnImportModel(uint win, IntPtr msg)
-        {
-            string zip = PickZip();
+        {            string zip = PickZip();
             if (string.IsNullOrEmpty(zip))
                 return Reply("{\"ok\":false,\"msg\":" + J.S("已取消") + "}");
 
@@ -1024,10 +1460,19 @@ namespace QRSnap
             return Reply("{\"ok\":true,\"msg\":" + J.S(result) + ",\"state\":" + BuildState() + "}");
         }
 
+        // 下载按钮：从 GitHub Releases 拉对应模型 zip，下完自动导入并清理临时文件
+        private static IntPtr OnDownloadModel(uint win, IntPtr msg)
+        {
+            string key = MiniJson.GetString(ReadUtf8(msg), "key");
+            string r = ModelDownload.Start(key);
+            return Reply("{\"ok\":true,\"msg\":" + J.S(r) + "}");
+        }
+
         private static IntPtr OnCapture(uint win, IntPtr msg)
         {
             string body = ReadUtf8(msg);
-            string mode = body.IndexOf("\"ocr\"", StringComparison.Ordinal) >= 0 ? "ocr" : "qr";
+            string mode = MiniJson.GetString(body, "mode");
+            if (mode != "ocr" && mode != "mt") mode = "qr";
 
             bool restore = mode == "qr" ? AppConfig.RestoreAfterQr : AppConfig.RestoreWin;
             HideWindow();
@@ -1067,6 +1512,8 @@ namespace QRSnap
                 if (HotkeyText.TryParse(combo, out m, out k))
                 {
                     if (which == "ocr") AppConfig.HotkeyOcr = HotkeyText.Format(m, k);
+                    else if (which == "mt") AppConfig.HotkeyMt = HotkeyText.Format(m, k);
+                    else if (which == "hide") AppConfig.HotkeyHide = HotkeyText.Format(m, k);
                     else AppConfig.HotkeyQr = HotkeyText.Format(m, k);
                     AppConfig.Save();
                     _shell.Invoke(new MethodInvoker(delegate() { _shell.RegisterAll(); }));
