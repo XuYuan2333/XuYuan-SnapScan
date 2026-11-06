@@ -1,20 +1,35 @@
-# 下载说明 · XuYuan-SnapScan v1.1.5
+# 下载说明 · XuYuan-SnapScan v1.1.7
 
-按引擎拆成 5 个包，**解压后直接双击 QRSnap.exe 就能用**，不用再单独装模型。
-每个包都自带 Windows 内置 OCR（系统兜底），所以任何一包都能跑。
+程序本体和模型分开：**本体每次更新都要，模型只下一次。**
+
+## 三步装好
+
+1. 下 `SnapScan-v1.1.7-Body.zip`（本体，约 4.7 MB），解压得到 `QRSnap.exe`
+2. 按下表挑一个模型包，解压到**同一个文件夹**（解压完 `QRSnap.exe` 旁边要有 `OCR Model` 文件夹）
+3. 双击 `QRSnap.exe` 就能用，不用装 Python、不用装微信
+
+以后出新版本，只把新的 `QRSnap.exe` 覆盖过去就行，模型包不用再下。
+
+## 模型包怎么挑（这 5 个固定在 v1.1.6，不会随版本重发）
 
 | 你想要的 | 下载这个文件 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（推荐） | SnapScan-v1.1.5-WeChatOCR.zip | 28.8 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | SnapScan-v1.1.5-PP-OCR-Tiny.zip | 12.3 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | SnapScan-v1.1.5-PP-OCR-Small.zip | 31.8 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | SnapScan-v1.1.5-PP-OCR-Medium.zip | 102.8 MB | PP-OCR medium，体积最大 |
-| 完全不想下模型 | SnapScan-v1.1.5-WindowsOCR-only.zip | 6.9 MB | 只用系统自带 OCR |
+| 中文最准（推荐） | SnapScan-v1.1.6-WeChatOCR.zip | 24.4 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | SnapScan-v1.1.6-PP-OCR-Tiny.zip | 12.3 MB | PP-OCR tiny，约 200 ms |
+| 均衡（中英混排都稳） | SnapScan-v1.1.6-PP-OCR-Small.zip | 31.8 MB | PP-OCR small |
+| 高精度（小字、复杂排版） | SnapScan-v1.1.6-PP-OCR-Medium.zip | 102.8 MB | PP-OCR medium，体积最大 |
+| 完全不想下模型 | SnapScan-v1.1.6-WindowsOCR-only.zip | 2.5 MB | 只用系统自带 OCR |
 
-想同时用多个引擎：下多个包，把它们 OCR Model 里的子文件夹互相拷到一起即可
-（例如把 PP-OCR\tiny 拷进微信 OCR 包的 OCR Model\PP-OCR\ 下），设置里就会多一项。
+模型包都在 v1.1.6 那个 Release 里：
+https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.6
+
+包里的 `QRSnap.exe` 是旧版，用最新本体的 exe 覆盖掉即可（覆盖后设置、模型都不用重新弄）。
+
+想同时用多个引擎：下多个模型包，把它们 OCR Model 里的子文件夹互相拷到一起即可
+（例如把 PP-OCR\tiny 拷进微信 OCR 包的 OCR Model\PP-OCR\ 下），设置里就会多出一项。
+没有模型的引擎在设置里是置灰的，看得到、选不了。
 
 注意：
-1. 五个包解压出来都是同一个 QRSnap.exe，只能留一份在跑，别同时开两个。
+1. 五个模型包解压出来都是同一个 QRSnap.exe，只能留一份在跑，别同时开两个。
 2. 模型跟着 OCR Model 目录走，不要把这个目录改名或挪到别处；程序只认它自己旁边这一份。
 3. OCR Model\WeChat 里是腾讯的二进制（微信 OCR 引擎与模型），版权归腾讯，公开分发或商用请自行评估授权。
