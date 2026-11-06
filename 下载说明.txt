@@ -23,9 +23,9 @@ https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.9
 
 | 你想要的 | 下载这个文件 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.9.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.9.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
-| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.9.zip | 100.3 MB | PP-OCR medium，体积最大 |
+| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.8.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.8.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
+| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.8.zip | 100.3 MB | PP-OCR medium，体积最大 |
 | 截图翻译（英/日/俄→中） | SnapScan-Model-HyMT1.5-v1.1.9.zip | 约 1.08 GB | 混元 Hy-MT1.5-1.8B Q4_K_M + llama.cpp 运行时 |
 | 完全不想下模型 | （不下） | 0 | 用 Windows 系统自带 OCR |
 
