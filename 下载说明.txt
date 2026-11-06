@@ -1,32 +1,41 @@
-# 下载说明 · XuYuan-SnapScan v1.1.8
+﻿# 下载说明 · XuYuan-SnapScan v1.1.9
 
 本体和模型分开：**本体每次更新都要换，模型只下一次。**
-模型包现在不含 exe，是一份纯模型 zip，在软件里点「导入模型包」就能装；PP-OCR 三档会顺带把推理库放到 exe 旁边。
+模型包不含 exe，是一份纯模型 zip，在软件里点「导入模型包」就能装：
+PP-OCR 两档（极速 / 高精）会顺带把 OCR 推理库放到 exe 旁边，翻译包会顺带把 llama.cpp 运行时放进 `llama` 目录。
 
 ## 三步装好
 
-1. 下 `SnapScan-v1.1.8-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
-2. 想要哪个引擎，就下对应的模型包 zip —— **不用解压，原样留着**
-3. 打开 `QRSnap.exe` → 右上角齿轮 → 设置里「识别引擎」→ 点「导入模型包」→ 选中刚下的 zip
+1. 下 `SnapScan-v1.1.9-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
+2. 想要哪个引擎 / 翻译，就下对应的模型包 zip —— **不用解压，原样留着**
+3. 打开 `QRSnap.exe` → 右上角齿轮 → 设置里「识别引擎」（或「翻译」）→ 点「导入模型包」→ 选中刚下的 zip
 
 导入完列表里那一项立刻变黑可选，不用重启软件。
 
-不想下模型也能用：本体直接跑，用 Windows 系统自带 OCR 兜底。
+不想下模型也能用：本体直接跑，用 Windows 系统自带 OCR 兜底；翻译没装模型时按钮置灰。
 
 ## 模型包怎么挑
 
 | 你想要的 | 下载这个文件 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.8.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.8.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | SnapScan-Model-PP-OCR-Small-v1.1.8.zip | 29.3 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.8.zip | 100.3 MB | PP-OCR medium，体积最大 |
+| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.9.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.9.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
+| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.9.zip | 100.3 MB | PP-OCR medium，体积最大 |
+| 截图翻译（英/日/俄→中） | SnapScan-Model-HyMT1.5-v1.1.9.zip | 约 1.08 GB | 混元 Hy-MT1.5-1.8B Q4_K_M + llama.cpp 运行时 |
 | 完全不想下模型 | （不下） | 0 | 用 Windows 系统自带 OCR |
 
 想同时用多个引擎：把几个模型包依次导入一遍就行，互不覆盖，设置里会一项项多出来。
 没有模型的引擎在设置里是置灰的，看得到、选不了。
 
+## 翻译怎么用
+
+1. 先导入 `SnapScan-Model-HyMT1.5-v1.1.9.zip`，右上角 pill 会显示模型名（`HY-MT1.5-1.8B-Q4_K_M`）
+2. 按 `Ctrl+Alt+F`，框选要翻的内容，译文会直接盖在原文上
+3. 遮罩默认点击穿透，鼠标照常点后面的窗口；关掉译文：右下角控制条的 ×、`Esc`、鼠标滚轮、`Ctrl+Alt+G`
+   不想看到那条浮动控制条：设置 → 翻译 → 译文遮罩 → 把「显示『✕ 关闭译文』控制条」关掉，之后就只剩纯译文，用 `Esc` / 滚轮 / `Ctrl+Alt+G` 关
+4. 模型用的是 CPU：冷启动约 1 秒，单行译文 0.2–0.4 秒；翻译时工作集约 1.9 GB（私有约 0.95 GB），**闲置 30 秒没有再用就自动退出、立刻把内存还回去**，只剩本体约 300 MB。秒数在 设置 → 翻译 → 内存释放 里改，填 0 = 常驻不释放
+
 注意：
-1. 模型包导入后会落到 `QRSnap.exe` 同级的 `OCR Model` 目录里，这个目录不要改名或挪走，程序只认它自己旁边这一份。
+1. 模型包导入后会落到 `QRSnap.exe` 同级的 `OCR Model` / `MT Model` 目录里，这两个目录不要改名或挪走，程序只认它自己旁边这一份。
 2. 以后出新版本，只把新的 `QRSnap.exe` 覆盖过去，模型不用再导一次。
-3. `OCR Model\WeChat` 里是腾讯的二进制（微信 OCR 引擎与模型），版权归腾讯，公开分发或商用请自行评估授权。
+3. `OCR Model\WeChat` 里是腾讯的二进制（微信 OCR 引擎与模型），`MT Model` 里是腾讯的混元翻译模型，版权均归腾讯，公开分发或商用请自行评估授权。
