@@ -558,6 +558,7 @@ namespace QRSnap
             Bind("config", OnConfig);
             Bind("recheck", OnRecheck);
             Bind("pickwx", OnPickWx);
+            Bind("importmodel", OnImportModel);
             Bind("capture", OnCapture);
             Bind("clipcopy", OnCopy);
             Bind("win", OnWin);
@@ -757,7 +758,7 @@ namespace QRSnap
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
                 return "v" + v.Major + "." + v.Minor + "." + v.Build + "." + v.Revision;
             }
-            catch (Exception) { return "v1.1.7.0"; }
+            catch (Exception) { return "v1.1.8.0"; }
         }
 
         private static string HotkeyQrText() { return AppConfig.HotkeyQr; }
@@ -812,6 +813,157 @@ namespace QRSnap
             // 微信 OCR 只认随包的 OCR Model\WeChat，不再允许指定目录
             Ocr.ProbeForce();
             return Reply(BuildState());
+        }
+
+        // ---------- 导入模型包 ----------
+        // 用户在设置里选一个下载好的 .zip，直接解开进软件目录里的 OCR Model。
+        // 整包（带 exe 的那种）也能导入，只挑里面的模型，其它文件原样丢掉。
+        private static string PickZip()
+        {
+            string chosen = null;
+            MethodInvoker act = delegate()
+            {
+                try
+                {
+                    using (OpenFileDialog d = new OpenFileDialog())
+                    {
+                        d.Title = "选择下载好的模型包（.zip）";
+                        d.Filter = "模型包 (*.zip)|*.zip|所有文件 (*.*)|*.*";
+                        d.CheckFileExists = true;
+                        d.Multiselect = false;
+                        if (d.ShowDialog() == DialogResult.OK) chosen = d.FileName;
+                    }
+                }
+                catch (Exception) { }
+            };
+            try { _shell.Invoke(act); }
+            catch (Exception) { try { act(); } catch (Exception) { } }
+            return chosen;
+        }
+
+        // 压缩包里可能直接就是模型目录，也可能外面套了一层（甚至一层 OCR Model），统一找出来
+        private static string FindModelSource(string root)
+        {
+            string[] found = Directory.GetDirectories(root, "*", SearchOption.AllDirectories);
+            foreach (string d in found)
+            {
+                if (string.Equals(Path.GetFileName(d), AppConfig.ModelFolderName, StringComparison.OrdinalIgnoreCase))
+                    return d;
+            }
+            foreach (string d in found)
+            {
+                string n = Path.GetFileName(d);
+                if (string.Equals(n, "WeChat", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(n, "PP-OCR", StringComparison.OrdinalIgnoreCase))
+                    return Path.GetDirectoryName(d);
+            }
+            return root;
+        }
+
+        private static void CopyTree(string from, string to)
+        {
+            Directory.CreateDirectory(to);
+            foreach (string f in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+            {
+                string rel = f.Substring(from.Length).TrimStart('\\');
+                string dst = Path.Combine(to, rel);
+                string dir = Path.GetDirectoryName(dst);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                File.Copy(f, dst, true);
+            }
+        }
+
+        private static string ImportModelZip(string zipPath)
+        {
+            // 模型根还没建过时，就在 exe 旁边建（符合“导入到软件目录”的直觉）
+            try
+            {
+                string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), AppConfig.ModelFolderName);
+                if (!Directory.Exists(beside) && !Directory.Exists(AppConfig.ModelRoot())) Directory.CreateDirectory(beside);
+            }
+            catch (Exception) { }
+            string modelRoot = AppConfig.ModelRoot();
+
+            string tmp = Path.Combine(Path.GetTempPath(), "snapscan-import-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(tmp);
+                System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, tmp);
+                string src = FindModelSource(tmp);
+
+                List<string> got = new List<string>();
+                string wx = Path.Combine(src, "WeChat");
+                if (Directory.Exists(wx))
+                {
+                    CopyTree(wx, Path.Combine(modelRoot, "WeChat"));
+                    got.Add("微信 OCR");
+                }
+                string pp = Path.Combine(src, "PP-OCR");
+                if (Directory.Exists(pp))
+                {
+                    string[] tiers = new string[] { "tiny", "small", "medium" };
+                    string[] labels = new string[] { "PP-OCR 极速", "PP-OCR 标准", "PP-OCR 高精" };
+                    for (int i = 0; i < tiers.Length; i++)
+                    {
+                        string t = Path.Combine(pp, tiers[i]);
+                        if (!Directory.Exists(t)) continue;
+                        CopyTree(t, Path.Combine(modelRoot, "PP-OCR", tiers[i]));
+                        got.Add(labels[i]);
+                    }
+                }
+
+                if (got.Count == 0)
+                    return "这个压缩包里没找到模型（要 OCR Model\\WeChat 或 PP-OCR\\tiny/small/medium），换一个模型包试试";
+
+                // PP-OCR 的模型包还会带一份推理库（onnxruntime 等），一起放到 exe 旁边
+                string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
+                bool runtimeOk = false;
+                try
+                {
+                    foreach (string d in Directory.GetDirectories(tmp, "*", SearchOption.AllDirectories))
+                    {
+                        if (!string.Equals(Path.GetFileName(d), "Runtime", StringComparison.OrdinalIgnoreCase)) continue;
+                        // 只认真正的推理库目录：模型 zip 里的 Runtime 一定有 onnxruntime.dll；
+                        // 微信模型自带的 runtime 目录（装的是 Weixin.exe）不能往 exe 旁边倒
+                        if (!File.Exists(Path.Combine(d, "onnxruntime.dll"))) continue;
+                        foreach (string f in Directory.GetFiles(d))
+                        {
+                            string name = Path.GetFileName(f);
+                            if (name.Equals("QRSnap.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (name.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)) continue;
+                            File.Copy(f, Path.Combine(exeDir, name), true);
+                            runtimeOk = true;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Ocr.ProbeForce();
+                    return "模型已导入 " + string.Join("、", got.ToArray()) + "，但推理库没放进去（" + ex.Message + "）";
+                }
+
+                Ocr.ProbeForce();
+                return "已导入 " + string.Join("、", got.ToArray()) + (runtimeOk ? "（含推理库）" : "") + "，设置里现在能直接选";
+            }
+            finally
+            {
+                try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch (Exception) { }
+            }
+        }
+
+        private static IntPtr OnImportModel(uint win, IntPtr msg)
+        {
+            string zip = PickZip();
+            if (string.IsNullOrEmpty(zip))
+                return Reply("{\"ok\":false,\"msg\":" + J.S("已取消") + "}");
+
+            string result;
+            try { result = ImportModelZip(zip); }
+            catch (Exception ex) { result = "导入失败：" + ex.Message; }
+
+            return Reply("{\"ok\":true,\"msg\":" + J.S(result) + ",\"state\":" + BuildState() + "}");
         }
 
         private static IntPtr OnCapture(uint win, IntPtr msg)
