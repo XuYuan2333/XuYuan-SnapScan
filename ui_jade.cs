@@ -454,7 +454,7 @@ namespace QRSnap
                     try
                     {
                         if (_toast != null) _toast.ShowBusy("正在翻译…");
-                        int shown = TranslateAndShow(segs, session.Selection);
+                        int shown = TranslateAndShow(segs, session.Selection, crop);
                         if (shown > 0) mtLines = shown;
                         else detail = detail + "；翻译：没有可对齐的文本行";
                     }
@@ -492,10 +492,95 @@ namespace QRSnap
             return cr;
         }
 
+        private static Rectangle ScaleRect(Rectangle r, double kx, double ky)
+        {
+            if (Math.Abs(kx - 1.0) < 0.02 && Math.Abs(ky - 1.0) < 0.02) return r;
+            int x0 = (int)Math.Floor(r.X * kx);
+            int y0 = (int)Math.Floor(r.Y * ky);
+            int x1 = (int)Math.Ceiling(r.Right * kx);
+            int y1 = (int)Math.Ceiling(r.Bottom * ky);
+            return Rectangle.FromLTRB(x0, y0, x1, y1);
+        }
+
+        // 把 OCR 框按原始截图上的真实字形外扩到「起笔到收笔」，避免遮罩盖不住原字
+        private static Rectangle InkBounds(Bitmap bmp, Rectangle box)
+        {
+            if (bmp == null) return box;
+            // 先在整行高度上做「列是否有墨」的判断，再从原框向两侧长，遇到空档才停
+            int padY = Math.Max(3, box.Height / 6);
+            int sy = Math.Max(0, box.Y - padY);
+            int ey = Math.Min(bmp.Height - 1, box.Bottom + padY);
+            if (ey - sy < 4) return box;
+
+            int W = bmp.Width;
+            int h = ey - sy + 1;
+            int[] col = new int[W];
+            int step = Math.Max(1, W / 400);   // 太宽就抽样，省时间
+            for (int x = 0; x < W; x += step)
+            {
+                int best = 0, mn = 255, mx = 0;
+                for (int y = 0; y < h; y++)
+                {
+                    Color c = bmp.GetPixel(x, sy + y);
+                    int l = (c.R * 77 + c.G * 151 + c.B * 28) >> 8;
+                    if (l < mn) mn = l;
+                    if (l > mx) mx = l;
+                }
+                best = mx - mn;
+                for (int k = x; k < Math.Min(W, x + step); k++) col[k] = best;
+            }
+            // 背景亮度取整行最常见的亮度（近似：取平均）
+            long sum = 0; int n = 0;
+            for (int x = 0; x < W; x += Math.Max(1, W / 200))
+            {
+                for (int y = 0; y < h; y += Math.Max(1, h / 4))
+                {
+                    Color c = bmp.GetPixel(x, sy + y);
+                    sum += (c.R * 77 + c.G * 151 + c.B * 28) >> 8; n++;
+                }
+            }
+            int bg = n > 0 ? (int)(sum / n) : 128;
+            int need = Math.Max(18, (int)(box.Height * 0.9f));   // 行内连续空白达到这个宽度就视为文字结束
+            int limit = Math.Max(60, (int)(box.Width * 2.5f));
+
+            int x0 = Math.Max(0, box.X), x1 = Math.Min(W - 1, box.Right - 1);
+            int gap = 0, stopX = x1;
+            for (int x = x1 + 1; x < W && x <= box.Right + limit; x++)
+            {
+                if (col[x] >= 26) { stopX = x; gap = 0; }
+                else
+                {
+                    gap += step;
+                    if (gap >= need) break;
+                }
+            }
+            x1 = stopX;
+            gap = 0; stopX = Math.Min(W - 1, box.X);
+            for (int x = box.X - 1; x >= 0 && x >= box.X - limit; x--)
+            {
+                if (col[x] >= 26) { stopX = x; gap = 0; }
+                else
+                {
+                    gap += step;
+                    if (gap >= need) break;
+                }
+            }
+            x0 = stopX;
+            if (x1 < x0) return box;
+
+            int y0 = sy, y1 = ey;
+            return Rectangle.FromLTRB(Math.Max(0, x0), Math.Max(0, y0),
+                Math.Min(bmp.Width, x1 + 1), Math.Min(bmp.Height, y1 + 1));
+        }
+
         // 逐行翻译并原地铺译文；返回画出来的行数
-        private int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect)
+        private int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp)
         {
             if (segs == null || segs.Count == 0) return 0;
+            if (bmp != null && Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
+            {
+                try { bmp.Save(@"E:\下载\豆包\_mt\crop.png", System.Drawing.Imaging.ImageFormat.Png); } catch { }
+            }
             string tgt = AppConfig.TargetLang;
             StringBuilder all = new StringBuilder();
             for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
@@ -504,6 +589,15 @@ namespace QRSnap
             if (src == tgt) throw new Exception("这段文字看起来已经是" + MtRouter.NameOf(tgt) + "，不需要翻译");
 
             List<TransOverlay.Item> items = new List<TransOverlay.Item>();
+            // 截图可能被缩放（高 DPI 下 crop 比选区小），覆盖层是按屏幕像素画的，坐标要按比例还原
+            double kx = 1.0, ky = 1.0;
+            if (bmp != null && bmp.Width > 0 && bmp.Height > 0 && screenRect.Width > 0 && screenRect.Height > 0)
+            {
+                kx = screenRect.Width / (double)bmp.Width;
+                ky = screenRect.Height / (double)bmp.Height;
+                Log("mt scale kx=" + kx.ToString("0.###") + " ky=" + ky.ToString("0.###")
+                    + " crop=" + bmp.Width + "x" + bmp.Height + " sel=" + screenRect.Width + "x" + screenRect.Height);
+            }
             string err = null;
             RunPumped(delegate()
             {
@@ -524,7 +618,11 @@ namespace QRSnap
                         string tr = router.Translate(s.Text, src, tgt, AppConfig.MtPair, out route);
                         if (string.IsNullOrEmpty(tr)) continue;
                         TransOverlay.Item it = new TransOverlay.Item();
-                        it.Box = s.Box;
+                        Rectangle rb = InkBounds(bmp, s.Box);
+                        if (Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
+                            Log("ink box=" + s.Box.X + "," + s.Box.Y + "," + s.Box.Width + "," + s.Box.Height
+                                + " -> " + rb.X + "," + rb.Y + "," + rb.Width + "," + rb.Height);
+                        it.Box = ScaleRect(rb, kx, ky);
                         it.Angle = s.Angle;
                         it.Text = tr;
                         items.Add(it);
@@ -965,6 +1063,7 @@ namespace QRSnap
             sb.Append(",\"mtbar\":").Append(J.B(AppConfig.MtBar));
             sb.Append(",\"mtperf\":").Append(J.S(AppConfig.MtPerf));
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
+            sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
             sb.Append(",\"dl\":{\"running\":").Append(J.B(ModelDownload.Running));
             sb.Append(",\"key\":").Append(J.S(ModelDownload.CurrentKey));
             sb.Append(",\"status\":").Append(J.S(ModelDownload.Status));
@@ -1073,6 +1172,15 @@ namespace QRSnap
                     {
                         int iv;
                         if (int.TryParse(v, out iv)) AppConfig.MtIdle = AppConfig.NormalizeMtIdle(iv);
+                    }
+                    else if (k == "mtalpha")
+                    {
+                        int av;
+                        if (int.TryParse(v, out av))
+                        {
+                            AppConfig.MtMaskAlpha = AppConfig.NormalizeMtMaskAlpha(av);
+                            TransOverlay.Repaint();   // 正在显示的话立刻按新透明度重画
+                        }
                     }
                     else if (k == "mtlang") { if (v != null && v.Trim().Length > 0) AppConfig.TargetLang = v.Trim().ToLowerInvariant(); }
                     else if (k == "mtpair")
