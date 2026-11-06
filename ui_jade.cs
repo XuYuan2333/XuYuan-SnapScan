@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -350,6 +350,8 @@ namespace QRSnap
         // 用户只会看到“识字完成”，看不到“正在识字”。所以识别丢到后台线程，
         // UI 线程这边泵消息，让提示条该淡入就淡入、该转圈就转圈。
         private bool _pumping;
+        private string _mtSkipReason;   // 这一路没出译文时的具体原因，交给结果详情
+        private string _mtSkipShort;    // 原因短句，直接显示在提示条上（「未翻译」到底为什么）
 
         private void RunPumped(Action work, int minVisibleMs)
         {
@@ -453,10 +455,11 @@ namespace QRSnap
                 {
                     try
                     {
-                        if (_toast != null) _toast.ShowBusy("正在翻译…");
+                        // 空闲释放后引擎是停着的，这一句会明显慢一拍，先说清楚，别让人以为卡死
+                        if (_toast != null) _toast.ShowBusy(LlamaMt.ServerRunning ? "正在翻译…" : "正在翻译…（首次加载模型，稍等）");
                         int shown = TranslateAndShow(segs, session.Selection, crop);
                         if (shown > 0) mtLines = shown;
-                        else detail = detail + "；翻译：没有可对齐的文本行";
+                        else detail = detail + "；翻译：未出译文（" + (_mtSkipReason ?? "没有可对齐的文本行") + "）";
                     }
                     catch (Exception exMt)
                     {
@@ -473,7 +476,9 @@ namespace QRSnap
                 catch (Exception) { }
             }
 
-            string doneWord = mode == "qr" ? "识码完成" : (mtLines > 0 ? "翻译完成" : "识字完成");
+            string doneWord = mode == "qr" ? "识码完成"
+                : (mtLines > 0 ? "翻译完成"
+                : (mode == "mt" && ok ? "识字完成 · 未翻译：" + (_mtSkipShort ?? "原因未知") : "识字完成"));
             if (_toast != null) _toast.ShowDone(ok ? doneWord : "没有识别到内容", ok);
 
             string json = "{"
@@ -585,10 +590,25 @@ namespace QRSnap
             StringBuilder all = new StringBuilder();
             for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
             string src = LangDetect.Detect(all.ToString());
-            if (string.IsNullOrEmpty(src)) return 0;
-            if (src == tgt) throw new Exception("这段文字看起来已经是" + MtRouter.NameOf(tgt) + "，不需要翻译");
+            _mtSkipReason = null;
+            _mtSkipShort = null;
+            if (string.IsNullOrEmpty(src))
+            {
+                _mtSkipReason = "没有识别到文字";
+                _mtSkipShort = "没识别到文字";
+                return 0;
+            }
+            // 不再抛异常：抛出去只会变成「只识字、不翻译」，用户根本不知道是跳过了
+            if (src == tgt)
+            {
+                _mtSkipReason = "选区文字本身就是" + MtRouter.NameOf(tgt) + "，已跳过翻译";
+                _mtSkipShort = "选区已是" + MtRouter.NameOf(tgt);
+                Log("translate skip " + _mtSkipReason);
+                return 0;
+            }
 
             List<TransOverlay.Item> items = new List<TransOverlay.Item>();
+            List<MtRealistic.Block> blocks = new List<MtRealistic.Block>();
             // 截图可能被缩放（高 DPI 下 crop 比选区小），覆盖层是按屏幕像素画的，坐标要按比例还原
             double kx = 1.0, ky = 1.0;
             if (bmp != null && bmp.Width > 0 && bmp.Height > 0 && screenRect.Width > 0 && screenRect.Height > 0)
@@ -618,7 +638,11 @@ namespace QRSnap
                         string tr = router.Translate(s.Text, src, tgt, AppConfig.MtPair, out route);
                         if (string.IsNullOrEmpty(tr)) continue;
                         TransOverlay.Item it = new TransOverlay.Item();
-                        Rectangle rb = InkBounds(bmp, s.Box);
+                        // 拟真模式不要 InkBounds：那个外扩是为「实色遮罩盖住整行」服务的，
+                        // 在深色/复杂底图上极易把整行甚至整片背景都吃进来，导致一个框跨好几列文字。
+                        // 擦除+重绘只需要原文框本身，MtRealistic 内部再按 2px 微扩。
+                        bool realMode = AppConfig.NormalizeMtMode(AppConfig.MtMode) == AppConfig.MtModeRealistic;
+                        Rectangle rb = realMode ? s.Box : InkBounds(bmp, s.Box);
                         if (Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
                             Log("ink box=" + s.Box.X + "," + s.Box.Y + "," + s.Box.Width + "," + s.Box.Height
                                 + " -> " + rb.X + "," + rb.Y + "," + rb.Width + "," + rb.Height);
@@ -626,6 +650,13 @@ namespace QRSnap
                         it.Angle = s.Angle;
                         it.Text = tr;
                         items.Add(it);
+
+                        // 拟真模式要的是原图坐标的框，直接喂给擦除/回填
+                        MtRealistic.Block blk = new MtRealistic.Block();
+                        blk.Box = rb;
+                        blk.Text = tr;
+                        blk.Angle = s.Angle;
+                        blocks.Add(blk);
                         Log("mt line box=" + s.Box.X + "," + s.Box.Y + "," + s.Box.Width + "," + s.Box.Height
                             + " ang=" + s.Angle + " | " + s.Text + " => " + tr);
                     }
@@ -638,8 +669,58 @@ namespace QRSnap
 
             if (err != null) throw new Exception(err);
             if (items.Count == 0) return 0;
+
+            // 拟真：擦除原字 + 回填译文，输出整块成品图铺回选区
+            if (AppConfig.NormalizeMtMode(AppConfig.MtMode) == AppConfig.MtModeRealistic)
+            {
+                if (bmp == null) throw new Exception("拟真模式拿不到原图，切回效率模式试试");
+                MtRealistic.Stats st;
+                Bitmap outImg = MtRealistic.Render(bmp, blocks, out st);
+                if (outImg != null && Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
+                {
+                    // 干净的成品图 + 带框的调试图，各存各的，验收看成品图
+                    try { ((Bitmap)outImg.Clone()).Save(@"E:\下载\豆包\_mt\real-overlay.png", System.Drawing.Imaging.ImageFormat.Png); } catch { }
+                    try
+                    {
+                        using (Bitmap dbg = new Bitmap(outImg.Width, outImg.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                        {
+                            using (Graphics dg = Graphics.FromImage(dbg))
+                            {
+                                dg.DrawImage(outImg, 0, 0);
+                                using (Pen pen = new Pen(Color.FromArgb(200, 255, 60, 60), 1f))
+                                    foreach (MtRealistic.Block b in blocks)
+                                        dg.DrawRectangle(pen, b.Box.X, b.Box.Y, Math.Max(1, b.Box.Width - 1), Math.Max(1, b.Box.Height - 1));
+                            }
+                            dbg.Save(@"E:\下载\豆包\_mt\real-debug.png", System.Drawing.Imaging.ImageFormat.Png);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (outImg != null && (kx != 1.0 || ky != 1.0))
+                {
+                    Bitmap scaled = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                    using (Graphics sg = Graphics.FromImage(scaled))
+                    {
+                        sg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        sg.DrawImage(outImg, new Rectangle(0, 0, scaled.Width, scaled.Height));
+                    }
+                    outImg.Dispose();
+                    outImg = scaled;
+                }
+                TransOverlay.ShowImage(screenRect, outImg);
+                Log("translate realistic lines=" + st.Lines + " hard=" + st.Hard + " wrap=" + st.Wrapped
+                    + " src=" + src + " tgt=" + tgt);
+                return st.Lines;
+            }
+
             TransOverlay.Show(screenRect, items);
             Log("translate shown lines=" + items.Count + " src=" + src + " tgt=" + tgt);
+            if (items.Count == 0)
+            {
+                _mtSkipReason = "翻译引擎没有产出译文（模型可能还在加载），重试一次";
+                _mtSkipShort = "引擎没出结果，重试";
+            }
             return items.Count;
         }
 
@@ -1063,6 +1144,7 @@ namespace QRSnap
             sb.Append(",\"mtperf\":").Append(J.S(AppConfig.MtPerf));
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
+            sb.Append(",\"mtmode\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
             sb.Append("}");
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
@@ -1176,6 +1258,10 @@ namespace QRSnap
                             AppConfig.MtMaskAlpha = AppConfig.NormalizeMtMaskAlpha(av);
                             TransOverlay.Repaint();   // 正在显示的话立刻按新透明度重画
                         }
+                    }
+                    else if (k == "mtmode")
+                    {
+                        AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
                     }
                     else if (k == "mtlang") { if (v != null && v.Trim().Length > 0) AppConfig.TargetLang = v.Trim().ToLowerInvariant(); }
                     else if (k == "mtpair")
