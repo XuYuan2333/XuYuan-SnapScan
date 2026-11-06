@@ -14,14 +14,18 @@
     <div class="logo"><img src="app.ico" alt="XuYuan-SnapScan"></div>
     <div class="brand-text">
       <h1>XuYuan-SnapScan</h1>
-      <p>截图 · 二维码 · 文字识别</p>
+      <p>截图 · 二维码 · 文字识别 · 翻译</p>
     </div>
   </div>
 
   <div class="top-right">
-    <div class="engine-pill" id="enginePill" title="当前真正可用的识别引擎">
+    <div class="engine-pill" id="enginePill" title="当前真正可用的识字引擎">
       <span class="dot" id="engineDot"></span>
       <span id="enginePillText">检测中…</span>
+    </div>
+    <div class="engine-pill mt-pill" id="mtPill" title="当前翻译模型">
+      <span class="dot"></span>
+      <span id="mtPillText">翻译模型…</span>
     </div>
     <button class="icon-btn" id="btnSettings" title="设置">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -40,6 +44,7 @@
         <em id="resultMeta">等待识别</em>
       </div>
       <div class="panel-actions">
+        <button class="btn ghost" id="btnHideTrans" title="关闭当前所有译文遮罩（也可以按 Ctrl+Alt+G）">隐藏译文</button>
         <button class="btn ghost" id="btnClear">清空</button>
         <button class="btn ghost" id="btnCopy">复制</button>
       </div>
@@ -57,6 +62,7 @@
   <aside class="side">
     <section class="panel action-panel">
       <div class="panel-title"><span>开始识别</span></div>
+
       <button class="shot-btn" id="btnQr">
         <span class="shot-ico">
           <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 3h3v3h-3v-3Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
@@ -64,23 +70,51 @@
         <span class="shot-text"><b>截图识码</b><i>二维码 / 条码</i></span>
         <span class="kbd" id="hkQr">Ctrl+Alt+D</span>
       </button>
+
       <button class="shot-btn" id="btnOcr">
         <span class="shot-ico">
           <svg viewBox="0 0 24 24" width="22" height="22"><path d="M5 4h14v16H5z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 9h8M8 13h8M8 17h5" stroke="currentColor" stroke-width="1.7"/></svg>
         </span>
-        <span class="shot-text"><b>截图识字</b><i>中文 / 英文 / 混排</i></span>
+        <span class="shot-text"><b>截图识字</b><i>只取文字，不翻译</i></span>
         <span class="kbd" id="hkOcr">Ctrl+Alt+X</span>
       </button>
-      <p class="tips">按下快捷键即可直接截屏；截屏期间本窗口会先隐藏，截完按原状态还原。</p>
+
+      <button class="shot-btn mt-btn" id="btnMt">
+        <span class="shot-ico">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 6h9M8.5 4v2M11 6c0 3.5-2.4 6.4-6 7.6M5.6 9.2c1.2 2.4 3.4 3.8 5.4 4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.6 20l3.1-8h1.4l3.1 8M14.9 16.6h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+        </span>
+        <span class="shot-text"><b>截图翻译</b><i id="mtSub">原地显示译文</i></span>
+        <span class="kbd" id="hkMt">Ctrl+Alt+F</span>
+      </button>
+
+      <p class="tips">识码 / 识字 / 翻译是三条独立入口。翻译要装了模型才能用，没装会置灰。</p>
     </section>
 
-    <section class="panel engine-panel">
-      <div class="panel-title"><span>识别引擎</span><button class="link" id="btnRecheck">重新检测</button></div>
-      <div class="engine-row">
-        <div class="engine-name" id="engineName">—</div>
-        <div class="engine-badge" id="engineBadge">—</div>
+    <section class="panel quick-panel">
+      <div class="panel-title"><span>快捷设置</span><button class="link" id="btnRecheck">重新检测</button></div>
+
+      <div class="quick-list">
+        <div class="quick-row pick" id="quickEngine">
+          <span class="q-text"><b>识字引擎</b><i id="engineName">—</i></span>
+          <span class="q-badge" id="engineBadge">—</span>
+        </div>
+
+        <div class="quick-row pick" id="quickMt">
+          <span class="q-text"><b>翻译模型</b><i id="mtName">—</i></span>
+          <span class="q-badge" id="mtBadge">—</span>
+        </div>
+
+        <div class="quick-row soon">
+          <span class="q-text"><b>启用 OCR 纠错</b><i>用词典与上下文修正错字</i></span>
+          <span class="soon-tag">待开放</span>
+        </div>
+
+        <div class="quick-row soon">
+          <span class="q-text"><b>译文显示方式</b><i>原位置遮罩 / 对照窗口</i></span>
+          <span class="soon-tag">待开放</span>
+        </div>
       </div>
-      <div class="engine-desc" id="engineDesc">—</div>
+
     </section>
   </aside>
 </main>
@@ -98,75 +132,149 @@
     <button class="icon-btn" id="btnCloseDrawer" title="关闭">✕</button>
   </div>
 
+  <div class="dl-progress" id="dlProgress" style="display:none;">
+    <div class="dl-bar"><i id="dlBar"></i></div>
+    <span id="dlText">准备下载…</span>
+  </div>
+
   <div class="drawer-body">
-    <div class="group">
-      <div class="group-title">识别引擎</div>
-      <div class="engine-list" id="engineList"></div>
-      <div class="group-note" id="engineNote">只读取本软件自己的「OCR Model」目录；灰掉的是该目录里没找到模型的。</div>
-      <div class="row-btns">
-        <button class="btn ghost" id="btnRecheck2">重新检测</button>
-        <button class="btn" id="btnImportModel">导入模型包</button>
+
+    <div class="acc open">
+      <button class="acc-head" type="button">快捷键 <span class="acc-note">4 组</span><span class="chev"></span></button>
+      <div class="acc-body">
+        <div class="field-grid">
+          <label class="field"><span>识码</span><input type="text" id="hkQrInput" readonly placeholder="点击后按下组合键"></label>
+          <label class="field"><span>识字</span><input type="text" id="hkOcrInput" readonly placeholder="点击后按下组合键"></label>
+          <label class="field"><span>截图翻译</span><input type="text" id="hkMtInput" readonly placeholder="点击后按下组合键"></label>
+          <label class="field"><span>显隐译文</span><input type="text" id="hkHideInput" readonly placeholder="点击后按下组合键"></label>
+        </div>
+        <div class="group-note">点击输入框后直接按组合键即可修改；Esc 取消。显隐译文这一组随时可关掉所有遮罩。</div>
       </div>
-      <div class="group-note">模型包（.zip）不用自己解压挪目录，点「导入模型包」选一下就行。</div>
     </div>
 
-    <div class="group">
-      <div class="group-title">外观</div>
-      <label class="field slider">
-        <span>透明度</span>
-        <input type="range" id="rgOpacity" min="0" max="100" step="1" value="30">
-        <b class="val" id="opacityVal">30%</b>
-      </label>
-      <label class="field slider">
-        <span>毛玻璃</span>
-        <input type="range" id="rgFrost" min="0" max="20" step="1" value="3">
-        <b class="val" id="frostVal">3</b>
-      </label>
-      <div class="group-note">透明度越低，背景图透出越多；毛玻璃强度越高，背景越糊。</div>
+    <div class="acc">
+      <button class="acc-head" type="button">识别引擎<span class="acc-note" id="engineAccNote"></span><span class="chev"></span></button>
+      <div class="acc-body">
+        <div class="engine-list" id="engineList"></div>
+        <div class="engine-desc" id="engineDesc">—</div>
+        <div class="group-note" id="engineNote">只读取本软件自己的「OCR Model」目录；灰掉的是该目录里没找到模型的。</div>
+        <div class="row-btns">
+          <button class="btn ghost" id="btnRecheck2">重新检测</button>
+          <button class="btn" id="btnImportModel">导入模型包</button>
+          <button class="btn ghost" id="btnDownloadModels">下载缺失模型</button>
+        </div>
+        <div class="group-note">模型包（.zip）不用自己解压挪目录，点「导入模型包」选一下就行。</div>
+      </div>
     </div>
 
-    <div class="group">
-      <div class="group-title">截图方式</div>
-      <label class="switch-row">
-        <div><b>自由圈选</b><i>按住鼠标画出任意形状，只识别圈住的区域</i></div>
-        <input type="checkbox" id="swFreehand"><span class="sw"></span>
-      </label>
+    <div class="acc">
+      <button class="acc-head" type="button">翻译<span class="acc-note" id="mtAccNote"></span><span class="chev"></span></button>
+      <div class="acc-body">
+        <div class="sub-title">翻译模型</div>
+        <div class="engine-list" id="mtList"></div>
+        <div class="group-note" id="mtNote">翻译模型放在「MT Model」目录，一个 .gguf 就够。当前用的是混元 Hy-MT1.5-1.8B（Q4_K_M，约 1.08 GB）：英→中 / 日→中 / 俄→中 最稳，其余 30 种语言也能直连，不用按语言对分文件夹。</div>
+        <div class="row-btns">
+          <button class="btn" id="btnImportMt">导入翻译模型包</button>
+          <button class="btn ghost" id="btnDownloadMt">下载翻译模型</button>
+        </div>
+        <div class="group-note">支持只含一个 .gguf 的 zip（如 Hy-MT1.5），或旧式 en-zh 目录包（带 model.json / encoder+decoder）。不用单独开关：扫到模型就能用，没有模型整块自动置灰。</div>
+
+        <div class="sub-title">目标语言</div>
+        <label class="field">
+          <span>译成</span>
+          <select id="selMtLang">
+            <option value="zh">中文</option>
+            <option value="en">英语</option>
+            <option value="ja">日语</option>
+            <option value="ko">韩语</option>
+            <option value="ru">俄语</option>
+          </select>
+        </label>
+        <div class="group-note">混元翻译模型一个文件就能直接翻 33 种语言，英→中 / 日→中 / 俄→中 都是直连，不用中转。</div>
+
+        <div class="sub-title">翻译性能</div>
+        <label class="field">
+          <span>占用</span>
+          <select id="selMtPerf">
+            <option value="silent">后台无感（最省）</option>
+            <option value="balanced">均衡（默认）</option>
+            <option value="performance">性能</option>
+            <option value="full">全力以赴</option>
+          </select>
+        </label>
+        <div class="group-note">后台无感只用约 1/8 线程并降到低优先级，翻得慢但不抢前台；均衡约 1/3；性能约 1/2；全力以赴吃满所有核，最快但会短时抢占 CPU。改档位后下次翻译生效。</div>
+
+        <div class="sub-title">内存释放</div>
+        <label class="field">
+          <span>空闲</span>
+          <input type="number" id="numMtIdle" min="0" max="86400" step="5" value="30" inputmode="numeric">
+          <span class="val" style="width:auto;">秒后释放</span>
+        </label>
+        <div class="group-note">超过这么多秒没有再次翻译，就把翻译服务整个退出，内存立刻还回去，只留本体这点基础占用；填 0 表示常驻不释放。改完立即生效。</div>
+
+        <div class="sub-title">译文遮罩</div>
+        <label class="switch-row">
+          <div><b>显示「✕ 关闭译文」控制条</b><i>关掉后翻译只画译文、不留浮动控制条，用 Esc / 滚轮 / Ctrl+Alt+G 关</i></div>
+          <input type="checkbox" id="swMtBar"><span class="sw"></span>
+        </label>
+        <div class="group-note">遮罩本身默认点击穿透，不拦鼠标；控制条不穿透，是给你随时关掉全部译文用的。</div>
+      </div>
     </div>
 
-    <div class="group">
-      <div class="group-title">识别之后</div>
-      <label class="switch-row">
-        <div><b>自动复制</b><i>识别完成后把文字放进剪贴板</i></div>
-        <input type="checkbox" id="swAutocopy"><span class="sw"></span>
-      </label>
-      <label class="switch-row">
-        <div><b>识别后显示本软件窗口</b><i>识别结束后强制把窗口提到最前；不勾选则保持原来的最小化 / 遮挡状态</i></div>
-        <input type="checkbox" id="swRestoreWin"><span class="sw"></span>
-      </label>
-      <label class="switch-row">
-        <div><b>扫码后显示本软件窗口</b><i>扫码结束后强制把窗口提到最前；不勾选则保持原来的最小化 / 遮挡状态</i></div>
-        <input type="checkbox" id="swRestoreQr"><span class="sw"></span>
-      </label>
+    <div class="acc">
+      <button class="acc-head" type="button">截图方式<span class="chev"></span></button>
+      <div class="acc-body">
+        <label class="switch-row">
+          <div><b>自由圈选</b><i>按住鼠标画出任意形状，只识别圈住的区域</i></div>
+          <input type="checkbox" id="swFreehand"><span class="sw"></span>
+        </label>
+      </div>
     </div>
 
-    <div class="group">
-      <div class="group-title">快捷键</div>
-      <label class="field">
-        <span>识码</span>
-        <input type="text" id="hkQrInput" readonly placeholder="点击后按下组合键">
-      </label>
-      <label class="field">
-        <span>识字</span>
-        <input type="text" id="hkOcrInput" readonly placeholder="点击后按下组合键">
-      </label>
-      <div class="group-note">点击输入框后直接按下组合键即可修改；Esc 取消。</div>
+    <div class="acc">
+      <button class="acc-head" type="button">识别之后<span class="chev"></span></button>
+      <div class="acc-body">
+        <label class="switch-row">
+          <div><b>自动复制</b><i>识别完成后把文字放进剪贴板</i></div>
+          <input type="checkbox" id="swAutocopy"><span class="sw"></span>
+        </label>
+        <label class="switch-row">
+          <div><b>识别后显示本软件窗口</b><i>识别结束后强制把窗口提到最前；不勾选则保持原来的最小化 / 遮挡状态</i></div>
+          <input type="checkbox" id="swRestoreWin"><span class="sw"></span>
+        </label>
+        <label class="switch-row">
+          <div><b>扫码后显示本软件窗口</b><i>扫码结束后强制把窗口提到最前；不勾选则保持原来的最小化 / 遮挡状态</i></div>
+          <input type="checkbox" id="swRestoreQr"><span class="sw"></span>
+        </label>
+      </div>
     </div>
 
-    <div class="group about">
-      <div class="about-line"><span>版本</span><b id="verText2">—</b></div>
-      <div class="about-line"><span>界面</span><b>JadeView 2.0 · Web UI</b></div>
-      <div class="about-line"><span>渲染</span><b id="rtText2">系统 WebView2</b></div>
+    <div class="acc">
+      <button class="acc-head" type="button">外观<span class="chev"></span></button>
+      <div class="acc-body">
+        <label class="field slider">
+          <span>透明度</span>
+          <input type="range" id="rgOpacity" min="0" max="100" step="1" value="30">
+          <b class="val" id="opacityVal">30%</b>
+        </label>
+        <label class="field slider">
+          <span>毛玻璃</span>
+          <input type="range" id="rgFrost" min="0" max="20" step="1" value="3">
+          <b class="val" id="frostVal">3</b>
+        </label>
+        <div class="group-note">透明度越低，背景图透出越多；毛玻璃强度越高，背景越糊。</div>
+      </div>
     </div>
+
+    <div class="acc">
+      <button class="acc-head" type="button">关于<span class="chev"></span></button>
+      <div class="acc-body">
+        <div class="about-line"><span>版本</span><b id="verText2">—</b></div>
+        <div class="about-line"><span>界面</span><b>JadeView 2.0 · Web UI</b></div>
+        <div class="about-line"><span>渲染</span><b id="rtText2">系统 WebView2</b></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
