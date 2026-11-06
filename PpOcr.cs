@@ -85,6 +85,64 @@ namespace QRSnap
             public int X, Y, W, H;
             public float Score;
             public int Order;
+            public float Angle;   // 文本行方向（度，-90~90）
+        }
+
+        // 一行文本（多个检测框合并后的一整行）
+        public sealed class Seg
+        {
+            public string Text;
+            public int X, Y, W, H;
+            public int Order;
+            public float Angle;
+        }
+
+        // 只跑检测，不识字：给别的引擎（微信/系统）补几何用
+        public List<Box> DetectPublic(Bitmap src)
+        {
+            if (src == null) return new List<Box>();
+            return Detect(src);
+        }
+
+        // 逐行返回：文字 + 位置 + 倾斜角
+        public List<Seg> RecognizeSegments(Bitmap src)
+        {
+            List<Seg> list = new List<Seg>();
+            if (src == null) return list;
+            List<Box> boxes = Detect(src);
+            if (boxes.Count == 0) return list;
+            int curOrder = int.MinValue;
+            Seg seg = null;
+            for (int i = 0; i < boxes.Count; i++)
+            {
+                Box b = boxes[i];
+                string line = RecOne(src, b);
+                if (line == null) continue;
+                line = line.Trim();
+                if (line.Length == 0) continue;
+                if (seg == null || b.Order != curOrder)
+                {
+                    if (seg != null) list.Add(seg);
+                    seg = new Seg();
+                    seg.Order = b.Order;
+                    seg.X = b.X; seg.Y = b.Y; seg.W = b.W; seg.H = b.H;
+                    seg.Text = line;
+                    seg.Angle = b.Angle;
+                    curOrder = b.Order;
+                    continue;
+                }
+                int x0 = Math.Min(seg.X, b.X);
+                int y0 = Math.Min(seg.Y, b.Y);
+                int x1 = Math.Max(seg.X + seg.W, b.X + b.W);
+                int y1 = Math.Max(seg.Y + seg.H, b.Y + b.H);
+                seg.X = x0; seg.Y = y0; seg.W = x1 - x0; seg.H = y1 - y0;
+                seg.Text = seg.Text + " " + line;
+                float area = (float)(b.W * b.H);
+                float area0 = (float)(seg.W * seg.H);
+                seg.Angle = (seg.Angle * area0 + b.Angle * area) / Math.Max(1f, area0 + area);
+            }
+            if (seg != null) list.Add(seg);
+            return list;
         }
 
         public string Recognize(Bitmap src)
@@ -220,12 +278,15 @@ namespace QRSnap
                 lab[seed] = nextLab;
                 int minx = pw, miny = ph, maxx = -1, maxy = -1, area = 0;
                 double sum = 0;
+                double ssx = 0, ssy = 0, ssxx = 0, ssyy = 0, ssxy = 0;
                 while (sp > 0)
                 {
                     int cur = stack[--sp];
                     int cy = cur / pw, cx = cur % pw;
                     area++;
                     sum += prob[cur];
+                    ssx += cx; ssy += cy;
+                    ssxx += (double)cx * cx; ssyy += (double)cy * cy; ssxy += (double)cx * cy;
                     if (cx < minx) minx = cx;
                     if (cx > maxx) maxx = cx;
                     if (cy < miny) miny = cy;
@@ -253,8 +314,7 @@ namespace QRSnap
                 if (bw < 4 || bh < 4) continue;
                 double dist = ((double)bw * bh) * unclip / (2.0 * (bw + bh));
                 float sx = (float)ow / pw;
-                float sy = (float)oh / ph;
-                int x0 = (int)Math.Floor((minx - dist) * sx);
+                float sy = (float)oh / ph;                int x0 = (int)Math.Floor((minx - dist) * sx);
                 int y0 = (int)Math.Floor((miny - dist) * sy);
                 int x1 = (int)Math.Ceiling((maxx + 1 + dist) * sx);
                 int y1 = (int)Math.Ceiling((maxy + 1 + dist) * sy);
@@ -267,6 +327,7 @@ namespace QRSnap
                 if ((x1 - x0) > ow * 0.98 && (y1 - y0) > oh * 0.98) continue;
                 Box nb = new Box();
                 nb.X = x0; nb.Y = y0; nb.W = x1 - x0; nb.H = y1 - y0; nb.Score = score;
+                nb.Angle = AngleOf(area, ssx, ssy, ssxx, ssyy, ssxy);
                 boxes.Add(nb);
             }
 
@@ -274,8 +335,27 @@ namespace QRSnap
             return boxes;
         }
 
-        private static void SortLines(List<Box> boxes)
+        // 用像素二阶矩估文本行方向：贴图上的斜排字也能拿到角度
+        private static float AngleOf(int area, double sx, double sy, double sxx, double syy, double sxy)
         {
+            if (area < 40) return 0f;
+            double mx = sx / area, my = sy / area;
+            double mu20 = sxx / area - mx * mx;
+            double mu02 = syy / area - my * my;
+            double mu11 = sxy / area - mx * my;
+            double d = Math.Sqrt((mu20 - mu02) * (mu20 - mu02) + 4.0 * mu11 * mu11);
+            double t = mu20 + mu02;
+            if (t <= 0.0001 || d / t < 0.12) return 0f;   // 接近方形，角度不可靠
+            double theta = 0.5 * Math.Atan2(2.0 * mu11, mu20 - mu02);
+            float deg = (float)(theta * 180.0 / Math.PI);
+            if (deg > 90f) deg -= 180f;
+            if (deg < -90f) deg += 180f;
+            if (Math.Abs(deg) < 1.5f) return 0f;
+            if (Math.Abs(deg) > 45f) return 0f;           // 竖排/异常，按水平处理
+            return deg;
+        }
+
+        private static void SortLines(List<Box> boxes)        {
             boxes.Sort(delegate(Box a, Box b)
             {
                 if (Math.Abs(a.Y - b.Y) > Math.Max(a.H, b.H) / 2) return a.Y.CompareTo(b.Y);
