@@ -5308,8 +5308,7 @@ namespace QRSnap
             // 正式界面：JadeView 2.0 + Web UI（新增 --classic 可退回旧的 WinForms 界面）
             bool legacyUi = args.Length >= 1 && args[0] == "--classic";
             bool selfTestArgs = args.Length >= 1 && (args[0] == "--selftest" || args[0] == "--ocrselftest"
-                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate" || args[0] == "--import"
-                || args[0] == "--downloadmodel");
+                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate" || args[0] == "--import");
             if (!legacyUi && !selfTestArgs)
             {
                 JadeHost.Run();
@@ -5327,21 +5326,6 @@ namespace QRSnap
             if (args.Length >= 2 && args[0] == "--ocrselftest")
             {
                 OcrSelfTest(args[1], args.Length >= 3 ? args[2] : null, args.Length >= 4 ? args[3] : "wechat");
-                return;
-            }
-
-            // 下载模型自检：QRSnap.exe --downloadmodel 键名 [结果输出路径]
-            if (args.Length >= 2 && args[0] == "--downloadmodel")
-            {
-                AppConfig.Load();
-                string first = ModelDownload.Start(args[1]);
-                DateTime t0 = DateTime.Now;
-                while (ModelDownload.Running && (DateTime.Now - t0).TotalSeconds < 360) System.Threading.Thread.Sleep(200);
-                string res = "start=" + first + "\r\nfinal status=" + ModelDownload.Status
-                    + " percent=" + ModelDownload.Percent + " running=" + ModelDownload.Running
-                    + "\r\nzip left=" + (System.IO.Directory.Exists(System.IO.Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan", "download")));
-                if (args.Length >= 3) System.IO.File.WriteAllText(args[2], res, Encoding.UTF8);
                 return;
             }
 
