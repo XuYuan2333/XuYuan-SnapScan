@@ -320,6 +320,26 @@
     $("btnRecheck").addEventListener("click", recheck);
     $("btnRecheck2").addEventListener("click", recheck);
 
+    // 导入模型包：弹一个选 zip 的框，后端解开后直接落到 OCR Model 目录
+    $("btnImportModel").addEventListener("click", async () => {
+      const btn = $("btnImportModel");
+      if (btn.disabled) return;
+      btn.disabled = true;
+      $("status").textContent = "正在导入模型包…";
+      try {
+        const r = await api("importmodel", {});
+        if (r && r.state) applyState(r.state);
+        const msg = (r && r.msg) ? r.msg : "导入完成";
+        toast(msg);
+        $("status").textContent = msg;
+      } catch (e) {
+        toast("导入失败：" + e);
+        $("status").textContent = "导入失败";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
     bindHotkeyRecorder($("hkQrInput"), "qr");
     bindHotkeyRecorder($("hkOcrInput"), "ocr");
 
