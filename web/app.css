@@ -444,34 +444,7 @@ html, body {
 html, body, .side, .drawer-body, .result-box, .engine-list { scrollbar-width: none; -ms-overflow-style: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, .side::-webkit-scrollbar, .drawer-body::-webkit-scrollbar, .result-box::-webkit-scrollbar, .engine-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
-/* 模型下载进度条（设置抽屉顶部，只在下载时出现） */
-.dl-progress {
-  margin: 0 18px 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(120, 140, 200, 0.10);
-}
-.dl-bar {
-  height: 8px;
-  border-radius: 6px;
-  background: rgba(120, 140, 200, 0.18);
-  overflow: hidden;
-}
-.dl-bar i {
-  display: block;
-  height: 100%;
-  width: 0;
-  border-radius: 6px;
-  background: linear-gradient(90deg, #7aa2ff, #9b7bff);
-  transition: width .25s linear;
-}
-.dl-progress span {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: #5b6070;
-  word-break: break-all;
-}
+
 /* 译文遮罩不透明度：彩虹底 + 实时预览 */
 .mask-preview {
   margin: 8px 0 10px;
