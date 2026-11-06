@@ -72,8 +72,10 @@ namespace QRSnap
         // 记住上一次的译文，Ctrl+Alt+G 才能在关掉之后再打开
         private static Rectangle _lastRect;
         private static List<Item> _lastItems = new List<Item>();
+        private static Bitmap _lastImage;      // 拟真模式：整块成品图
 
         private readonly List<Item> _items = new List<Item>();
+        private Bitmap _image;
         private bool _closing;
 
         private TransOverlay()
@@ -116,15 +118,44 @@ namespace QRSnap
             }
             _inst._items.Clear();
             if (items != null) _inst._items.AddRange(items);
+            _inst.SetImage(null);
             _lastRect = screenRect;
             _lastItems = new List<Item>();
             if (items != null) _lastItems.AddRange(items);
+            _lastImage = null;
             _inst._closing = false;
             _inst.Bounds = screenRect;
             _inst.Visible = true;
             _inst.RenderAll();
             _inst.HookOn();
             BarShow(screenRect);
+        }
+
+        // 拟真模式：整块成品图（原图擦掉原字 + 回填译文）直接铺在选区上
+        public static void ShowImage(Rectangle screenRect, Bitmap img)
+        {
+            if (img == null || screenRect.Width < 8 || screenRect.Height < 8) return;
+            if (_inst == null || _inst.IsDisposed)
+            {
+                _inst = new TransOverlay();
+                _inst.CreateControl();
+            }
+            _inst._items.Clear();
+            _inst.SetImage(img);
+            _lastRect = screenRect;
+            _lastItems = new List<Item>();
+            _lastImage = img;
+            _inst._closing = false;
+            _inst.Bounds = screenRect;
+            _inst.Visible = true;
+            _inst.RenderAll();
+            _inst.HookOn();
+            BarShow(screenRect);
+        }
+
+        private void SetImage(Bitmap img)
+        {
+            _image = img;
         }
 
         // 改了遮罩透明度等外观参数后立刻重画（不用关掉再重开）
@@ -140,6 +171,7 @@ namespace QRSnap
         public static void Toggle()
         {
             if (IsShowing) { HideOverlay(); return; }
+            if (_lastImage != null) { ShowImage(_lastRect, _lastImage); return; }
             if (_lastItems.Count == 0) return;
             Show(_lastRect, _lastItems);
         }
@@ -262,7 +294,16 @@ namespace QRSnap
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.Clear(Color.Transparent);
 
-                for (int i = 0; i < _items.Count; i++) DrawItem(g, _items[i], w, h);
+                if (_image != null)
+                {
+                    // 拟真：整块成品图铺满选区
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(_image, new Rectangle(0, 0, w, h));
+                }
+                else
+                {
+                    for (int i = 0; i < _items.Count; i++) DrawItem(g, _items[i], w, h);
+                }
             }
             Commit(bmp);
             bmp.Dispose();
@@ -300,12 +341,12 @@ namespace QRSnap
             float radius = Math.Min(bg.Height / 2f, 6f);
             int maskA = AppConfig.NormalizeMtMaskAlpha(AppConfig.MtMaskAlpha);
             int fillA = (int)Math.Round(255.0 * maskA / 100.0);
-            int edgeA = (int)Math.Round(110.0 * maskA / 100.0);
+            int edgeA = (int)Math.Round(52.0 * maskA / 100.0);
             using (GraphicsPath path = RoundRect(bg, radius))
             {
                 using (SolidBrush fill = new SolidBrush(Color.FromArgb(fillA, 14, 18, 26)))
                     g.FillPath(fill, path);
-                using (Pen edge = new Pen(Color.FromArgb(edgeA, 96, 165, 250), 1f))
+                using (Pen edge = new Pen(Color.FromArgb(edgeA, 108, 128, 158), 1f))
                     g.DrawPath(edge, path);
             }
 
@@ -313,7 +354,7 @@ namespace QRSnap
             float tx = bg.X + padX;
             float ty = bg.Y + bg.Height / 2f;
 
-            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
                 g.DrawString(it.Text, font, shadow, tx + 1f, ty + 1f, sf);
             using (SolidBrush brush = new SolidBrush(Color.FromArgb(248, 246, 249, 255)))
                 g.DrawString(it.Text, font, brush, tx, ty, sf);
