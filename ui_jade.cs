@@ -268,11 +268,22 @@ namespace QRSnap
 
         private void HotkeyCapture(string mode)
         {
+            // 框选还没结束又按了一次热键：直接忽略。否则会叠出好几层遮罩，
+            // Esc 只能关掉最上面那层，看起来就像“按了没反应”。
+            if (!JadeHost.TryEnterCapture()) return;
+
             ThreadPool.QueueUserWorkItem(delegate
             {
-                JadeHost.HideWindow();
-                Thread.Sleep(160);
-                JadeHost.RunCapture(mode, true);
+                try
+                {
+                    JadeHost.HideWindow();
+                    Thread.Sleep(160);
+                    JadeHost.RunCapture(mode, true);
+                }
+                finally
+                {
+                    JadeHost.LeaveCapture();
+                }
             });
         }
 
@@ -316,7 +327,11 @@ namespace QRSnap
             CaptureSession session = new CaptureSession();
             session.Freehand = AppConfig.Freehand;
 
-            if (_toast != null) _toast.ShowBusy(mode == "qr" ? "正在识码…" : "正在识字…");
+            // 截屏前先把提示条收掉。原来这里直接 ShowBusy，结果上一轮还没消失的
+            // “识别完成 / 正在识别”会被一起拍进截图里，框选时也能看到这块残留。
+            if (_toast != null) _toast.HideToast();
+            try { Native.FlushComposition(); } catch (Exception) { }
+            Thread.Sleep(40);
 
             session.Run();
             Bitmap crop = session.Crop;
@@ -742,7 +757,7 @@ namespace QRSnap
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
                 return "v" + v.Major + "." + v.Minor + "." + v.Build + "." + v.Revision;
             }
-            catch (Exception) { return "v1.1.6.0"; }
+            catch (Exception) { return "v1.1.7.0"; }
         }
 
         private static string HotkeyQrText() { return AppConfig.HotkeyQr; }
@@ -913,12 +928,36 @@ namespace QRSnap
         // 热键路径的截图（在 WinForms 线程上跑，结果通过 send_ipc_message 推给前端）
         internal static string RunCapture(string mode, bool fromHotkey)
         {
-            bool cancelled;
-            string json = _shell.CaptureSync(mode, fromHotkey, out cancelled);
+            bool cancelled = false;
+            string json = null;
+            try
+            {
+                json = _shell.CaptureSync(mode, fromHotkey, out cancelled);
+            }
+            finally
+            {
+                // 关键：无论成功、失败、Esc 取消还是中途异常，都必须把主窗口放回来。
+                // 原来这里先 if (json == null) return null; 再 ShowWindow，取消时直接返回，
+                // 窗口就永远留在隐藏状态——用户只能去杀进程。
+                ShowWindow(mode == "qr" ? AppConfig.RestoreAfterQr : AppConfig.RestoreWin);
+            }
+
             if (json == null) return null;
-            ShowWindow(mode == "qr" ? AppConfig.RestoreAfterQr : AppConfig.RestoreWin);
             Send("capture-done", json);
             return json;
+        }
+
+        // 同一时间只允许一个截屏会话
+        private static int _capturing;
+
+        internal static bool TryEnterCapture()
+        {
+            return System.Threading.Interlocked.CompareExchange(ref _capturing, 1, 0) == 0;
+        }
+
+        internal static void LeaveCapture()
+        {
+            System.Threading.Interlocked.Exchange(ref _capturing, 0);
         }
     }
 
