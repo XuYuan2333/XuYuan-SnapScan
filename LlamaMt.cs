@@ -60,6 +60,12 @@ internal static class LlamaMt
         get { return RuntimeReady ? "" : "缺少 llama.cpp 运行时（llama-server.exe），翻译用不了"; }
     }
 
+    // 引擎进程是否已经驻留：空闲释放后是 false，第一次翻译要等它重新加载
+    public static bool ServerRunning
+    {
+        get { try { return _proc != null && !_proc.HasExited; } catch (Exception) { return false; } }
+    }
+
     private static int FreePort()
     {
         TcpListener l = new TcpListener(IPAddress.Loopback, 0);
