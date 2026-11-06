@@ -27,6 +27,17 @@
     root.style.setProperty("--glass-blur", (2 + f * 2) + "px");
   }
 
+  // 译文模式：效率走遮罩块，拟真走擦除+回填成品图；不透明度只对效率有意义
+  function applyMtMode(mode) {
+    const real = mode === "realistic";
+    const pv = $("maskPreview");
+    const row = $("rowMtAlpha");
+    const n1 = $("noteMtAlpha");
+    if (pv) pv.style.display = real ? "none" : "";
+    if (row) row.style.display = real ? "none" : "";
+    if (n1) n1.style.display = real ? "none" : "";
+  }
+
   function applyState(s) {
     if (!s || typeof s !== "object") return;
     S = s;
@@ -59,6 +70,8 @@
     if ($("swMtBar")) $("swMtBar").checked = c.mtbar !== false;
     if ($("selMtPerf")) $("selMtPerf").value = c.mtperf || "balanced";
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
+    if ($("selMtMode")) $("selMtMode").value = c.mtmode === "realistic" ? "realistic" : "efficiency";
+    applyMtMode(c.mtmode === "realistic" ? "realistic" : "efficiency");
     if ($("rngMtAlpha")) {
       const a = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
       $("rngMtAlpha").value = a;
@@ -421,6 +434,11 @@
     $("selMtLang").addEventListener("change", (e) => setConfig({ mtlang: e.target.value }));
     $("swMtBar").addEventListener("change", (e) => setConfig({ mtbar: e.target.checked }));
     $("selMtPerf").addEventListener("change", (e) => setConfig({ mtperf: e.target.value }));
+
+    if ($("selMtMode")) $("selMtMode").addEventListener("change", (e) => {
+      applyMtMode(e.target.value);
+      setConfig({ mtmode: e.target.value });
+    });
 
     $("numMtIdle").addEventListener("change", (e) => {
       let v = parseInt(e.target.value, 10);
