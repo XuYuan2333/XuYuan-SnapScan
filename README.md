@@ -7,7 +7,8 @@
 - **截图识码**：圈选屏幕任意区域，自动识别二维码 / 条形码
 - **截图识字**：支持自由圈选（任意形状）或方形框选，圈住即识别
 - **全局快捷键**：`Ctrl+Alt+D` 截图识码，`Ctrl+Alt+X` 截图识字（可自定义）
-- **多识别引擎**：微信 OCR（推荐）/ PP-OCR 极速 / PP-OCR 标准 / PP-OCR 高精 / Windows 内置 OCR，设置里下拉选择，缺模型的项置灰
+- **多识别引擎**：微信 OCR（推荐）/ PP-OCR 极速 / PP-OCR 标准 / PP-OCR 高精 / Windows 内置 OCR，设置里选择，缺模型的项置灰
+- **导入模型包**：设置里点一下、选个 zip 就装好引擎，不用自己解压、不用挪目录
 - **界面**：JadeView 2.0 + HTML/CSS/JS（复用系统 WebView2，不打包浏览器内核），软件图标 + 背景图 + 毛玻璃
 - **无托盘**：程序只以任务栏按钮存在，关窗口＝退出
 - **外观可调**：设置里实时调节「透明度」（0–100，默认 30）与「毛玻璃强度」（0–20，默认 3）
@@ -15,30 +16,29 @@
 
 ## 下载哪个包
 
-分成两层：**程序本体**（每次版本更新）+ **模型包**（下过一次就不用再下）。
+分成两层：**程序本体**（每次更新都换）+ **模型包**（下过一次就够了，换版本不用重下）。
 
-1. 下最新的 `SnapScan-v1.1.7-Body.zip`（本体，约 4.7 MB），解压得到 `QRSnap.exe`
-2. 按下面表格挑一个模型包，解压到**同一个目录**，让 `QRSnap.exe` 旁边出现 `OCR Model` 文件夹
-3. 双击 `QRSnap.exe`
+1. 下 `SnapScan-v1.1.8-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
+2. 想要哪个引擎，就下对应那个模型包（**不用解压**，zip 原样留着）
+3. 打开软件 → 右上角齿轮 → 设置里的「识别引擎」→ 点「导入模型包」→ 选中刚下的 zip
+4. 导入完列表立刻能选，不用重启
 
-> **以后出新版本只需要覆盖 `QRSnap.exe`**：模型包固定在 v1.1.6 那个 Release 里，不会随版本重新打包上传。
+> 只想用它认字、又不挑引擎的话，本体直接就能跑：会用 Windows 系统自带的 OCR 兜底。
 
-| 你想要的 | 模型包（v1.1.6 固定） | 大小 | 说明 |
+| 你想要的 | 下载这个模型包 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（**推荐**） | `SnapScan-v1.1.6-WeChatOCR.zip` | 24.4 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | `SnapScan-v1.1.6-PP-OCR-Tiny.zip` | 12.3 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | `SnapScan-v1.1.6-PP-OCR-Small.zip` | 31.8 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | `SnapScan-v1.1.6-PP-OCR-Medium.zip` | 102.8 MB | PP-OCR medium，体积最大 |
-| 完全不想下模型 | `SnapScan-v1.1.6-WindowsOCR-only.zip` | 2.5 MB | 只用系统自带 OCR |
+| 中文最准（**推荐**） | `SnapScan-Model-WeChatOCR-v1.1.8.zip` | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | `SnapScan-Model-PP-OCR-Tiny-v1.1.8.zip` | 9.8 MB | PP-OCR tiny，约 200 ms |
+| 均衡（中英混排都稳） | `SnapScan-Model-PP-OCR-Small-v1.1.8.zip` | 29.3 MB | PP-OCR small |
+| 高精度（小字、复杂排版） | `SnapScan-Model-PP-OCR-Medium-v1.1.8.zip` | 100.3 MB | PP-OCR medium，体积最大 |
+| 完全不想下模型 | （不下） | 0 | 直接用 Windows 系统 OCR |
 
-> 只有 PP-OCR 的三个包需要 `onnxruntime.dll`；微信 OCR / Windows OCR 包不带推理库，所以体积更小。
-> 这些模型包里的 `QRSnap.exe` 是 v1.1.6 的，覆盖成最新本体的 exe 即可。
-
-想同时要多个引擎，就下多个包，把它们 `OCR Model` 目录里的子文件夹互相拷到一起即可
-（例如把 `PP-OCR\tiny` 拷进微信 OCR 包的 `OCR Model\PP-OCR\` 下），设置里就会多出一项。
+> 模型包只含 `OCR Model`（PP-OCR 三档另带一份推理库），导入后模型进 `QRSnap.exe` 同级的 `OCR Model`，推理库放到 exe 旁边。
+> 想同时用多个引擎，就依次把几个模型包都导入一遍，互不覆盖，设置里会一项项多出来。
 
 ## 版本变更
 
+- **v1.1.8**：新增「导入模型包」——设置里选一个 zip，程序自己把模型落进 `OCR Model` 目录并刷新引擎列表；发行方式改成本体 + 纯模型包（模型包不含 exe，只要下过一次，换版本不用重下）
 - **v1.1.7**：修 Esc 取消截屏后主窗口不再出现（取消/失败/异常都会还原窗口，且框选期间把 Esc 注册成系统热键，遮罩没抢到焦点也能取消）；修截屏会拍到上一轮「识别中／识别完成」提示（抓屏前先清提示条并等 DWM 合成）；提示条移到屏幕居中靠下，改成 30 ms 帧的淡入上滑 + 淡出下滑、渐变底加细描边；框选期间重复按热键不再叠出多层遮罩
 - **v1.1.6**：删除托盘图标与「隐藏＝最小化」；关闭主窗口即退出程序；截图期间真正隐藏窗口，结束后按原状态还原（勾选「显示本软件窗口」才强制置顶）；分引擎包去掉用不到的 onnxruntime（微信包 28.8→24.4 MB，Windows 包 6.9→2.5 MB）
 - **v1.1.5**：JadeView 2.0 网页界面重做、微信 OCR 随包离线、按引擎分包
@@ -62,7 +62,7 @@ onnxruntime.dll               OCR 推理原生库
 System.Memory.dll / System.Buffers.dll / System.Numerics.Vectors.dll
 System.Runtime.CompilerServices.Unsafe.dll
 XuYuan-SnapScan_config.ini    配置（首次运行自动生成）
-OCR Model\                    模型根目录，只认这一处
+OCR Model\                    模型根目录，只认这一处（导入模型包时就落在这里）
   PP-OCR\tiny\    det.onnx / rec.onnx / keys.txt    PP-OCRv6 Tiny   约 6 MB
   PP-OCR\small\   ...                              PP-OCRv6 Small  约 30 MB
   PP-OCR\medium\  ...                              PP-OCRv6 Medium 约 132 MB
@@ -72,15 +72,15 @@ OCR Model\                    模型根目录，只认这一处
     plugin\wxocr.dll + text_det / text_rec .xnet + paragraph_det + 字符表
 ```
 
-> 模型不放 exe 里，是因为 medium 一档就 132 MB。程序**只扫描 exe 同级的 `OCR Model` 目录**
-> （或 ini 里显式写的 `modeldir=`），目录里没有的引擎在设置里直接置灰不可选。
+> 模型不放 exe 里，是因为 medium 一档就 132 MB。程序**只扫描 exe 同级的 `OCR Model` 目录**，
+> 目录里没有的引擎在设置里直接置灰不可选；「导入模型包」就是往这个目录里放东西。
 
 ## 使用
 
 1. 解压后双击 QRSnap.exe（没有托盘图标；关掉窗口就是退出程序，不留后台）
 2. 按 `Ctrl+Alt+D` 截图识码，`Ctrl+Alt+X` 截图识字
 3. 圈选区域后自动识别，结果显示在主窗口
-4. 点右上角齿轮进设置：切换引擎、开关自由圈选、改快捷键、调透明度 / 毛玻璃
+4. 点右上角齿轮进设置：切换引擎、导入模型包、开关自由圈选、改快捷键、调透明度 / 毛玻璃
 5. 截图时本窗口会先隐藏，截完按原状态还原（原来最小化就仍最小化、原来被挡住就仍被挡住）；设置里勾了「显示本软件窗口」才强制提到最前
 
 ## 识别引擎说明
