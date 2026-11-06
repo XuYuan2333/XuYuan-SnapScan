@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.1.6.0")]
-[assembly: AssemblyFileVersion("1.1.6.0")]
+[assembly: AssemblyVersion("1.1.7.0")]
+[assembly: AssemblyFileVersion("1.1.7.0")]
 
 namespace QRSnap
 {
@@ -95,6 +95,21 @@ namespace QRSnap
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetFocus(IntPtr hWnd);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmFlush();
 
@@ -130,6 +145,34 @@ namespace QRSnap
             if (hWnd == IntPtr.Zero) return;
             ShowWindow(hWnd, SW_RESTORE);
             SetForegroundWindow(hWnd);
+        }
+
+        // 强制把某个窗口变成前台并拿到键盘焦点。
+        // 直接 SetForegroundWindow 会被系统的前台锁拦下（尤其从隐藏状态刚恢复时），
+        // 遮罩拿不到焦点，Esc 就送不到它手里；AttachThreadInput 能绕过这个限制。
+        public static bool ForceForeground(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return false;
+            uint pid = 0;
+            IntPtr fg = GetForegroundWindow();
+            uint fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out pid);
+            uint myThread = GetCurrentThreadId();
+            bool attached = false;
+            try
+            {
+                if (fgThread != 0 && fgThread != myThread)
+                {
+                    attached = AttachThreadInput(fgThread, myThread, true);
+                }
+                BringWindowToTop(hWnd);
+                SetForegroundWindow(hWnd);
+                SetFocus(hWnd);
+                return GetForegroundWindow() == hWnd;
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(fgThread, myThread, false);
+            }
         }
 
         public static void ActivateWindow(string title)
@@ -1982,6 +2025,9 @@ namespace QRSnap
         private readonly List<MonitorShot> _shots = new List<MonitorShot>();
         private readonly List<OverlayForm> _forms = new List<OverlayForm>();
 
+        private const int ESC_HOTKEY_ID = 0x5A53;
+        private IntPtr _escHotkeyHwnd = IntPtr.Zero;
+
         public Rectangle Selection = Rectangle.Empty;
         public bool Done;
         public bool Confirmed;
@@ -2065,8 +2111,26 @@ namespace QRSnap
                 Dbg("forms shown=" + _forms.Count);
 
                 OverlayForm focus = PickFocusForm();
-                if (focus != null) Native.BringToFront(focus.Handle);
-                Dbg("focus brought");
+                if (focus != null)
+                {
+                    // 遮罩必须真的拿到键盘焦点：直接从隐藏状态弹出来时，SetForegroundWindow
+                    // 常被前台锁拦掉，Esc 就被别的程序吃走了（表现为“按 Esc 没反应”）。
+                    bool ok = Native.ForceForeground(focus.Handle);
+                    for (int i = 0; i < 3 && !ok; i++)
+                    {
+                        Thread.Sleep(30);
+                        ok = Native.ForceForeground(focus.Handle);
+                    }
+                    Dbg("focus brought ok=" + ok);
+
+                    // 焦点不保险，就把 Esc 临时注册成系统热键：走 WM_HOTKEY → WndProc 取消，
+                    // 无论谁在前台、遮罩有没有焦点都能取消。
+                    if (Native.RegisterHotKey(focus.Handle, ESC_HOTKEY_ID, 0, 0x1B))
+                    {
+                        _escHotkeyHwnd = focus.Handle;
+                        Dbg("esc hotkey registered");
+                    }
+                }
 
                 int started = Environment.TickCount;
                 while (!Done)
@@ -2079,6 +2143,13 @@ namespace QRSnap
             }
             finally
             {
+                if (_escHotkeyHwnd != IntPtr.Zero)
+                {
+                    try { Native.UnregisterHotKey(_escHotkeyHwnd, ESC_HOTKEY_ID); }
+                    catch (Exception) { }
+                    _escHotkeyHwnd = IntPtr.Zero;
+                }
+
                 foreach (OverlayForm form in _forms)
                 {
                     if (!form.IsDisposed)
@@ -2359,6 +2430,8 @@ namespace QRSnap
 
         public MonitorShot Shot { get { return _shot; } }
 
+        private const int WM_HOTKEY = 0x0312;
+
         public OverlayForm(CaptureSession session, MonitorShot shot)
         {
             _session = session;
@@ -2548,6 +2621,17 @@ namespace QRSnap
             return new Rectangle(x, y, w, h);
         }
 
+        protected override void WndProc(ref Message m)
+        {
+            // 框选期间 Esc 是注册过的系统热键，走 WM_HOTKEY 进来，不依赖窗口有没有键盘焦点
+            if (m.Msg == WM_HOTKEY)
+            {
+                _session.Cancel();
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if (keyData == Keys.Escape)
@@ -2666,11 +2750,15 @@ namespace QRSnap
 
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
+        private const int WS_EX_TRANSPARENT = 0x00000020;   // 提示条只用于看，不让它挡住鼠标点击
 
         private const int PAD_X = 16;
         private const int ICON_SIZE = 18;
         private const int GAP = 10;
         private const int BOX_H = 46;
+
+        private const int TICK_MS = 30;      // 30ms 一帧，比原来的 60ms 顺滑
+        private const int SLIDE_PX = 14;     // 进场时从下方 14px 滑上来
 
         private readonly System.Windows.Forms.Timer _timer;
         private float _angle;
@@ -2678,6 +2766,9 @@ namespace QRSnap
         private string _text = string.Empty;
         private bool _ok = true;
         private int _holdMs;
+        private int _anim;                   // 0 静止 / 1 进场 / 2 出场
+        private float _animT;
+        private int _restTop;                // 静止时的最终 Top
 
         public ToastForm()
         {
@@ -2691,7 +2782,7 @@ namespace QRSnap
             Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
 
             _timer = new System.Windows.Forms.Timer();
-            _timer.Interval = 60;
+            _timer.Interval = TICK_MS;
             _timer.Tick += OnTick;
         }
 
@@ -2705,33 +2796,48 @@ namespace QRSnap
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT;
                 return cp;
             }
         }
 
         public void ShowBusy(string text)
         {
-            SetText(text);
-            _state = STATE_BUSY;
-            _ok = true;
-            _holdMs = 0;
-            _angle = 0f;
-            PlaceToast();
-            if (!Visible) Show();
-            BringToFront();
-            _timer.Start();
-            Invalidate();
+            Present(text, STATE_BUSY, true, 0);
         }
 
         public void ShowDone(string text, bool ok)
         {
+            Present(text, STATE_DONE, ok, 1700);
+        }
+
+        // 统一入口：第一次出现走「淡入 + 上滑」；已经在屏幕上（比如 识别中 → 识别完成）就地换内容，不重播动画
+        private void Present(string text, int state, bool ok, int holdMs)
+        {
+            bool wasVisible = Visible;
             SetText(text);
-            _state = STATE_DONE;
+            _state = state;
             _ok = ok;
-            _holdMs = 1700;
+            _holdMs = holdMs;
+            _angle = 0f;
             PlaceToast();
-            if (!Visible) Show();
+
+            if (!wasVisible)
+            {
+                Opacity = 0.0;
+                Top = _restTop + SLIDE_PX;
+                Show();
+                _anim = 1;
+                _animT = 0f;
+            }
+            else
+            {
+                Opacity = 0.95;
+                Top = _restTop;
+                _anim = 0;
+                _animT = 0f;
+            }
+
             BringToFront();
             _timer.Start();
             Invalidate();
@@ -2740,7 +2846,11 @@ namespace QRSnap
         public void HideToast()
         {
             _state = STATE_IDLE;
+            _anim = 0;
+            _animT = 0f;
+            _holdMs = 0;
             _timer.Stop();
+            Opacity = 0.95;                  // 复位，下次 Present 再从 0 淡入
             if (Visible) Hide();
         }
 
@@ -2748,31 +2858,56 @@ namespace QRSnap
         {
             _text = text;
             Size size = TextRenderer.MeasureText(text, Font);
-            int w = PAD_X * 2 + ICON_SIZE + GAP + size.Width + 8;
+            int w = PAD_X * 2 + ICON_SIZE + GAP + size.Width + 10;
             if (w < 150) w = 150;
             Size = new Size(w, BOX_H);
         }
 
+        // 居中靠下：在鼠标所在那块屏上水平居中，离工作区底边留一点距离
         private void PlaceToast()
         {
             Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Left = wa.Right - Width - 28;
-            Top = wa.Bottom - Height - 104;
+            Left = wa.Left + (wa.Width - Width) / 2;
+            if (Left < wa.Left + 8) Left = wa.Left + 8;
+            _restTop = wa.Bottom - Height - 56;
+            Top = _restTop;
+        }
+
+        private static float EaseOut(float t)
+        {
+            float u = 1f - t;
+            return 1f - u * u * u;           // 先快后慢，收尾柔和
         }
 
         private void OnTick(object sender, EventArgs e)
         {
+            if (_anim == 1)
+            {
+                _animT += 0.12f;
+                if (_animT >= 1f) { _animT = 1f; _anim = 0; }
+                float t = EaseOut(_animT);
+                Opacity = 0.95f * t;
+                Top = _restTop + (int)(SLIDE_PX * (1f - t));
+            }
+            else if (_anim == 2)
+            {
+                _animT += 0.10f;
+                if (_animT >= 1f) { HideToast(); return; }
+                Opacity = 0.95f * (1f - _animT);
+                Top = _restTop + (int)(8f * _animT);
+            }
+
             if (_state == STATE_BUSY)
             {
-                _angle += 15f;
+                _angle += 9f;
                 if (_angle > 360f) _angle -= 360f;
                 Invalidate();
                 return;
             }
-            if (_state == STATE_DONE)
+            if (_state == STATE_DONE && _anim == 0)
             {
-                _holdMs -= _timer.Interval;
-                if (_holdMs <= 0) HideToast();
+                _holdMs -= TICK_MS;
+                if (_holdMs <= 0) { _anim = 2; _animT = 0f; }
             }
         }
 
@@ -2804,9 +2939,17 @@ namespace QRSnap
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-            using (SolidBrush bg = new SolidBrush(Color.FromArgb(30, 36, 48)))
+            // 竖向渐变 + 一圈细内描边，比纯色块更有质感
+            using (LinearGradientBrush bg = new LinearGradientBrush(
+                new Rectangle(0, 0, Width, Height + 1),
+                Color.FromArgb(40, 46, 60), Color.FromArgb(20, 24, 32), 90f))
             {
                 g.FillRectangle(bg, ClientRectangle);
+            }
+            using (GraphicsPath edge = Rounded(0, 0, Width - 1, Height - 1, 9))
+            using (Pen pen = new Pen(Color.FromArgb(72, 86, 106), 1F))
+            {
+                g.DrawPath(pen, edge);
             }
 
             int cy = (Height - ICON_SIZE) / 2;
@@ -3711,7 +3854,7 @@ namespace QRSnap
 
         private static string VersionLine()
         {
-            string ver = "1.1.6.0";
+            string ver = "1.1.7.0";
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
