@@ -398,6 +398,8 @@ namespace QRSnap
         public static string MtPerf = MtPerfBalanced;
         public const int DefaultMtIdle = 30;             // 闲置多少秒没翻译就卸载翻译服务（0 = 不自动卸载）
         public static int MtIdle = DefaultMtIdle;
+        public const int DefaultMtMaskAlpha = 100;       // 译文遮罩不透明度（0-100，100=完全不透明）
+        public static int MtMaskAlpha = DefaultMtMaskAlpha;
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -475,6 +477,14 @@ namespace QRSnap
             return v;
         }
 
+        // 译文遮罩不透明度：夹在 0–100
+        public static int NormalizeMtMaskAlpha(int v)
+        {
+            if (v < 0) return 0;
+            if (v > 100) return 100;
+            return v;
+        }
+
         public static void Load()
         {
             HotkeyQr = DefaultHotkeyQr;
@@ -496,6 +506,7 @@ namespace QRSnap
             MtBar = true;
             MtPerf = MtPerfBalanced;
             MtIdle = DefaultMtIdle;
+            MtMaskAlpha = DefaultMtMaskAlpha;
             Legacy = false;
             try
             {
@@ -542,6 +553,11 @@ namespace QRSnap
                         int iv;
                         if (int.TryParse(v, out iv)) MtIdle = NormalizeMtIdle(iv);
                     }
+                    else if (k.Equals("mtalpha", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int av;
+                        if (int.TryParse(v, out av)) MtMaskAlpha = NormalizeMtMaskAlpha(av);
+                    }
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
@@ -574,6 +590,7 @@ namespace QRSnap
             sb.Append("mtbar=").Append(MtBar ? "1" : "0").Append("\r\n");
             sb.Append("mtperf=").Append(MtPerf).Append("\r\n");
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
+            sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
