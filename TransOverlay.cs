@@ -127,6 +127,15 @@ namespace QRSnap
             BarShow(screenRect);
         }
 
+        // 改了遮罩透明度等外观参数后立刻重画（不用关掉再重开）
+        public static void Repaint()
+        {
+            if (!IsShowing) return;
+            _inst._items.Clear();
+            if (_lastItems != null) _inst._items.AddRange(_lastItems);
+            _inst.RenderAll();
+        }
+
         // Ctrl+Alt+G：整层译文显示 / 隐藏
         public static void Toggle()
         {
@@ -268,15 +277,17 @@ namespace QRSnap
             if (box.Bottom > h) box.Height = h - box.Y;
             if (box.Width < 6 || box.Height < 6) return;
 
-            Font font = FitFont(g, it.Text, box.Width, box.Height);
+            // 底板严格用原文本框：从原文起笔到收笔的长宽高，不跟着译文长度变
+            float padX = Math.Max(2f, box.Height * 0.06f);
+            RectangleF bg = new RectangleF(box.X, box.Y, box.Width, box.Height);
+
+            Font font = FitFont(g, it.Text, (int)Math.Max(8f, bg.Width - padX * 2f), (int)Math.Max(8f, bg.Height));
             if (font == null) return;
             StringFormat sf = new StringFormat();
             sf.Alignment = StringAlignment.Near;
-            sf.LineAlignment = StringAlignment.Near;
+            sf.LineAlignment = StringAlignment.Center;
             sf.Trimming = StringTrimming.None;
             sf.FormatFlags = StringFormatFlags.NoWrap;
-
-            SizeF ts = g.MeasureString(it.Text, font, new PointF(0, 0), sf);
 
             float cx = box.X + box.Width / 2f;
             float cy = box.Y + box.Height / 2f;
@@ -286,25 +297,26 @@ namespace QRSnap
             if (Math.Abs(it.Angle) >= 1.5f) g.RotateTransform(it.Angle);
             g.TranslateTransform(-cx, -cy);
 
-            float padX = Math.Max(3f, font.Size * 0.4f);
-            float padY = Math.Max(3f, font.Size * 0.3f);
-            RectangleF bg = new RectangleF(cx - ts.Width / 2f - padX, cy - ts.Height / 2f - padY,
-                ts.Width + padX * 2f, ts.Height + padY * 2f);
-            float radius = Math.Min(bg.Height / 2f, 8f);
-
+            float radius = Math.Min(bg.Height / 2f, 6f);
+            int maskA = AppConfig.NormalizeMtMaskAlpha(AppConfig.MtMaskAlpha);
+            int fillA = (int)Math.Round(255.0 * maskA / 100.0);
+            int edgeA = (int)Math.Round(110.0 * maskA / 100.0);
             using (GraphicsPath path = RoundRect(bg, radius))
             {
-                using (SolidBrush fill = new SolidBrush(Color.FromArgb(214, 12, 16, 24)))
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(fillA, 14, 18, 26)))
                     g.FillPath(fill, path);
-                using (Pen edge = new Pen(Color.FromArgb(110, 96, 165, 250), 1f))
+                using (Pen edge = new Pen(Color.FromArgb(edgeA, 96, 165, 250), 1f))
                     g.DrawPath(edge, path);
             }
 
-            // 文本本体（白字 + 一点点暗描边，压住亮背景）
+            // 译文一律贴着底板左侧起排（留一点点边距），不居中
+            float tx = bg.X + padX;
+            float ty = bg.Y + bg.Height / 2f;
+
             using (SolidBrush shadow = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
-                g.DrawString(it.Text, font, shadow, cx - ts.Width / 2f + 1f, cy - ts.Height / 2f + 1f, sf);
+                g.DrawString(it.Text, font, shadow, tx + 1f, ty + 1f, sf);
             using (SolidBrush brush = new SolidBrush(Color.FromArgb(248, 246, 249, 255)))
-                g.DrawString(it.Text, font, brush, cx - ts.Width / 2f, cy - ts.Height / 2f, sf);
+                g.DrawString(it.Text, font, brush, tx, ty, sf);
 
             g.Restore(gs);
             font.Dispose();
