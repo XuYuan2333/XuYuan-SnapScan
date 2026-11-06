@@ -132,11 +132,6 @@
     <button class="icon-btn" id="btnCloseDrawer" title="关闭">✕</button>
   </div>
 
-  <div class="dl-progress" id="dlProgress" style="display:none;">
-    <div class="dl-bar"><i id="dlBar"></i></div>
-    <span id="dlText">准备下载…</span>
-  </div>
-
   <div class="drawer-body">
 
     <div class="acc open">
@@ -161,9 +156,8 @@
         <div class="row-btns">
           <button class="btn ghost" id="btnRecheck2">重新检测</button>
           <button class="btn" id="btnImportModel">导入模型包</button>
-          <button class="btn ghost" id="btnDownloadModels">下载缺失模型</button>
         </div>
-        <div class="group-note">模型包（.zip）不用自己解压挪目录，点「导入模型包」选一下就行。</div>
+        <div class="group-note">模型包（.zip）不用自己解压挪目录，点「导入模型包」选一下就行；包从 GitHub 发布页手动下。</div>
       </div>
     </div>
 
@@ -175,9 +169,8 @@
         <div class="group-note" id="mtNote">翻译模型放在「MT Model」目录，一个 .gguf 就够。当前用的是混元 Hy-MT1.5-1.8B（Q4_K_M，约 1.08 GB）：英→中 / 日→中 / 俄→中 最稳，其余 30 种语言也能直连，不用按语言对分文件夹。</div>
         <div class="row-btns">
           <button class="btn" id="btnImportMt">导入翻译模型包</button>
-          <button class="btn ghost" id="btnDownloadMt">下载翻译模型</button>
         </div>
-        <div class="group-note">支持只含一个 .gguf 的 zip（如 Hy-MT1.5），或旧式 en-zh 目录包（带 model.json / encoder+decoder）。不用单独开关：扫到模型就能用，没有模型整块自动置灰。</div>
+        <div class="group-note">支持只含一个 .gguf 的 zip（如 Hy-MT1.5），或旧式 en-zh 目录包（带 model.json / encoder+decoder）。模型包从 GitHub 发布页手动下，不用单独开关：扫到模型就能用，没有模型整块自动置灰。</div>
 
         <div class="sub-title">目标语言</div>
         <label class="field">
