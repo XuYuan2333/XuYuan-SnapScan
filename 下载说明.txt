@@ -1,17 +1,15 @@
-﻿# 下载说明 · XuYuan-SnapScan v1.1.9
+# 下载说明 · XuYuan-SnapScan v1.2.0
 
 本体和模型分开：**本体每次更新都要换，模型只下一次。**
 模型包不含 exe，是一份纯模型 zip，在软件里点「导入模型包」就能装：
 PP-OCR 两档（极速 / 高精）会顺带把 OCR 推理库放到 exe 旁边，翻译包会顺带把 llama.cpp 运行时放进 `llama` 目录。
 
-模型包统一放在 v1.1.8 发布页（软件里没有下载按钮，全部手动下）：
-https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.8
-本体（最新版）：
-https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.9
+本体和全部模型包都在同一个发布页（软件里没有下载按钮，全部手动下）：
+https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.2.0
 
 ## 三步装好
 
-1. 下 `SnapScan-v1.1.9-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
+1. 下 `SnapScan-v1.2.0-Body.zip`（本体，约 2.5 MB），解压得到 `QRSnap.exe`
 2. 想要哪个引擎 / 翻译，就下对应的模型包 zip —— **不用解压，原样留着**
 3. 打开 `QRSnap.exe` → 右上角齿轮 → 设置里「识别引擎」（或「翻译」）→ 点「导入模型包」→ 选中刚下的 zip
 
@@ -23,10 +21,10 @@ https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.9
 
 | 你想要的 | 下载这个文件 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.1.8.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.1.8.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
-| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.1.8.zip | 100.3 MB | PP-OCR medium，体积最大 |
-| 截图翻译（英/日/俄→中） | SnapScan-Model-HyMT1.5-v1.1.9.zip | 约 1.08 GB | 混元 Hy-MT1.5-1.8B Q4_K_M + llama.cpp 运行时 |
+| 中文最准（推荐） | SnapScan-Model-WeChatOCR-v1.2.0.zip | 21.9 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | SnapScan-Model-PP-OCR-Tiny-v1.2.0.zip | 9.8 MB | PP-OCR tiny，约 200 ms |
+| 高精度（小字、复杂排版） | SnapScan-Model-PP-OCR-Medium-v1.2.0.zip | 100.3 MB | PP-OCR medium，体积最大 |
+| 截图翻译（英/日/俄→中） | SnapScan-Model-HyMT1.5-v1.2.0.zip | 约 1.08 GB | 混元 Hy-MT1.5-1.8B Q4_K_M + llama.cpp 运行时 |
 | 完全不想下模型 | （不下） | 0 | 用 Windows 系统自带 OCR |
 
 想同时用多个引擎：把几个模型包依次导入一遍就行，互不覆盖，设置里会一项项多出来。
@@ -34,7 +32,7 @@ https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.9
 
 ## 翻译怎么用
 
-1. 先导入 `SnapScan-Model-HyMT1.5-v1.1.9.zip`（到上面 v1.1.8 页下），右上角 pill 会显示模型名（`HY-MT1.5-1.8B-Q4_K_M`）
+1. 先导入 `SnapScan-Model-HyMT1.5-v1.2.0.zip`（到上面发布页下），右上角 pill 会显示模型名（`HY-MT1.5-1.8B-Q4_K_M`）
 2. 按 `Ctrl+Alt+F`，框选要翻的内容，译文会直接盖在原文上
 3. 遮罩默认点击穿透，鼠标照常点后面的窗口；关掉译文：右下角控制条的 ×、`Esc`、鼠标滚轮、`Ctrl+Alt+G`
    不想看到那条浮动控制条：设置 → 翻译 → 译文遮罩 → 把「显示『✕ 关闭译文』控制条」关掉，之后就只剩纯译文，用 `Esc` / 滚轮 / `Ctrl+Alt+G` 关
