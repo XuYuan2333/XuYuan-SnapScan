@@ -59,6 +59,13 @@
     if ($("swMtBar")) $("swMtBar").checked = c.mtbar !== false;
     if ($("selMtPerf")) $("selMtPerf").value = c.mtperf || "balanced";
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
+    if ($("rngMtAlpha")) {
+      const a = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
+      $("rngMtAlpha").value = a;
+      const demo = $("maskDemo");
+      if (demo) demo.style.background = "rgba(14,18,26," + (a / 100).toFixed(2) + ")";
+      if ($("lblMtAlpha")) $("lblMtAlpha").textContent = a + "%";
+    }
     if (c.dl && c.dl.running) showDl(c.dl.status, c.dl.percent);
 
     if (document.activeElement !== $("rgOpacity")) $("rgOpacity").value = c.opacity != null ? c.opacity : 30;
@@ -478,6 +485,22 @@
       e.target.value = v;
       setConfig({ mtidle: v });
     });
+
+    const rngA = $("rngMtAlpha");
+    if (rngA) {
+      const paint = (p) => {
+        const demo = $("maskDemo");
+        if (demo) demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
+        const lbl = $("lblMtAlpha");
+        if (lbl) lbl.textContent = p + "%";
+      };
+      rngA.addEventListener("input", (e) => paint(parseInt(e.target.value, 10) || 0));
+      rngA.addEventListener("change", (e) => {
+        const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+        paint(v);
+        setConfig({ mtalpha: v });
+      });
+    }
 
     // 快捷区的「识字引擎」行：点一下直接跳到设置里的引擎分组
     $("quickEngine").addEventListener("click", () => {
