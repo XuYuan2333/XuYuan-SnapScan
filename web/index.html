@@ -213,6 +213,15 @@
         <div class="group-note">超过这么多秒没有再次翻译，就把翻译服务整个退出，内存立刻还回去，只留本体这点基础占用；填 0 表示常驻不释放。改完立即生效。</div>
 
         <div class="sub-title">译文遮罩</div>
+        <div class="mask-preview" id="maskPreview">
+          <div class="mask-demo" id="maskDemo">我喜欢尼娅，还有大家！</div>
+        </div>
+        <label class="field slider">
+          <span>不透明度</span>
+          <input type="range" id="rngMtAlpha" min="0" max="100" step="1" value="100">
+          <span class="val" id="lblMtAlpha" style="width:44px;">100%</span>
+        </label>
+        <div class="group-note">拖上面的滑杆，彩虹底图上那块遮罩会跟着变淡变实，所见即所得（100% 完全不透明，原字彻底看不到；越低越透出原文）。</div>
         <label class="switch-row">
           <div><b>显示「✕ 关闭译文」控制条</b><i>关掉后翻译只画译文、不留浮动控制条，用 Esc / 滚轮 / Ctrl+Alt+G 关</i></div>
           <input type="checkbox" id="swMtBar"><span class="sw"></span>
