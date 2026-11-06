@@ -1763,6 +1763,16 @@ namespace QRSnap
             return AppConfig.EngineSystem;
         }
 
+        // 实际可用引擎的显示名：本地档位必须显示 PP-OCR 极速/标准/高精，
+        // 之前所有非微信的分支都写成“Windows 内置 OCR”，选了 PP-OCR 也这么提示，纯属说错
+        public static string EffectiveName()
+        {
+            string e = EffectiveEngine();
+            if (e == AppConfig.EngineWeChat) return "微信 OCR";
+            if (AppConfig.IsLocalEngine(e)) return LocalName(e);
+            return SystemEngineName;
+        }
+
         public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail)
         {
             engine = SystemEngineName;
@@ -4357,7 +4367,7 @@ namespace QRSnap
         private void BeginOcr(Bitmap crop)
         {
             _working = true;
-            string want = Ocr.EffectiveEngine() == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR";
+            string want = Ocr.EffectiveName();
             SetStatus("正在识别文字…（" + want + "）");
             _toast.ShowBusy("识别中…  文字（" + want + "）");
 
