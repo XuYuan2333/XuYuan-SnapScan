@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.1.8.0")]
-[assembly: AssemblyFileVersion("1.1.8.0")]
+[assembly: AssemblyVersion("1.1.9.0")]
+[assembly: AssemblyFileVersion("1.1.9.0")]
 
 namespace QRSnap
 {
@@ -324,6 +324,8 @@ namespace QRSnap
     {
         public const string DefaultHotkeyQr = "Ctrl+Alt+D";
         public const string DefaultHotkeyOcr = "Ctrl+Alt+X";
+        public const string DefaultHotkeyMt = "Ctrl+Alt+F";     // 截图翻译
+        public const string DefaultHotkeyHide = "Ctrl+Alt+G";   // 译文遮罩 显示/隐藏
         public const string ConfigVersion = "1201";
         // 引擎：wechat = 微信内置 OCR（默认，中文支持好）；system = Windows 内置 OCR
         // pp* = 本地 PP-OCR（模型放在 exe 同级 "OCR Model" 目录，离线可用，无需装任何软件）
@@ -333,6 +335,17 @@ namespace QRSnap
         public const string EnginePpSmall = "ppsmall";
         public const string EnginePpMedium = "ppmed";
         public const string ModelFolderName = "OCR Model";
+        public const string MtFolderName = "MT Model";
+
+        // 翻译模型根目录：优先用户指定，其次 exe 同级 "MT Model"，最后 %LOCALAPPDATA%
+        public static string MtRoot()
+        {
+            string custom = MtDir != null ? MtDir.Trim() : string.Empty;
+            if (custom.Length > 0) return custom;
+            string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), MtFolderName);
+            if (Directory.Exists(beside)) return beside;
+            return Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan"), MtFolderName);
+        }
 
         public static string ModelDir = string.Empty;  // 自定义模型根目录，空=exe 同级 OCR Model
 
@@ -350,8 +363,7 @@ namespace QRSnap
         public static string ModelTierDir(string engine)
         {
             string tier = "tiny";
-            if (engine == EnginePpSmall) tier = "small";
-            else if (engine == EnginePpMedium) tier = "medium";
+            if (engine == EnginePpMedium) tier = "medium";
             return Path.Combine(Path.Combine(ModelRoot(), "PP-OCR"), tier);
         }
         public const string FileName = "XuYuan-SnapScan_config.ini";
@@ -363,6 +375,8 @@ namespace QRSnap
         // 运行时配置（Load 填、Save 写）
         public static string HotkeyQr = DefaultHotkeyQr;
         public static string HotkeyOcr = DefaultHotkeyOcr;
+        public static string HotkeyMt = DefaultHotkeyMt;
+        public static string HotkeyHide = DefaultHotkeyHide;
         public static bool AutoCopy = true;
         public static string Engine = EngineWeChat;
         public static string WeChatDir = string.Empty;   // 手动指定的微信安装目录（自动探测失败时用）
@@ -371,6 +385,19 @@ namespace QRSnap
         public static bool RestoreWin = false;           // 识别后恢复本软件窗口
         public static bool RestoreAfterQr = false;       // 扫码后显示本软件窗口
         public static bool Freehand = false;             // 自由圈选（不规则选区）
+        public static bool Translate = true;            // 翻译功能启用（没有模型时界面会置灰）
+        public static string TargetLang = "zh";          // 目标语言
+        public static string MtPair = string.Empty;      // 选中的翻译模型（MT Model 下的目录名），空=自动
+        public static string MtDir = string.Empty;       // 自定义翻译模型根目录，空=exe 同级 MT Model
+        public static bool MtBar = true;                 // 译文右下角「✕ 关闭译文」控制条是否显示
+        // 翻译线程档位：后台无感 / 均衡 / 性能 / 全力以赴
+        public const string MtPerfSilent = "silent";
+        public const string MtPerfBalanced = "balanced";
+        public const string MtPerfPerformance = "performance";
+        public const string MtPerfFull = "full";
+        public static string MtPerf = MtPerfBalanced;
+        public const int DefaultMtIdle = 30;             // 闲置多少秒没翻译就卸载翻译服务（0 = 不自动卸载）
+        public static int MtIdle = DefaultMtIdle;
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -406,10 +433,10 @@ namespace QRSnap
         {
             if (string.IsNullOrEmpty(value)) return EngineWeChat;
             string v = value.Trim().ToLowerInvariant();
-            // 兼容旧版 auto / rapid / ppocr 等写法
+            // 兼容旧版 auto / rapid / ppocr 等写法；标准档已下线，旧配置一律并到极速
             if (v == EngineSystem || v == "win" || v == "windows") return EngineSystem;
             if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
-            if (v == EnginePpSmall || v == "small") return EnginePpSmall;
+            if (v == EnginePpSmall || v == "small" || v == "standard") return EnginePpTiny;
             if (v == EnginePpMedium || v == "medium" || v == "med") return EnginePpMedium;
             return EngineWeChat;
         }
@@ -426,10 +453,34 @@ namespace QRSnap
                 || v.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
 
+        // 翻译线程档位：兼容中文/英文/数字写法，统一成英文键
+        public static string NormalizeMtPerf(string v)
+        {
+            if (v == null) return MtPerfBalanced;
+            string s = v.Trim().ToLowerInvariant();
+            if (s.Length == 0) return MtPerfBalanced;
+            if (s == MtPerfSilent || s == "0" || s == "后台无感" || s == "silentmode") return MtPerfSilent;
+            if (s == MtPerfBalanced || s == "1" || s == "均衡") return MtPerfBalanced;
+            if (s == MtPerfPerformance || s == "2" || s == "性能") return MtPerfPerformance;
+            if (s == MtPerfFull || s == "3" || s == "全力以赴" || s == "full-power") return MtPerfFull;
+            return MtPerfBalanced;
+        }
+
+        // 空闲释放秒数：0 或负数=不自动释放；其余夹在 5–86400 之间
+        public static int NormalizeMtIdle(int v)
+        {
+            if (v <= 0) return 0;
+            if (v < 5) return 5;
+            if (v > 86400) return 86400;
+            return v;
+        }
+
         public static void Load()
         {
             HotkeyQr = DefaultHotkeyQr;
             HotkeyOcr = DefaultHotkeyOcr;
+            HotkeyMt = DefaultHotkeyMt;
+            HotkeyHide = DefaultHotkeyHide;
             AutoCopy = true;
             Engine = EngineWeChat;
             WeChatDir = string.Empty;
@@ -438,6 +489,13 @@ namespace QRSnap
             RestoreWin = false;
             RestoreAfterQr = false;
             Freehand = false;
+            Translate = true;
+            TargetLang = "zh";
+            MtPair = string.Empty;
+            MtDir = string.Empty;
+            MtBar = true;
+            MtPerf = MtPerfBalanced;
+            MtIdle = DefaultMtIdle;
             Legacy = false;
             try
             {
@@ -456,6 +514,8 @@ namespace QRSnap
                     if (k.Equals("ver", StringComparison.OrdinalIgnoreCase)) ver = v;
                     else if (k.Equals("hotkey", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyQr = v;
                     else if (k.Equals("hotkey2", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyOcr = v;
+                    else if (k.Equals("hotkey3", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyMt = v;
+                    else if (k.Equals("hotkey4", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyHide = v;
                     else if (k.Equals("autocopy", StringComparison.OrdinalIgnoreCase)) AutoCopy = ToBool(v);
                     else if (k.Equals("engine", StringComparison.OrdinalIgnoreCase) && v.Length > 0) Engine = NormalizeEngine(v);
                     else if (k.Equals("bgopacity", StringComparison.OrdinalIgnoreCase))
@@ -471,6 +531,17 @@ namespace QRSnap
                     else if (k.Equals("restorewin", StringComparison.OrdinalIgnoreCase)) RestoreWin = ToBool(v);
                     else if (k.Equals("restoreqr", StringComparison.OrdinalIgnoreCase)) RestoreAfterQr = ToBool(v);
                     else if (k.Equals("freehand", StringComparison.OrdinalIgnoreCase)) Freehand = ToBool(v);
+                    else if (k.Equals("translate", StringComparison.OrdinalIgnoreCase)) Translate = ToBool(v);
+                    else if (k.Equals("mtlang", StringComparison.OrdinalIgnoreCase) && v.Length > 0) TargetLang = v.Trim().ToLowerInvariant();
+                    else if (k.Equals("mtpair", StringComparison.OrdinalIgnoreCase)) MtPair = v.Trim();
+                    else if (k.Equals("mtdir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) MtDir = v;
+                    else if (k.Equals("mtbar", StringComparison.OrdinalIgnoreCase)) MtBar = ToBool(v);
+                    else if (k.Equals("mtperf", StringComparison.OrdinalIgnoreCase)) MtPerf = NormalizeMtPerf(v);
+                    else if (k.Equals("mtidle", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int iv;
+                        if (int.TryParse(v, out iv)) MtIdle = NormalizeMtIdle(iv);
+                    }
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
@@ -486,6 +557,8 @@ namespace QRSnap
             sb.Append("ver=").Append(ConfigVersion).Append("\r\n");
             sb.Append("hotkey=").Append(HotkeyQr).Append("\r\n");
             sb.Append("hotkey2=").Append(HotkeyOcr).Append("\r\n");
+            sb.Append("hotkey3=").Append(HotkeyMt).Append("\r\n");
+            sb.Append("hotkey4=").Append(HotkeyHide).Append("\r\n");
             sb.Append("autocopy=").Append(AutoCopy ? "1" : "0").Append("\r\n");
             sb.Append("engine=").Append(NormalizeEngine(Engine)).Append("\r\n");
             if (ModelDir != null && ModelDir.Length > 0) sb.Append("modeldir=").Append(ModelDir).Append("\r\n");
@@ -494,6 +567,13 @@ namespace QRSnap
             sb.Append("restorewin=").Append(RestoreWin ? "1" : "0").Append("\r\n");
             sb.Append("restoreqr=").Append(RestoreAfterQr ? "1" : "0").Append("\r\n");
             sb.Append("freehand=").Append(Freehand ? "1" : "0").Append("\r\n");
+            sb.Append("translate=").Append(Translate ? "1" : "0").Append("\r\n");
+            sb.Append("mtlang=").Append(TargetLang).Append("\r\n");
+            if (MtPair != null && MtPair.Length > 0) sb.Append("mtpair=").Append(MtPair).Append("\r\n");
+            if (MtDir != null && MtDir.Length > 0) sb.Append("mtdir=").Append(MtDir).Append("\r\n");
+            sb.Append("mtbar=").Append(MtBar ? "1" : "0").Append("\r\n");
+            sb.Append("mtperf=").Append(MtPerf).Append("\r\n");
+            sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -1624,6 +1704,15 @@ namespace QRSnap
         }
     }
 
+    // 一段识别结果：文字 + 在原图里的位置（坐标系是截图 crop，左上角为原点）
+    public sealed class OcrSegment
+    {
+        public string Text;
+        public Rectangle Box;
+        public float Angle;
+        public int Order;
+    }
+
     internal static class Ocr
     {
         private static readonly Regex CjkSpace = new Regex(
@@ -1694,7 +1783,6 @@ namespace QRSnap
         public static string LocalName(string engine)
         {
             string e = AppConfig.NormalizeEngine(engine);
-            if (e == AppConfig.EnginePpSmall) return "PP-OCR 标准";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
             return "PP-OCR 极速";
         }
@@ -1775,9 +1863,16 @@ namespace QRSnap
 
         public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail)
         {
+            return Recognize(bitmap, out engine, out ms, out detail, null);
+        }
+
+        // segs 非空时顺便把每行的位置填进去（原地显示译文要用）
+        public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail, List<OcrSegment> segs)
+        {
             engine = SystemEngineName;
             ms = 0;
             detail = string.Empty;
+            if (segs != null) segs.Clear();
 
             string png = null;
             try
@@ -1800,7 +1895,29 @@ namespace QRSnap
                         Stopwatch swLocal = Stopwatch.StartNew();
                         try
                         {
-                            string text = pp.Recognize(bitmap);
+                            string text;
+                            if (segs != null)
+                            {
+                                List<PpOcr.Seg> ps = pp.RecognizeSegments(bitmap);
+                                StringBuilder sb = new StringBuilder();
+                                for (int i = 0; i < ps.Count; i++)
+                                {
+                                    PpOcr.Seg s = ps[i];
+                                    if (sb.Length > 0) sb.Append("\r\n");
+                                    sb.Append(s.Text);
+                                    OcrSegment seg = new OcrSegment();
+                                    seg.Text = s.Text;
+                                    seg.Box = new Rectangle(s.X, s.Y, s.W, s.H);
+                                    seg.Angle = s.Angle;
+                                    seg.Order = s.Order;
+                                    segs.Add(seg);
+                                }
+                                text = sb.ToString();
+                            }
+                            else
+                            {
+                                text = pp.Recognize(bitmap);
+                            }
                             ms = swLocal.ElapsedMilliseconds;
                             engine = LocalName(want);
                             detail = AppConfig.ModelTierDir(want);
@@ -1837,6 +1954,7 @@ namespace QRSnap
                                 engine = "微信 OCR";
                                 detail = note;
                                 probe.WeChatVerified = true;
+                                if (segs != null) BuildSegmentsByDetect(segs, bitmap, text);
                                 return NormalizeWeChatText(text);
                             }
                             detail = note + "，已改用 " + SystemEngineName;
@@ -1851,6 +1969,7 @@ namespace QRSnap
                     return null;
                 }
                 engine = SystemEngineName;
+                if (segs != null) BuildSegmentsByDetect(segs, bitmap, sys);
                 return NormalizeSystemText(sys);
             }
             catch (Exception ex)
@@ -1865,6 +1984,110 @@ namespace QRSnap
                     try { File.Delete(png); } catch (Exception) { }
                     try { File.Delete(png + ".ocr.txt"); } catch (Exception) { }
                 }
+            }
+        }
+
+        // 微信 OCR / 系统 OCR 只给文字、不给坐标，译文要借 PP-OCR 的检测框逐行对齐。
+        // 当前引擎若是微信，PP-OCR 可能一个都没加载过，这里按 高精→极速 的顺序临时拉一个检测器；
+        // 一个都没有就返回 null，让调用方走整块兜底，翻译照样能出。
+        private static PpOcr DetectorForSegments()
+        {
+            lock (LocalLock)
+            {
+                if (_local != null && AppConfig.IsLocalEngine(_localEngine)) return _local;
+            }
+            string[] tiers = new string[] { AppConfig.EnginePpMedium, AppConfig.EnginePpTiny };
+            for (int i = 0; i < tiers.Length; i++)
+            {
+                if (!LocalReady(tiers[i])) continue;
+                PpOcr p = LocalFor(tiers[i]);
+                if (p != null) return p;
+            }
+            return null;
+        }
+
+        // 微信 OCR / 系统 OCR 只给文字，没有坐标：借已经加载的 PP-OCR 检测框按行对齐
+        private static void BuildSegmentsByDetect(List<OcrSegment> segs, Bitmap bmp, string text)
+        {
+            if (segs == null || bmp == null) return;
+            segs.Clear();
+            List<string> lines = new List<string>();
+            foreach (string raw in (text ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                string t = CjkSpace.Replace(raw.Trim(), string.Empty);
+                if (t.Length > 0) lines.Add(t);
+            }
+            List<OcrSegment> boxes = new List<OcrSegment>();
+            PpOcr pp = DetectorForSegments();
+            if (pp != null)
+            {
+                List<PpOcr.Box> bs = pp.DetectPublic(bmp);
+                int cur = int.MinValue;
+                OcrSegment seg = null;
+                for (int i = 0; i < bs.Count; i++)
+                {
+                    PpOcr.Box b = bs[i];
+                    if (seg == null || b.Order != cur)
+                    {
+                        if (seg != null) boxes.Add(seg);
+                        seg = new OcrSegment();
+                        seg.Order = b.Order;
+                        seg.Box = new Rectangle(b.X, b.Y, b.W, b.H);
+                        seg.Angle = b.Angle;
+                        cur = b.Order;
+                        continue;
+                    }
+                    Rectangle u = Rectangle.Union(seg.Box, new Rectangle(b.X, b.Y, b.W, b.H));
+                    seg.Box = u;
+                    seg.Angle = seg.Angle == 0f ? b.Angle : seg.Angle;
+                }
+                if (seg != null) boxes.Add(seg);
+            }
+
+            if (boxes.Count == 0)
+            {
+                // 连检测框都没有（只装了微信 OCR、机器上没有 PP-OCR 模型）也别让译文落空：
+                // 整块当一行，译文铺在选区上
+                OcrSegment whole = new OcrSegment();
+                whole.Box = new Rectangle(0, 0, bmp.Width, bmp.Height);
+                whole.Angle = 0f;
+                whole.Order = 0;
+                StringBuilder all = new StringBuilder();
+                foreach (string l in lines)
+                {
+                    if (all.Length > 0) all.Append(' ');
+                    all.Append(l);
+                }
+                whole.Text = all.ToString();
+                if (whole.Text.Length > 0) segs.Add(whole);
+                return;
+            }
+
+            // 按行数均分到检测框：以前是从第 i 行一直拼到末尾，导致第一个框吃掉所有行
+            int nBoxes = boxes.Count;
+            int nLines = lines.Count;
+            for (int i = 0; i < nBoxes; i++)
+            {
+                int from = (int)((long)i * nLines / nBoxes);
+                int to = (int)((long)(i + 1) * nLines / nBoxes);   // 不含
+                if (to <= from)
+                {
+                    if (i < nLines) { from = i; to = i + 1; }
+                    else continue;
+                }
+                if (from >= nLines) continue;
+                if (to > nLines) to = nLines;
+                StringBuilder sb = new StringBuilder();
+                for (int k = from; k < to; k++)
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(lines[k]);
+                }
+                boxes[i].Text = sb.ToString();
+            }
+            foreach (OcrSegment s in boxes)
+            {
+                if (s.Text.Length > 0) segs.Add(s);
             }
         }
 
@@ -3894,7 +4117,7 @@ namespace QRSnap
 
         private static string VersionLine()
         {
-            string ver = "1.1.8.0";
+            string ver = "1.1.9.0";
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
@@ -5068,7 +5291,8 @@ namespace QRSnap
             // 正式界面：JadeView 2.0 + Web UI（新增 --classic 可退回旧的 WinForms 界面）
             bool legacyUi = args.Length >= 1 && args[0] == "--classic";
             bool selfTestArgs = args.Length >= 1 && (args[0] == "--selftest" || args[0] == "--ocrselftest"
-                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate");
+                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate" || args[0] == "--import"
+                || args[0] == "--downloadmodel");
             if (!legacyUi && !selfTestArgs)
             {
                 JadeHost.Run();
@@ -5086,6 +5310,34 @@ namespace QRSnap
             if (args.Length >= 2 && args[0] == "--ocrselftest")
             {
                 OcrSelfTest(args[1], args.Length >= 3 ? args[2] : null, args.Length >= 4 ? args[3] : "wechat");
+                return;
+            }
+
+            // 下载模型自检：QRSnap.exe --downloadmodel 键名 [结果输出路径]
+            if (args.Length >= 2 && args[0] == "--downloadmodel")
+            {
+                AppConfig.Load();
+                string first = ModelDownload.Start(args[1]);
+                DateTime t0 = DateTime.Now;
+                while (ModelDownload.Running && (DateTime.Now - t0).TotalSeconds < 360) System.Threading.Thread.Sleep(200);
+                string res = "start=" + first + "\r\nfinal status=" + ModelDownload.Status
+                    + " percent=" + ModelDownload.Percent + " running=" + ModelDownload.Running
+                    + "\r\nzip left=" + (System.IO.Directory.Exists(System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan", "download")));
+                if (args.Length >= 3) System.IO.File.WriteAllText(args[2], res, Encoding.UTF8);
+                return;
+            }
+
+            // 导入模型包自检：QRSnap.exe --import 包路径 [结果输出路径]
+            if (args.Length >= 2 && args[0] == "--import")
+            {
+                string res;
+                try { AppConfig.Load(); res = JadeHost.ImportForTest(args[1]); }
+                catch (Exception ex) { res = "ERROR: " + ex.Message; }
+                if (args.Length >= 3)
+                {
+                    try { File.WriteAllText(args[2], res, new UTF8Encoding(false)); } catch (Exception) { }
+                }
                 return;
             }
 
@@ -5256,7 +5508,7 @@ namespace QRSnap
                 if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
                 else if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
                 else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
-                else if (mode == "ppsmall") AppConfig.Engine = AppConfig.EnginePpSmall;
+                else if (mode == "ppsmall") AppConfig.Engine = AppConfig.EnginePpTiny;   // 标准档已下线，并入极速
                 else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
 
                 EngineProbe probe = Ocr.Probe();
