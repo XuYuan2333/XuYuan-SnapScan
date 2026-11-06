@@ -4,6 +4,11 @@
 模型包不含 exe，是一份纯模型 zip，在软件里点「导入模型包」就能装：
 PP-OCR 两档（极速 / 高精）会顺带把 OCR 推理库放到 exe 旁边，翻译包会顺带把 llama.cpp 运行时放进 `llama` 目录。
 
+模型包统一放在 v1.1.8 发布页（软件里没有下载按钮，全部手动下）：
+https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.8
+本体（最新版）：
+https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.1.9
+
 ## 三步装好
 
 1. 下 `SnapScan-v1.1.9-Body.zip`（本体，约 2.4 MB），解压得到 `QRSnap.exe`
@@ -29,7 +34,7 @@ PP-OCR 两档（极速 / 高精）会顺带把 OCR 推理库放到 exe 旁边，
 
 ## 翻译怎么用
 
-1. 先导入 `SnapScan-Model-HyMT1.5-v1.1.9.zip`，右上角 pill 会显示模型名（`HY-MT1.5-1.8B-Q4_K_M`）
+1. 先导入 `SnapScan-Model-HyMT1.5-v1.1.9.zip`（到上面 v1.1.8 页下），右上角 pill 会显示模型名（`HY-MT1.5-1.8B-Q4_K_M`）
 2. 按 `Ctrl+Alt+F`，框选要翻的内容，译文会直接盖在原文上
 3. 遮罩默认点击穿透，鼠标照常点后面的窗口；关掉译文：右下角控制条的 ×、`Esc`、鼠标滚轮、`Ctrl+Alt+G`
    不想看到那条浮动控制条：设置 → 翻译 → 译文遮罩 → 把「显示『✕ 关闭译文』控制条」关掉，之后就只剩纯译文，用 `Esc` / 滚轮 / `Ctrl+Alt+G` 关
