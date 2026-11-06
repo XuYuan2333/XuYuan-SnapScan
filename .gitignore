@@ -1,0 +1,7 @@
+QRSnap.exe
+QRSnap.exe.config
+XuYuan-SnapScan_config.ini
+OCR Model/
+*.zip
+*.log
+*.tmp

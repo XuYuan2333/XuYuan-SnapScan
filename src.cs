@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.1.4.0")]
-[assembly: AssemblyFileVersion("1.1.4.0")]
+[assembly: AssemblyVersion("1.1.5.0")]
+[assembly: AssemblyFileVersion("1.1.5.0")]
 
 namespace QRSnap
 {
@@ -214,14 +214,54 @@ namespace QRSnap
     {
         public const string DefaultHotkeyQr = "Ctrl+Alt+D";
         public const string DefaultHotkeyOcr = "Ctrl+Alt+X";
-        public const string ConfigVersion = "1130";
-        public const string EngineAuto = "auto";
+        public const string ConfigVersion = "1201";
+        // 引擎：wechat = 微信内置 OCR（默认，中文支持好）；system = Windows 内置 OCR
+        // pp* = 本地 PP-OCR（模型放在 exe 同级 "OCR Model" 目录，离线可用，无需装任何软件）
+        public const string EngineWeChat = "wechat";
         public const string EngineSystem = "system";
+        public const string EnginePpTiny = "pptiny";
+        public const string EnginePpSmall = "ppsmall";
+        public const string EnginePpMedium = "ppmed";
+        public const string ModelFolderName = "OCR Model";
+
+        public static string ModelDir = string.Empty;  // 自定义模型根目录，空=exe 同级 OCR Model
+
+        // 模型根目录：优先用户指定，其次 exe 同级 "OCR Model"，最后 %LOCALAPPDATA%
+        public static string ModelRoot()
+        {
+            string custom = ModelDir != null ? ModelDir.Trim() : string.Empty;
+            if (custom.Length > 0) return custom;
+            string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), ModelFolderName);
+            if (Directory.Exists(beside)) return beside;
+            return Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan"), ModelFolderName);
+        }
+
+        // 某个 PP-OCR 档位的模型目录
+        public static string ModelTierDir(string engine)
+        {
+            string tier = "tiny";
+            if (engine == EnginePpSmall) tier = "small";
+            else if (engine == EnginePpMedium) tier = "medium";
+            return Path.Combine(Path.Combine(ModelRoot(), "PP-OCR"), tier);
+        }
         public const string FileName = "XuYuan-SnapScan_config.ini";
-        public const int DefaultBackOpacity = 70;
-        public const int DefaultFrost = 10;
+        public const int DefaultBackOpacity = 30;
+        public const int DefaultFrost = 3;
 
         private static string _activePath = string.Empty;
+
+        // 运行时配置（Load 填、Save 写）
+        public static string HotkeyQr = DefaultHotkeyQr;
+        public static string HotkeyOcr = DefaultHotkeyOcr;
+        public static bool AutoCopy = true;
+        public static string Engine = EngineWeChat;
+        public static string WeChatDir = string.Empty;   // 手动指定的微信安装目录（自动探测失败时用）
+        public static int BackOpacity = DefaultBackOpacity;
+        public static int Frost = DefaultFrost;
+        public static bool RestoreWin = false;           // 识别后恢复本软件窗口
+        public static bool RestoreAfterQr = false;       // 扫码后显示本软件窗口
+        public static bool Freehand = false;             // 自由圈选（不规则选区）
+        public static bool Legacy;
 
         public static string ConfigFolder
         {
@@ -231,7 +271,7 @@ namespace QRSnap
             }
         }
 
-        // 首选：程序同目录的 QRSnap_config.ini（绿色便携）
+        // 首选：程序同目录的 XuYuan-SnapScan_config.ini（绿色便携）
         public static string PrimaryConfigPath
         {
             get
@@ -252,19 +292,43 @@ namespace QRSnap
             get { return _activePath.Length > 0 ? _activePath : PrimaryConfigPath; }
         }
 
-        public static void Load(out string hotkeyQr, out string hotkeyOcr, out bool autoCopy, out string ocrDir,
-            out string engine, out int backOpacity, out int frost, out string modelSize, out bool restoreWin, out bool legacy)
+        public static string NormalizeEngine(string value)
         {
-            hotkeyQr = DefaultHotkeyQr;
-            hotkeyOcr = DefaultHotkeyOcr;
-            autoCopy = true;
-            ocrDir = string.Empty;
-            engine = EngineAuto;
-            backOpacity = DefaultBackOpacity;
-            frost = DefaultFrost;
-            modelSize = "Tiny";
-            restoreWin = false;
-            legacy = false;
+            if (string.IsNullOrEmpty(value)) return EngineWeChat;
+            string v = value.Trim().ToLowerInvariant();
+            // 兼容旧版 auto / rapid / ppocr 等写法
+            if (v == EngineSystem || v == "win" || v == "windows") return EngineSystem;
+            if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
+            if (v == EnginePpSmall || v == "small") return EnginePpSmall;
+            if (v == EnginePpMedium || v == "medium" || v == "med") return EnginePpMedium;
+            return EngineWeChat;
+        }
+
+        public static bool IsLocalEngine(string engine)
+        {
+            string e = NormalizeEngine(engine);
+            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium;
+        }
+
+        private static bool ToBool(string v)
+        {
+            return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || v.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static void Load()
+        {
+            HotkeyQr = DefaultHotkeyQr;
+            HotkeyOcr = DefaultHotkeyOcr;
+            AutoCopy = true;
+            Engine = EngineWeChat;
+            WeChatDir = string.Empty;
+            BackOpacity = DefaultBackOpacity;
+            Frost = DefaultFrost;
+            RestoreWin = false;
+            RestoreAfterQr = false;
+            Freehand = false;
+            Legacy = false;
             try
             {
                 string p = PrimaryConfigPath;
@@ -280,50 +344,46 @@ namespace QRSnap
                     string k = line.Substring(0, i).Trim();
                     string v = line.Substring(i + 1).Trim();
                     if (k.Equals("ver", StringComparison.OrdinalIgnoreCase)) ver = v;
-                    else if (k.Equals("hotkey", StringComparison.OrdinalIgnoreCase) && v.Length > 0) hotkeyQr = v;
-                    else if (k.Equals("hotkey2", StringComparison.OrdinalIgnoreCase) && v.Length > 0) hotkeyOcr = v;
-                    else if (k.Equals("autocopy", StringComparison.OrdinalIgnoreCase))
-                        autoCopy = (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase));
-                    else if (k.Equals("engine", StringComparison.OrdinalIgnoreCase) && v.Length > 0) engine = v;
-                    else if (k.Equals("ocrdir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ocrDir = v;
+                    else if (k.Equals("hotkey", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyQr = v;
+                    else if (k.Equals("hotkey2", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyOcr = v;
+                    else if (k.Equals("autocopy", StringComparison.OrdinalIgnoreCase)) AutoCopy = ToBool(v);
+                    else if (k.Equals("engine", StringComparison.OrdinalIgnoreCase) && v.Length > 0) Engine = NormalizeEngine(v);
                     else if (k.Equals("bgopacity", StringComparison.OrdinalIgnoreCase))
                     {
                         int iv;
-                        if (int.TryParse(v, out iv) && iv >= 0 && iv <= 100) backOpacity = iv;
+                        if (int.TryParse(v, out iv) && iv >= 0 && iv <= 100) BackOpacity = iv;
                     }
                     else if (k.Equals("frost", StringComparison.OrdinalIgnoreCase))
                     {
                         int iv;
-                        if (int.TryParse(v, out iv) && iv >= 0 && iv <= 20) frost = iv;
+                        if (int.TryParse(v, out iv) && iv >= 0 && iv <= 20) Frost = iv;
                     }
-                    else if (k.Equals("modelsize", StringComparison.OrdinalIgnoreCase) && v.Length > 0)
-                    {
-                        string s = v.Trim();
-                        if (s == "Tiny" || s == "Small" || s == "Medium") modelSize = s;
-                    }
-                    else if (k.Equals("restorewin", StringComparison.OrdinalIgnoreCase))
-                        restoreWin = (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+                    else if (k.Equals("restorewin", StringComparison.OrdinalIgnoreCase)) RestoreWin = ToBool(v);
+                    else if (k.Equals("restoreqr", StringComparison.OrdinalIgnoreCase)) RestoreAfterQr = ToBool(v);
+                    else if (k.Equals("freehand", StringComparison.OrdinalIgnoreCase)) Freehand = ToBool(v);
+                    else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
-                legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
+                Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception)
             {
             }
         }
 
-        public static void Save(string hotkeyQr, string hotkeyOcr, bool autoCopy, string ocrDir, string engine, int backOpacity, int frost, string modelSize, bool restoreWin)
+        public static void Save()
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("ver=").Append(ConfigVersion).Append("\r\n");
-            sb.Append("hotkey=").Append(hotkeyQr).Append("\r\n");
-            sb.Append("hotkey2=").Append(hotkeyOcr).Append("\r\n");
-            sb.Append("autocopy=").Append(autoCopy ? "1" : "0").Append("\r\n");
-            sb.Append("engine=").Append(engine == EngineSystem ? EngineSystem : EngineAuto).Append("\r\n");
-            sb.Append("ocrdir=").Append(ocrDir).Append("\r\n");
-            sb.Append("bgopacity=").Append(backOpacity).Append("\r\n");
-            sb.Append("frost=").Append(frost).Append("\r\n");
-            sb.Append("modelsize=").Append(modelSize ?? "Tiny").Append("\r\n");
-            sb.Append("restorewin=").Append(restoreWin ? "1" : "0").Append("\r\n");
+            sb.Append("hotkey=").Append(HotkeyQr).Append("\r\n");
+            sb.Append("hotkey2=").Append(HotkeyOcr).Append("\r\n");
+            sb.Append("autocopy=").Append(AutoCopy ? "1" : "0").Append("\r\n");
+            sb.Append("engine=").Append(NormalizeEngine(Engine)).Append("\r\n");
+            if (ModelDir != null && ModelDir.Length > 0) sb.Append("modeldir=").Append(ModelDir).Append("\r\n");
+            sb.Append("bgopacity=").Append(BackOpacity).Append("\r\n");
+            sb.Append("frost=").Append(Frost).Append("\r\n");
+            sb.Append("restorewin=").Append(RestoreWin ? "1" : "0").Append("\r\n");
+            sb.Append("restoreqr=").Append(RestoreAfterQr ? "1" : "0").Append("\r\n");
+            sb.Append("freehand=").Append(Freehand ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -414,267 +474,1188 @@ namespace QRSnap
         }
     }
 
-    // 文字识别：用 PP-OCRv6（OcrEngine + Python rapidocr），找不到就退到系统自带 OCR
-    internal static class Ocr
+    // ==========================================================================
+    // 文字识别引擎层
+    //   首选：微信客户端内置 OCR（用 mmmojo 起 wxocr 插件，中文识别明显更准）
+    //   兜底：Windows 10/11 自带的 Windows.Media.Ocr（免安装）
+    // 两条路都不需要额外装 Python / VS / 运行时，满足“Win10+ 即开即用”。
+    // ==========================================================================
+
+    // 引擎探测结果：只做文件/注册表级检查，不启动任何进程
+    internal sealed class EngineProbe
     {
-        public const string RapidExeName = "OcrEngine.exe";
-        private const string DetName = "det.onnx";
-        private const string RecName = "rec.onnx";
-        private const string KeysName = "keys.txt";
-        public static readonly string[] Sizes = new string[] { "Tiny", "Small", "Medium" };
+        public bool WeChatFound;
+        public bool WeChatVerified;     // 本次运行里真正握手成功过
+        public string WeChatInstallDir = string.Empty;
+        public string WeChatVersion = string.Empty;
+        public string WeChatHostExe = string.Empty;
+        public string PluginDir = string.Empty;
+        public string PluginDll = string.Empty;
+        public string PluginVersion = string.Empty;
+        public bool WeChat3Only;        // 只找到微信 3.x 的 32 位插件
+        public string Problem = string.Empty;
 
-        private static readonly Regex CjkSpace = new Regex(
-            "(?<=[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef0-9])\\s+(?=[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef0-9])");
+        public bool WeChatUsable { get { return WeChatFound; } }
+    }
 
-        public static string MirrorDir
+    // 负责找微信 OCR 插件与宿主 exe
+    internal static class WeChatOcrLocator
+    {
+        private const string PluginRoot4 = @"Tencent\xwechat\XPlugin\Plugins\WeChatOCR";
+        private const string PluginRoot3 = @"Tencent\WeChat\XPlugin\Plugins\WeChatOCR";
+
+        private static string AppData
         {
-            get { return Path.Combine(AppConfig.ConfigFolder, "rapid"); }
+            get { return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData); }
         }
 
-        // 检查某个规格是否可用：ModelDir\size\det.onnx + rec.onnx + keys.txt
-        public static bool IsSizeAvailable(string size)
+        // 4.x 插件：优先用随包自带的（OCR Model\WeChat\plugin），没有才用本机微信的
+        private static string FindPluginDll(out string pluginVersion)
         {
+            pluginVersion = string.Empty;
+
+            // 1) 随包自带的离线副本
             try
             {
-                if (!File.Exists(Path.Combine(ModelDir, RapidExeName))) return false;
-                string d = Path.Combine(ModelDir, size);
-                return File.Exists(Path.Combine(d, DetName))
-                    && File.Exists(Path.Combine(d, RecName))
-                    && File.Exists(Path.Combine(d, KeysName));
-            }
-            catch (Exception) { return false; }
-        }
-
-        // 某个规格的模型目录
-        public static string GetSizeDir(string size)
-        {
-            return Path.Combine(ModelDir, size);
-        }
-
-        public static bool IsRapidDir(string dir)
-        {
-            // 兼容旧结构检查
-            if (string.IsNullOrEmpty(dir)) return false;
-            try
-            {
-                if (!Directory.Exists(dir)) return false;
-                if (!File.Exists(Path.Combine(dir, RapidExeName))) return false;
-                // 新结构：检查任意一个 size 子目录
-                foreach (string s in Sizes)
+                string own = BundledPluginDir();
+                string ownDll = Path.Combine(own, "wxocr.dll");
+                if (File.Exists(ownDll))
                 {
-                    string d = Path.Combine(dir, s);
-                    if (File.Exists(Path.Combine(d, DetName)) && File.Exists(Path.Combine(d, RecName)))
-                        return true;
+                    pluginVersion = "bundle";
+                    return ownDll;
                 }
-                return false;
-            }
-            catch (Exception) { return false; }
-        }
-
-        // 程序自身所在目录
-        public static string AppFolder
-        {
-            get { return Path.GetDirectoryName(Application.ExecutablePath); }
-        }
-
-        // 唯一的模型目录：exe 同目录下名为 "OCR Model" 的文件夹
-        public static string ModelDir
-        {
-            get { return Path.Combine(AppFolder, "OCR Model"); }
-        }
-
-        // 根据规格返回可用的模型目录
-        public static string GetUpstream(string preferred, string size)
-        {
-            if (IsSizeAvailable(size)) return GetSizeDir(size);
-            // 回退：找第一个可用规格
-            foreach (string s in Sizes)
-                if (IsSizeAvailable(s)) return GetSizeDir(s);
-            return null;
-        }
-
-        // 「导入模型」：把一份完整的模型目录拷进 OCR Model，之后程序只读这一处
-        public static bool ImportIntoModels(string src, out string note, out int files, out long bytes)
-        {
-            note = string.Empty;
-            files = 0;
-            bytes = 0;
-            if (!IsRapidDir(src))
-            {
-                note = "源目录不完整：需要 OcrEngine.exe 与 models 下的 3 个模型文件";
-                return false;
-            }
-            try
-            {
-                string dst = ModelDir;
-                Directory.CreateDirectory(Path.Combine(dst, "models"));
-                CopyAll(src, dst, ref bytes, ref files);
-                note = "已导入 " + files.ToString() + " 个文件，" + (bytes / 1048576.0).ToString("0.0") + " MB";
-                return IsRapidDir(dst);
-            }
-            catch (Exception ex)
-            {
-                note = "导入失败：" + ex.Message;
-                return false;
-            }
-        }
-
-        public static string DescribeDir(string dir)
-        {
-            if (IsRapidDir(dir))
-            {
-                return dir + "\r\n（含 OcrEngine.exe 与 models 下 4 个模型文件，完整）";
-            }
-            return dir + "\r\n（缺少 exe 或模型文件，不完整）";
-        }
-
-        private static long FileLength(string p)
-        {
-            try
-            {
-                FileInfo fi = new FileInfo(p);
-                return fi.Exists ? fi.Length : 0;
             }
             catch (Exception)
             {
-                return 0;
             }
-        }
 
-        private static DateTime FileTime(string p)
-        {
+            // 2) 本机微信 4.x 的插件
+            string root = Path.Combine(AppData, PluginRoot4);
+            string best = null;
+            int bestVer = -1;
             try
             {
-                FileInfo fi = new FileInfo(p);
-                return fi.Exists ? fi.LastWriteTimeUtc : DateTime.MinValue;
+                if (!Directory.Exists(root)) return null;
+                foreach (string dir in Directory.GetDirectories(root))
+                {
+                    int v;
+                    if (!int.TryParse(Path.GetFileName(dir), out v)) continue;
+                    string dll = Path.Combine(dir, "extracted", "wxocr.dll");
+                    if (!File.Exists(dll)) continue;
+                    if (v > bestVer) { bestVer = v; best = dll; }
+                }
             }
             catch (Exception)
             {
-                return DateTime.MinValue;
             }
+            if (best != null) pluginVersion = bestVer.ToString();
+            return best;
         }
 
-        // 上游模型比镜像新（或镜像还不完整）就需要同步
-        private static bool NeedRefresh(string upstream, string mirror)
+        // 随包自带的微信 OCR 目录：<模型根>\WeChat
+        internal static string BundledWeChatDir()
         {
-            if (!IsRapidDir(mirror)) return true;
-            string[] names = new string[]
+            return Path.Combine(AppConfig.ModelRoot(), "WeChat");
+        }
+
+        internal static string BundledPluginDir()
+        {
+            return Path.Combine(BundledWeChatDir(), "plugin");
+        }
+
+        internal static string BundledRuntimeDir()
+        {
+            return Path.Combine(BundledWeChatDir(), "runtime");
+        }
+
+        // 3.x 插件是 WeChatOCR.exe（32 位），本工具跑不起来，只用来给出准确提示
+        private static bool HasPlugin3()
+        {
+            try
             {
-                RapidExeName,
-                Path.Combine("models", DetName),
-                Path.Combine("models", RecName),
-                Path.Combine("models", KeysName)
-            };
-            foreach (string name in names)
+                string root = Path.Combine(AppData, PluginRoot3);
+                if (!Directory.Exists(root)) return false;
+                foreach (string dir in Directory.GetDirectories(root))
+                {
+                    if (File.Exists(Path.Combine(dir, "extracted", "WeChatOCR.exe"))) return true;
+                }
+            }
+            catch (Exception)
             {
-                DateTime up = FileTime(Path.Combine(upstream, name));
-                DateTime mi = FileTime(Path.Combine(mirror, name));
-                if (up > mi.AddSeconds(1)) return true;
             }
             return false;
         }
 
-        private static void CopyFile(string from, string to, ref long bytes, ref int files)
+        private static void AddCandidate(List<string> list, string dir)
         {
-            string dir = Path.GetDirectoryName(to);
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            File.Copy(from, to, true);
-            files++;
-            bytes += FileLength(to);
-        }
-
-        private static void CopyAll(string upstream, string mirror, ref long bytes, ref int files)
-        {
-            string modelsSrc = Path.Combine(upstream, "models");
-            string modelsDst = Path.Combine(mirror, "models");
-            if (!Directory.Exists(modelsDst)) Directory.CreateDirectory(modelsDst);
-
-            CopyFile(Path.Combine(upstream, RapidExeName), Path.Combine(mirror, RapidExeName), ref bytes, ref files);
-            CopyFile(Path.Combine(modelsSrc, DetName), Path.Combine(modelsDst, DetName), ref bytes, ref files);
-            CopyFile(Path.Combine(modelsSrc, RecName), Path.Combine(modelsDst, RecName), ref bytes, ref files);
-            CopyFile(Path.Combine(modelsSrc, KeysName), Path.Combine(modelsDst, KeysName), ref bytes, ref files);
-        }
-
-        private static bool IsAscii(string s)
-        {
-            for (int i = 0; i < s.Length; i++)
+            if (string.IsNullOrEmpty(dir)) return;
+            string d = dir.Trim().TrimEnd('\\');
+            if (d.Length == 0) return;
+            foreach (string x in list)
             {
-                if (s[i] > 127) return false;
+                if (string.Equals(x, d, StringComparison.OrdinalIgnoreCase)) return;
             }
-            return true;
+            list.Add(d);
         }
 
-        // OcrEngine 只认纯英文路径：中文目录先镜像到 %APPDATA%\XuYuan-SnapScan\rapid 再用
-        public static string PrepareRapidDir(string sizeDir, out string note)
+        // 微信安装目录：注册表 → 正在运行的微信用途 → 常见安装位置 → 用户手动指定
+        private static List<string> InstallCandidates(string manualDir)
         {
-            note = string.Empty;
-            if (!Directory.Exists(sizeDir)) return null;
-            if (IsAscii(sizeDir)) return sizeDir;
+            List<string> list = new List<string>();
 
-            string mirror = MirrorDir;
+            // 0) 随包自带的运行时（有就不用管本机装没装微信）
+            AddCandidate(list, BundledRuntimeDir());
+            AddCandidate(list, manualDir);
+
             try
             {
-                Directory.CreateDirectory(mirror);
-                string[] files = new string[] { DetName, RecName, KeysName };
-                foreach (string f in files)
+                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Tencent\Weixin"))
                 {
-                    string src = Path.Combine(sizeDir, f);
-                    string dst = Path.Combine(mirror, f);
-                    if (File.Exists(src)) File.Copy(src, dst, true);
+                    if (k != null)
+                    {
+                        object v = k.GetValue("InstallPath");
+                        if (v != null) AddCandidate(list, v.ToString());
+                    }
                 }
-                note = "已镜像模型到 " + mirror;
-                return mirror;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                note = "镜像模型失败：" + ex.Message;
+            }
+            try
+            {
+                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"Software\Tencent\Weixin"))
+                {
+                    if (k != null)
+                    {
+                        object v = k.GetValue("InstallPath");
+                        if (v != null) AddCandidate(list, v.ToString());
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            // 微信正开着的时候，直接从进程路径拿，最准
+            try
+            {
+                Process[] ps = Process.GetProcessesByName("Weixin");
+                foreach (Process p in ps)
+                {
+                    try
+                    {
+                        string exe = p.MainModule.FileName;
+                        if (string.IsNullOrEmpty(exe)) continue;
+                        string dir = Path.GetDirectoryName(exe);
+                        AddCandidate(list, dir);
+                        AddCandidate(list, Path.Combine(dir, ".."));
+                    }
+                    catch (Exception)
+                    {
+                    }
+                    finally
+                    {
+                        p.Dispose();
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            AddCandidate(list, Path.Combine(pf, @"Tencent\Weixin"));
+            AddCandidate(list, Path.Combine(pf86, @"Tencent\Weixin"));
+            AddCandidate(list, Path.Combine(AppData, @"Tencent\Weixin"));
+            AddCandidate(list, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                @"Tencent\Weixin"));
+
+            // 装了但装在别的盘（最常见的情况）：注册表值可能过期，看卸载项和开始菜单快捷方式最准
+            AddUninstallCandidates(list);
+            AddShortcutCandidates(list);
+            return list;
+        }
+
+        // 卸载注册表里的 InstallLocation / DisplayIcon，常带真实安装路径
+        private static void AddUninstallCandidates(List<string> list)
+        {
+            string[] roots = new string[]
+            {
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            };
+            foreach (string root in roots)
+            {
+                foreach (bool machine in new bool[] { false, true })
+                {
+                    Microsoft.Win32.RegistryKey baseKey = machine
+                        ? Microsoft.Win32.Registry.LocalMachine
+                        : Microsoft.Win32.Registry.CurrentUser;
+                    try
+                    {
+                        using (Microsoft.Win32.RegistryKey un = baseKey.OpenSubKey(root))
+                        {
+                            if (un == null) continue;
+                            foreach (string sub in un.GetSubKeyNames())
+                            {
+                                using (Microsoft.Win32.RegistryKey item = un.OpenSubKey(sub))
+                                {
+                                    if (item == null) continue;
+                                    object name = item.GetValue("DisplayName");
+                                    string dn = name == null ? string.Empty : name.ToString();
+                                    if (dn.IndexOf("微信", StringComparison.Ordinal) < 0
+                                        && dn.IndexOf("WeChat", StringComparison.OrdinalIgnoreCase) < 0
+                                        && dn.IndexOf("Weixin", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                                    object loc = item.GetValue("InstallLocation");
+                                    if (loc != null) AddCandidate(list, loc.ToString());
+                                    object icon = item.GetValue("DisplayIcon");
+                                    if (icon != null)
+                                    {
+                                        string s = icon.ToString().Trim();
+                                        int comma = s.IndexOf(',');
+                                        if (comma > 0) s = s.Substring(0, comma);
+                                        s = s.Trim('"');
+                                        if (s.Length > 0) AddCandidate(list, Path.GetDirectoryName(s));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+        }
+
+        // 开始菜单 / 桌面快捷方式：微信安装器一定会建，目标路径就是真安装路径
+        private static void AddShortcutCandidates(List<string> list)
+        {
+            List<string> dirs = new List<string>();
+            try
+            {
+                dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu));
+                dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu));
+                dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+                dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
+            }
+            catch (Exception)
+            {
+            }
+            foreach (string dir in dirs)
+            {
+                AddShortcutInDir(list, dir, 0);
+            }
+        }
+
+        private static void AddShortcutInDir(List<string> list, string dir, int depth)
+        {
+            if (depth > 2) return;
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                foreach (string file in Directory.GetFiles(dir, "*.lnk"))
+                {
+                    string n = Path.GetFileNameWithoutExtension(file);
+                    if (n.IndexOf("微信", StringComparison.Ordinal) < 0
+                        && n.IndexOf("WeChat", StringComparison.OrdinalIgnoreCase) < 0
+                        && n.IndexOf("Weixin", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    string target = ResolveShortcut(file);
+                    if (string.IsNullOrEmpty(target)) continue;
+                    string exeDir = Path.GetDirectoryName(target);
+                    AddCandidate(list, exeDir);
+                    AddCandidate(list, Path.GetDirectoryName(exeDir));
+                }
+                foreach (string sub in Directory.GetDirectories(dir))
+                {
+                    AddShortcutInDir(list, sub, depth + 1);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        // 解析 .lnk 目标；WScript.Shell 在 .NET Framework 里可直接用 COM
+        private static string ResolveShortcut(string path)
+        {
+            object shell = null;
+            object link = null;
+            try
+            {
+                Type t = Type.GetTypeFromProgID("WScript.Shell");
+                if (t == null) return null;
+                shell = Activator.CreateInstance(t);
+                link = t.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod,
+                    null, shell, new object[] { path });
+                object target = link.GetType().InvokeMember("TargetPath",
+                    System.Reflection.BindingFlags.GetProperty, null, link, null);
+                return target == null ? null : target.ToString();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                try
+                {
+                    if (link != null) Marshal.ReleaseComObject(link);
+                    if (shell != null) Marshal.ReleaseComObject(shell);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        // 最后的兜底：在固定磁盘里浅扫一层，找含 mmmojo_64.dll 的目录（限时，避免卡启动）
+        private static string ScanForLibDir(int budgetMs)
+        {
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(budgetMs);
+            Queue<string> dirs = new Queue<string>();
+            Queue<int> depths = new Queue<int>();
+            try
+            {
+                foreach (DriveInfo d in DriveInfo.GetDrives())
+                {
+                    try
+                    {
+                        if (d.DriveType != DriveType.Fixed || !d.IsReady) continue;
+                        dirs.Enqueue(d.RootDirectory.FullName);
+                        depths.Enqueue(0);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+            while (dirs.Count > 0 && DateTime.UtcNow < deadline)
+            {
+                string dir = dirs.Dequeue();
+                int depth = depths.Dequeue();
+                try
+                {
+                    if (File.Exists(Path.Combine(dir, "mmmojo_64.dll"))) return dir;
+                }
+                catch (Exception)
+                {
+                }
+                if (depth >= 3) continue;
+                string[] subs;
+                try
+                {
+                    subs = Directory.GetDirectories(dir);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                if (subs.Length > 350) continue;   // 系统大目录就别钻了
+                foreach (string sub in subs)
+                {
+                    string name = Path.GetFileName(sub);
+                    if (name.StartsWith("Windows", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (name.StartsWith("$", StringComparison.Ordinal)) continue;
+                    dirs.Enqueue(sub);
+                    depths.Enqueue(depth + 1);
+                }
+            }
+            return null;
+        }
+
+        // 在候选目录里找“含 mmmojo_64.dll 的那一层”，返回 user-lib-dir
+        private static string ResolveLibDir(string root)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) return null;
+                if (File.Exists(Path.Combine(root, "mmmojo_64.dll"))) return root;
+                string best = null;
+                long bestVer = -1;
+                foreach (string dir in Directory.GetDirectories(root))
+                {
+                    if (!File.Exists(Path.Combine(dir, "mmmojo_64.dll"))) continue;
+                    long ver = 0;
+                    string name = Path.GetFileName(dir);
+                    foreach (char c in name)
+                    {
+                        if (c >= '0' && c <= '9') ver = ver * 10 + (c - '0');
+                    }
+                    if (ver >= bestVer) { bestVer = ver; best = dir; }
+                }
+                return best;
+            }
+            catch (Exception)
+            {
                 return null;
             }
         }
 
-        // 「更新上游算法」按钮用：无条件把上游最新的一份覆盖到本地
-        public static bool SyncFromUpstream(string upstream, out string note, out int files, out long bytes, out long ms)
+        private static string ResolveHostExe(string libDir)
         {
-            files = 0;
-            bytes = 0;
-            ms = 0;
-            note = string.Empty;
-
-            if (!IsRapidDir(upstream))
-            {
-                note = "上游目录不完整：需要 OcrEngine.exe 与 models 下 4 个模型文件";
-                return false;
-            }
-            if (IsAscii(upstream))
-            {
-                note = "上游已在英文路径，直接使用，无需镜像";
-                return true;
-            }
-
-            Stopwatch sw = Stopwatch.StartNew();
             try
             {
-                long b = 0;
-                int f = 0;
-                CopyAll(upstream, MirrorDir, ref b, ref f);
-                bytes = b;
-                files = f;
-                ms = sw.ElapsedMilliseconds;
-                note = "已更新 " + f.ToString() + " 个文件，" + (b / 1048576.0).ToString("0.0") + " MB";
-                return IsRapidDir(MirrorDir);
+                string[] names = new string[] { "Weixin.exe", "weixin.exe", "WeChat.exe" };
+                foreach (string n in names)
+                {
+                    string p = Path.Combine(libDir, n);
+                    if (File.Exists(p)) return p;
+                }
+                string parent = Path.GetDirectoryName(libDir);
+                if (parent != null)
+                {
+                    foreach (string n in names)
+                    {
+                        string p = Path.Combine(parent, n);
+                        if (File.Exists(p)) return p;
+                    }
+                }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                ms = sw.ElapsedMilliseconds;
-                note = "更新失败：" + ex.Message;
+            }
+            return null;
+        }
+
+        // 只认本软件自己的 OCR Model\WeChat 目录，不再去探测本机微信
+        public static EngineProbe Detect()
+        {
+            EngineProbe probe = new EngineProbe();
+
+            string pluginDir = BundledPluginDir();
+            string runtimeDir = BundledRuntimeDir();
+            string dll = Path.Combine(pluginDir, "wxocr.dll");
+
+            if (!File.Exists(dll))
+            {
+                probe.Problem = "没找到微信 OCR 模型，请把 OCR Model\\WeChat 目录放进软件同级";
+                return probe;
+            }
+
+            string libDir = ResolveLibDir(runtimeDir);
+            if (libDir == null)
+            {
+                probe.Problem = "OCR Model\\WeChat\\runtime 里缺 mmmojo_64.dll";
+                return probe;
+            }
+
+            string host = ResolveHostExe(libDir);
+            if (host == null)
+            {
+                probe.Problem = "OCR Model\\WeChat\\runtime 里缺 Weixin.exe";
+                return probe;
+            }
+
+            probe.PluginDll = dll;
+            probe.PluginDir = pluginDir;
+            probe.PluginVersion = "bundle";
+            probe.WeChatInstallDir = libDir;
+            probe.WeChatVersion = Path.GetFileName(libDir);
+            probe.WeChatHostExe = host;
+            probe.WeChatFound = true;
+            return probe;
+        }
+    }
+
+    // 微信 4.x OCR 客户端（纯 P/Invoke + 手写 protobuf，不依赖任何第三方库）
+    internal static class WxOcr
+    {
+        private const int ReqHandshake = 10001;
+        private const int ReqOcr = 10010;
+        private const int RespOcr = 10011;
+
+        // mmmojo 常量
+        private const int CbReadPush = 1;
+        private const int CbReadPull = 2;
+        private const int CbReadShared = 3;
+        private const int CbRemoteConnect = 4;
+        private const int CbRemoteDisconnect = 5;
+        private const int CbProcessLaunched = 6;
+        private const int CbProcessLaunchFailed = 7;
+        private const int CbMojoError = 8;
+
+        private const int ParamHostProcess = 0;
+        private const int ParamExePath = 2;
+
+        private const int MethodPush = 1;
+
+        private delegate void CbRead(uint requestId, IntPtr readInfo, IntPtr userData);
+        private delegate void CbConnect(bool connected, IntPtr userData);
+        private delegate void CbVoid(IntPtr userData);
+        private delegate void CbLaunchFailed(int errorCode, IntPtr userData);
+        private delegate void CbError(IntPtr errorBuf, int errorSize, IntPtr userData);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr GetProcAddress(IntPtr module, string name);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnInit(int argc, IntPtr argv);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr FnCreateEnv();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnSetCb(IntPtr env, int type, IntPtr cb);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnSetParamInt(IntPtr env, int type, int value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnSetParamStr(IntPtr env, int type, IntPtr value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnAppendSwitch(IntPtr env, string key, [MarshalAs(UnmanagedType.LPWStr)] string value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnEnvOp(IntPtr env);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr FnGetReadReq(IntPtr readInfo, out uint size);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnRemoveReadInfo(IntPtr readInfo);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr FnCreateWriteInfo(int method, int sync, uint requestId);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr FnGetWriteReq(IntPtr writeInfo, UIntPtr size);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate bool FnSendWrite(IntPtr env, IntPtr writeInfo);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FnDeinit();
+
+        private static readonly object Sync = new object();
+        private static IntPtr _module;
+        private static IntPtr _env;
+        private static string _startedFor = string.Empty;
+        private static bool _connected;
+        private static bool _handshakeDone;
+        private static bool _supported;
+        private static bool _faulted;
+        private static string _fault = string.Empty;
+        private static ulong _taskSeed = 2;
+        private static IntPtr _hostPtr;   // 必须一直有效，不能释放
+
+        private static FnGetReadReq _getReadReq;
+        private static FnRemoveReadInfo _removeReadInfo;
+        private static FnCreateWriteInfo _createWriteInfo;
+        private static FnGetWriteReq _getWriteReq;
+        private static FnSendWrite _sendWrite;
+
+        private static readonly Dictionary<ulong, string> _texts = new Dictionary<ulong, string>();
+        private static readonly Dictionary<ulong, int> _codes = new Dictionary<ulong, int>();
+        private static readonly Dictionary<ulong, int[]> _sizes = new Dictionary<ulong, int[]>();
+
+        // 回调委托必须被静态引用，否则会被 GC 回收导致崩溃
+        private static CbRead _cbPush;
+        private static CbRead _cbPull;
+        private static CbRead _cbShared;
+        private static CbConnect _cbConnect;
+        private static CbVoid _cbDisconnect;
+        private static CbVoid _cbLaunched;
+        private static CbLaunchFailed _cbLaunchFailed;
+        private static CbError _cbError;
+
+        private static T Fn<T>(string name) where T : class
+        {
+            IntPtr p = GetProcAddress(_module, name);
+            if (p == IntPtr.Zero) throw new EntryPointNotFoundException(name);
+            return (T)(object)Marshal.GetDelegateForFunctionPointer(p, typeof(T));
+        }
+
+        private static void OnRead(uint requestId, IntPtr readInfo, IntPtr userData)
+        {
+            try
+            {
+                uint size = 0;
+                IntPtr data = _getReadReq(readInfo, out size);
+                byte[] buf = new byte[size];
+                if (size > 0) Marshal.Copy(data, buf, 0, (int)size);
+                _removeReadInfo(readInfo);
+                HandleMessage(requestId, buf);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static void HandleMessage(uint requestId, byte[] data)
+        {
+            if (requestId == ReqHandshake)
+            {
+                bool supported = false;
+                PB.ForEachField(data, delegate(int field, int wire, byte[] payload, long varint)
+                {
+                    if (field == 1 && wire == 0) supported = varint != 0;
+                });
+                lock (Sync)
+                {
+                    _handshakeDone = true;
+                    _supported = supported;
+                    if (!supported) _fault = "微信 OCR 不支持当前环境";
+                    Monitor.PulseAll(Sync);
+                }
+                return;
+            }
+            if (requestId != RespOcr) return;
+
+            ulong taskId = 0;
+            int errCode = 0;
+            List<string> lines = new List<string>();
+            int[] size = new int[2];
+            PB.ForEachField(data, delegate(int field, int wire, byte[] payload, long varint)
+            {
+                if (field == 1 && wire == 0) taskId = (ulong)varint;
+                else if (field == 2 && wire == 0) errCode = (int)varint;
+                else if (field == 3 && wire == 2) ParseResultInfo(payload, lines, size);
+            });
+
+            StringBuilder sb = new StringBuilder();
+            foreach (string line in lines)
+            {
+                if (sb.Length > 0) sb.Append("\r\n");
+                sb.Append(line);
+            }
+
+            lock (Sync)
+            {
+                _texts[taskId] = sb.ToString();
+                _codes[taskId] = errCode;
+                _sizes[taskId] = size;
+                Monitor.PulseAll(Sync);
+            }
+        }
+
+        private static void ParseResultInfo(byte[] data, List<string> lines, int[] size)
+        {
+            PB.ForEachField(data, delegate(int field, int wire, byte[] payload, long varint)
+            {
+                if (field == 3 && wire == 2)
+                {
+                    string text = string.Empty;
+                    PB.ForEachField(payload, delegate(int f2, int w2, byte[] p2, long v2)
+                    {
+                        if (f2 == 2 && w2 == 2) text = Encoding.UTF8.GetString(p2);
+                    });
+                    // 空行（纯噪点）丢掉，避免结果里出现一串空行
+                    if (text.Trim().Length > 0) lines.Add(text);
+                }
+                else if (field == 4 && wire == 0) size[0] = (int)varint;
+                else if (field == 5 && wire == 0) size[1] = (int)varint;
+            });
+        }
+
+        public static bool IsRunning
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    return _env != IntPtr.Zero && _handshakeDone && _supported;
+                }
+            }
+        }
+
+        public static bool Start(EngineProbe probe, out string note)
+        {
+            note = string.Empty;
+            lock (Sync)
+            {
+                // 已经为同一份微信起过一次，直接复用
+                if (_env != IntPtr.Zero && string.Equals(_startedFor, probe.PluginDll, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_faulted)
+                    {
+                        note = _fault;
+                        return false;
+                     }
+                    return WaitHandshake(12000, out note);
+                }
+                if (_env != IntPtr.Zero)
+                {
+                    Stop();
+                }
+
+                _handshakeDone = false;
+                _supported = false;
+                _faulted = false;
+                _fault = string.Empty;
+                _texts.Clear();
+                _codes.Clear();
+                _sizes.Clear();
+
+                try
+                {
+                    string mojo = Path.Combine(probe.WeChatInstallDir, "mmmojo_64.dll");
+                    _module = LoadLibraryExW(mojo, IntPtr.Zero, 0x00000008);
+                    if (_module == IntPtr.Zero)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        note = err == 193
+                            ? "微信是本机 32 位版本，和本工具 64 位进程不匹配"
+                            : "加载 mmmojo_64.dll 失败（错误 " + err + "）";
+                        _faulted = true;
+                        _fault = note;
+                        return false;
+                    }
+
+                    FnInit init = Fn<FnInit>("InitializeMMMojo");
+                    FnCreateEnv create = Fn<FnCreateEnv>("CreateMMMojoEnvironment");
+                    FnSetCb setCb = Fn<FnSetCb>("SetMMMojoEnvironmentCallbacks");
+                    FnSetParamInt setInt = Fn<FnSetParamInt>("SetMMMojoEnvironmentInitParams");
+                    FnSetParamStr setStr = Fn<FnSetParamStr>("SetMMMojoEnvironmentInitParams");
+                    FnAppendSwitch append = Fn<FnAppendSwitch>("AppendMMSubProcessSwitchNative");
+                    FnEnvOp startEnv = Fn<FnEnvOp>("StartMMMojoEnvironment");
+                    _getReadReq = Fn<FnGetReadReq>("GetMMMojoReadInfoRequest");
+                    _removeReadInfo = Fn<FnRemoveReadInfo>("RemoveMMMojoReadInfo");
+                    _createWriteInfo = Fn<FnCreateWriteInfo>("CreateMMMojoWriteInfo");
+                    _getWriteReq = Fn<FnGetWriteReq>("GetMMMojoWriteInfoRequest");
+                    _sendWrite = Fn<FnSendWrite>("SendMMMojoWriteInfo");
+
+                    _cbPush = OnRead;
+                    _cbPull = OnRead;
+                    _cbShared = OnRead;
+                    _cbConnect = delegate(bool ok, IntPtr u)
+                    {
+                        lock (Sync)
+                        {
+                            _connected = ok;
+                            if (!ok) _fault = "与微信 OCR 进程断开连接";
+                            Monitor.PulseAll(Sync);
+                        }
+                    };
+                    _cbDisconnect = delegate(IntPtr u)
+                    {
+                        lock (Sync)
+                        {
+                            _faulted = true;
+                            _fault = "微信 OCR 进程意外退出";
+                            Monitor.PulseAll(Sync);
+                        }
+                    };
+                    _cbLaunched = delegate(IntPtr u) { };
+                    _cbLaunchFailed = delegate(int code, IntPtr u)
+                    {
+                        lock (Sync)
+                        {
+                            _faulted = true;
+                            _fault = "微信 OCR 进程启动失败（code " + code + "）";
+                            Monitor.PulseAll(Sync);
+                        }
+                    };
+                    _cbError = delegate(IntPtr buf, int len, IntPtr u)
+                    {
+                        string s = string.Empty;
+                        if (len > 0)
+                        {
+                            byte[] b = new byte[len];
+                            Marshal.Copy(buf, b, 0, len);
+                            s = Encoding.UTF8.GetString(b);
+                        }
+                        lock (Sync)
+                        {
+                            _fault = "微信 OCR 报错：" + s;
+                            Monitor.PulseAll(Sync);
+                        }
+                    };
+
+                    init(0, IntPtr.Zero);
+                    _env = create();
+                    if (_env == IntPtr.Zero)
+                    {
+                        note = "创建微信 OCR 环境失败";
+                        _faulted = true;
+                        _fault = note;
+                        return false;
+                    }
+
+                    setCb(_env, CbReadPush, Marshal.GetFunctionPointerForDelegate(_cbPush));
+                    setCb(_env, CbReadPull, Marshal.GetFunctionPointerForDelegate(_cbPull));
+                    setCb(_env, CbReadShared, Marshal.GetFunctionPointerForDelegate(_cbShared));
+                    setCb(_env, CbRemoteConnect, Marshal.GetFunctionPointerForDelegate(_cbConnect));
+                    setCb(_env, CbRemoteDisconnect, Marshal.GetFunctionPointerForDelegate(_cbDisconnect));
+                    setCb(_env, CbProcessLaunched, Marshal.GetFunctionPointerForDelegate(_cbLaunched));
+                    setCb(_env, CbProcessLaunchFailed, Marshal.GetFunctionPointerForDelegate(_cbLaunchFailed));
+                    setCb(_env, CbMojoError, Marshal.GetFunctionPointerForDelegate(_cbError));
+
+                    // 注意：宽字符指针必须常驻，GC 一挪就崩
+                    _hostPtr = Marshal.StringToHGlobalUni(probe.WeChatHostExe);
+                    setInt(_env, ParamHostProcess, 1);
+                    setStr(_env, ParamExePath, _hostPtr);
+
+                    append(_env, "no-sandbox", string.Empty);
+                    append(_env, "user-lib-dir", probe.WeChatInstallDir);
+                    append(_env, "type", Path.GetFileNameWithoutExtension(probe.PluginDll));
+                    append(_env, "app-path", probe.PluginDir);
+
+                    _startedFor = probe.PluginDll;
+                    startEnv(_env);
+                }
+                catch (Exception ex)
+                {
+                    note = "启动微信 OCR 失败：" + ex.Message;
+                    _faulted = true;
+                    _fault = note;
+                    Stop();
+                    return false;
+                }
+            }
+
+            // 等待握手在锁外做，避免回调线程被锁住
+            return WaitHandshake(15000, out note);
+        }
+
+        private static bool WaitHandshake(int timeoutMs, out string note)
+        {
+            note = string.Empty;
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            lock (Sync)
+            {
+                while (!_handshakeDone && !_faulted && DateTime.UtcNow < deadline)
+                    Monitor.Wait(Sync, 150);
+                if (_handshakeDone && _supported) return true;
+                if (_handshakeDone && !_supported)
+                {
+                    note = "微信 OCR 不支持当前环境";
+                    _faulted = true;
+                    _fault = note;
+                    return false;
+                }
+                note = _faulted
+                    ? (_fault.Length > 0 ? _fault : "微信 OCR 启动失败")
+                    : "微信 OCR 启动超时（微信刚启动时偶尔会慢一点，重试一次即可）";
+                if (!_faulted)
+                {
+                    // 超时不算永久故障，下次还能再试
+                    return false;
+                }
                 return false;
             }
         }
 
-        public static string Recognize(Bitmap bitmap, string rapidDir, bool forceSystem,
-            out string engine, out long ms, out string detail)
+        public static string Recognize(string pngPath, int timeoutMs, out string note)
         {
-            engine = "系统 OCR";
+            note = string.Empty;
+            if (_env == IntPtr.Zero) { note = "微信 OCR 未启动"; return null; }
+
+            ulong taskId;
+            lock (Sync)
+            {
+                taskId = _taskSeed++;
+            }
+
+            byte[] req = PB.EncodeOcrRequest(taskId, Path.GetFullPath(pngPath));
+            IntPtr wi = _createWriteInfo(MethodPush, 0, ReqOcr);
+            if (wi == IntPtr.Zero) { note = "创建请求失败"; return null; }
+            IntPtr buf = _getWriteReq(wi, (UIntPtr)req.Length);
+            if (buf == IntPtr.Zero) { note = "申请请求缓冲失败"; return null; }
+            Marshal.Copy(req, 0, buf, req.Length);
+            if (!_sendWrite(_env, wi)) { note = "发送识别请求失败"; return null; }
+
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            lock (Sync)
+            {
+                while (!_texts.ContainsKey(taskId) && !_faulted && DateTime.UtcNow < deadline)
+                    Monitor.Wait(Sync, 150);
+                if (!_texts.ContainsKey(taskId))
+                {
+                    note = _faulted && _fault.Length > 0 ? _fault : "微信 OCR 识别超时";
+                    return null;
+                }
+                int code = _codes[taskId];
+                int[] size = _sizes[taskId];
+                if (code != 0)
+                {
+                    note = "微信 OCR 返回错误码 " + code;
+                    return null;
+                }
+                if (size[0] > 0) note = size[0].ToString() + "×" + size[1].ToString();
+                return _texts[taskId];
+            }
+        }
+
+        public static void Stop()
+        {
+            lock (Sync)
+            {
+                if (_env != IntPtr.Zero)
+                {
+                    try
+                    {
+                        FnEnvOp stopEnv = Fn<FnEnvOp>("StopMMMojoEnvironment");
+                        FnEnvOp removeEnv = Fn<FnEnvOp>("RemoveMMMojoEnvironment");
+                        stopEnv(_env);
+                        removeEnv(_env);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                    _env = IntPtr.Zero;
+                }
+                _startedFor = string.Empty;
+                _handshakeDone = false;
+                _connected = false;
+                // mmmojo 内部线程不会随 env 一起结束，模块句柄故意不释放，避免卸载时崩
+            }
+        }
+
+        public static string ShutdownAndGetNote()
+        {
+            Stop();
+            return string.Empty;
+        }
+    }
+
+    // 极简 protobuf：只做我们需要的“字段遍历 + 编码一条 OCR 请求”
+    internal static class PB
+    {
+        public delegate void FieldHandler(int field, int wire, byte[] payload, long varint);
+
+        public static void ForEachField(byte[] data, FieldHandler handler)
+        {
+            int i = 0;
+            while (i < data.Length)
+            {
+                long tag = 0;
+                int shift = 0;
+                while (true)
+                {
+                    if (i >= data.Length) return;
+                    byte b = data[i++];
+                    tag |= (long)(b & 0x7F) << shift;
+                    if ((b & 0x80) == 0) break;
+                    shift += 7;
+                }
+                int field = (int)(tag >> 3);
+                int wire = (int)(tag & 7);
+                if (wire == 0)
+                {
+                    long v = 0;
+                    shift = 0;
+                    while (true)
+                    {
+                        if (i >= data.Length) return;
+                        byte b = data[i++];
+                        v |= (long)(b & 0x7F) << shift;
+                        if ((b & 0x80) == 0) break;
+                        shift += 7;
+                    }
+                    handler(field, wire, null, v);
+                }
+                else if (wire == 1)
+                {
+                    if (i + 8 > data.Length) return;
+                    byte[] p8 = new byte[8];
+                    Array.Copy(data, i, p8, 0, 8);
+                    i += 8;
+                    handler(field, wire, p8, 0);
+                }
+                else if (wire == 2)
+                {
+                    long len = 0;
+                    shift = 0;
+                    while (true)
+                    {
+                        if (i >= data.Length) return;
+                        byte b = data[i++];
+                        len |= (long)(b & 0x7F) << shift;
+                        if ((b & 0x80) == 0) break;
+                        shift += 7;
+                    }
+                    if (len < 0 || i + len > data.Length) return;
+                    byte[] p = new byte[(int)len];
+                    Array.Copy(data, i, p, 0, (int)len);
+                    i += (int)len;
+                    handler(field, wire, p, 0);
+                }
+                else if (wire == 5)
+                {
+                    if (i + 4 > data.Length) return;
+                    byte[] p4 = new byte[4];
+                    Array.Copy(data, i, p4, 0, 4);
+                    i += 4;
+                    handler(field, wire, p4, 0);
+                }
+                else
+                {
+                    return;
+                }
+            }
+        }
+
+        private static void Varint(Stream s, long v)
+        {
+            ulong u = (ulong)v;
+            while (u >= 0x80)
+            {
+                s.WriteByte((byte)((u | 0x80) & 0xFF));
+                u >>= 7;
+            }
+            s.WriteByte((byte)u);
+        }
+
+        private static void Tag(Stream s, int field, int wire)
+        {
+            Varint(s, (field << 3) | wire);
+        }
+
+        // ParseOCRReqMessage{1:task_id, 2:pic_path, 6:rt{t1,t2,t3}}
+        public static byte[] EncodeOcrRequest(ulong taskId, string picPath)
+        {
+            MemoryStream ms = new MemoryStream();
+            Tag(ms, 1, 0);
+            Varint(ms, (long)taskId);
+            byte[] path = Encoding.UTF8.GetBytes(picPath);
+            Tag(ms, 2, 2);
+            Varint(ms, path.Length);
+            ms.Write(path, 0, path.Length);
+
+            MemoryStream rt = new MemoryStream();
+            Tag(rt, 1, 0);
+            Varint(rt, 1);
+            Tag(rt, 2, 0);
+            Varint(rt, 1);
+            Tag(rt, 3, 0);
+            Varint(rt, 0);
+            byte[] rtBytes = rt.ToArray();
+            Tag(ms, 6, 2);
+            Varint(ms, rtBytes.Length);
+            ms.Write(rtBytes, 0, rtBytes.Length);
+            return ms.ToArray();
+        }
+    }
+
+    internal static class Ocr
+    {
+        private static readonly Regex CjkSpace = new Regex(
+            "(?<=[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef0-9])\\s+(?=[\\u4e00-\\u9fff\\u3000-\\u303f\\uff00-\\uffef0-9])");
+
+        private static readonly object ProbeLock = new object();
+        private static EngineProbe _probe;
+
+        public static string SystemEngineName = "Windows 内置 OCR";
+
+        // 探测（只查文件/注册表，不启动进程）；结果缓存，避免每次刷新界面都扫盘
+        public static EngineProbe Probe()
+        {
+            lock (ProbeLock)
+            {
+                if (_probe == null) _probe = WeChatOcrLocator.Detect();
+                return _probe;
+            }
+        }
+
+        // 设置页“重新检测”走这里：强制重扫
+        public static EngineProbe ProbeForce()
+        {
+            lock (ProbeLock)
+            {
+                _probe = WeChatOcrLocator.Detect();
+                return _probe;
+            }
+        }
+
+        public static EngineProbe CurrentProbe
+        {
+            get
+            {
+                lock (ProbeLock)
+                {
+                    if (_probe == null) _probe = WeChatOcrLocator.Detect();
+                    return _probe;
+                }
+            }
+        }
+
+        public static bool WeChatVerified
+        {
+            get
+            {
+                EngineProbe p = CurrentProbe;
+                return p != null && p.WeChatVerified;
+            }
+        }
+
+        public static bool WeChatRunning
+        {
+            get { return WxOcr.IsRunning; }
+        }
+
+        public static void Shutdown()
+        {
+            WxOcr.Stop();
+            ShutdownLocal();
+        }
+
+        // ---------- 本地 PP-OCR（离线，模型在 "OCR Model" 目录） ----------
+        private static readonly object LocalLock = new object();
+        private static PpOcr _local;
+        private static string _localEngine = string.Empty;
+
+        public static string LocalName(string engine)
+        {
+            string e = AppConfig.NormalizeEngine(engine);
+            if (e == AppConfig.EnginePpSmall) return "PP-OCR 标准";
+            if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
+            return "PP-OCR 极速";
+        }
+
+        // 只查文件，不加载模型
+        public static bool LocalReady(string engine)
+        {
+            return PpOcr.FolderReady(AppConfig.ModelTierDir(engine));
+        }
+
+        public static void ShutdownLocal()
+        {
+            lock (LocalLock)
+            {
+                if (_local != null)
+                {
+                    try { _local.Dispose(); } catch (Exception) { }
+                    _local = null;
+                    _localEngine = string.Empty;
+                }
+            }
+        }
+
+        // 取当前配置档位的本地引擎；模型缺失返回 null
+        public static PpOcr Local()
+        {
+            return LocalFor(AppConfig.NormalizeEngine(AppConfig.Engine));
+        }
+
+        public static PpOcr LocalFor(string e)
+        {
+            e = AppConfig.NormalizeEngine(e);
+            if (!AppConfig.IsLocalEngine(e)) return null;
+            lock (LocalLock)
+            {
+                if (_local != null && _localEngine == e) return _local;
+                if (_local != null)
+                {
+                    try { _local.Dispose(); } catch (Exception) { }
+                    _local = null;
+                    _localEngine = string.Empty;
+                }
+                string dir = AppConfig.ModelTierDir(e);
+                if (!PpOcr.FolderReady(dir)) return null;
+                try
+                {
+                    _local = new PpOcr(dir, LocalName(e));
+                    _localEngine = e;
+                }
+                catch (Exception)
+                {
+                    _local = null;
+                    _localEngine = string.Empty;
+                }
+                return _local;
+            }
+        }
+
+        // 实际可用的首选引擎
+        public static string EffectiveEngine()
+        {
+            string want = AppConfig.NormalizeEngine(AppConfig.Engine);
+            if (AppConfig.IsLocalEngine(want) && LocalReady(want)) return want;
+            if (want == AppConfig.EngineWeChat && CurrentProbe.WeChatUsable) return AppConfig.EngineWeChat;
+            if (LocalReady(AppConfig.EnginePpTiny)) return AppConfig.EnginePpTiny;
+            return AppConfig.EngineSystem;
+        }
+
+        public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail)
+        {
+            engine = SystemEngineName;
             ms = 0;
             detail = string.Empty;
 
@@ -686,26 +1667,70 @@ namespace QRSnap
                 png = Path.Combine(tmpDir, "ocr" + DateTime.Now.Ticks.ToString() + ".png");
                 bitmap.Save(png, ImageFormat.Png);
 
-                if (!forceSystem && rapidDir != null)
+                string want = AppConfig.NormalizeEngine(AppConfig.Engine);
+                if (AppConfig.IsLocalEngine(want))
                 {
-                    string note;
-                    string prepared = PrepareRapidDir(rapidDir, out note);
-                    if (note.Length > 0) detail = note;
-                    if (prepared != null)
+                    PpOcr pp = LocalFor(want);
+                    if (pp == null)
                     {
-                        string text = RunRapid(prepared, png, out ms);
-                        if (text != null)
+                        detail = "本地模型缺失（" + AppConfig.ModelTierDir(want) + "），已改用 " + SystemEngineName;
+                    }
+                    else
+                    {
+                        Stopwatch swLocal = Stopwatch.StartNew();
+                        try
                         {
-                            engine = "PP-OCRv6";
-                            return text;
+                            string text = pp.Recognize(bitmap);
+                            ms = swLocal.ElapsedMilliseconds;
+                            engine = LocalName(want);
+                            detail = AppConfig.ModelTierDir(want);
+                            if (text == null) return null;
+                            return NormalizeSystemText(text);
                         }
-                        detail = "PP-OCR 超时或失败，已改用系统 OCR";
+                        catch (Exception exLocal)
+                        {
+                            detail = "本地 OCR 失败：" + exLocal.Message + "，已改用 " + SystemEngineName;
+                        }
+                    }
+                }
+                if (want == AppConfig.EngineWeChat)
+                {
+                    EngineProbe probe = CurrentProbe;
+                    if (!probe.WeChatUsable)
+                    {
+                        detail = probe.Problem + "，已改用 " + SystemEngineName;
+                    }
+                    else
+                    {
+                        Stopwatch sw = Stopwatch.StartNew();
+                        string note;
+                        if (!WxOcr.Start(probe, out note))
+                        {
+                            detail = "微信 OCR 启动失败：" + note + "，已改用 " + SystemEngineName;
+                        }
+                        else
+                        {
+                            string text = WxOcr.Recognize(png, 20000, out note);
+                            if (text != null)
+                            {
+                                ms = sw.ElapsedMilliseconds;
+                                engine = "微信 OCR";
+                                detail = note;
+                                probe.WeChatVerified = true;
+                                return NormalizeWeChatText(text);
+                            }
+                            detail = note + "，已改用 " + SystemEngineName;
+                        }
                     }
                 }
 
                 string sys = RunSystemOcr(png, out ms);
-                engine = "系统 OCR";
-                if (sys == null) return null;
+                if (sys == null)
+                {
+                    if (detail.Length == 0) detail = "Windows 内置 OCR 不可用（需 Win10 以上且装有中文语言包）";
+                    return null;
+                }
+                engine = SystemEngineName;
                 return NormalizeSystemText(sys);
             }
             catch (Exception ex)
@@ -718,103 +1743,24 @@ namespace QRSnap
                 if (png != null)
                 {
                     try { File.Delete(png); } catch (Exception) { }
-                    try { File.Delete(png + "-result.txt"); } catch (Exception) { }
                     try { File.Delete(png + ".ocr.txt"); } catch (Exception) { }
                 }
             }
         }
 
-        private static string RunRapid(string sizeDir, string pngPath, out long ms)
+        // 微信 OCR 一行行给回来，去掉行尾空白即可
+        private static string NormalizeWeChatText(string text)
         {
-            ms = 0;
-            // exe 在 ModelDir 根目录，模型在 sizeDir
-            string exePath = Path.Combine(ModelDir, RapidExeName);
-            string models = sizeDir;
-            string resultFile = pngPath + "-result.txt";
-            try { if (File.Exists(resultFile)) File.Delete(resultFile); }
-            catch (Exception) { }
-
-            Stopwatch sw = Stopwatch.StartNew();
-            Process proc = null;
-            try
+            string[] lines = text.Replace("\r\n", "\n").Split('\n');
+            StringBuilder sb = new StringBuilder();
+            foreach (string raw in lines)
             {
-                ProcessStartInfo psi = new ProcessStartInfo(exePath);
-                psi.Arguments = "-d \"" + models + "\" -1 " + DetName + " -3 " + RecName
-                    + " -4 " + KeysName + " -i \"" + pngPath + "\"";
-                psi.WorkingDirectory = ModelDir;
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.RedirectStandardOutput = true;
-                psi.RedirectStandardError = true;
-
-                proc = Process.Start(psi);
-                if (proc == null) return null;
-
-                // 读空 stdout / stderr，避免管道写满把子进程卡住
-                Thread drain1 = new Thread(new ParameterizedThreadStart(Drain));
-                drain1.IsBackground = true;
-                drain1.Start(proc.StandardOutput);
-                Thread drain2 = new Thread(new ParameterizedThreadStart(Drain));
-                drain2.IsBackground = true;
-                drain2.Start(proc.StandardError);
-
-                // 这个 exe 跑完不会自己退出，只能盯着结果文件
-                while (sw.ElapsedMilliseconds < 25000)
-                {
-                    if (File.Exists(resultFile))
-                    {
-                        long len = new FileInfo(resultFile).Length;
-                        if (len > 0)
-                        {
-                            Thread.Sleep(120);
-                            string text = File.ReadAllText(resultFile, Encoding.UTF8);
-                            ms = sw.ElapsedMilliseconds;
-                            return text;
-                        }
-                    }
-                    if (proc.HasExited) break;
-                    Thread.Sleep(60);
-                }
-                ms = sw.ElapsedMilliseconds;
-                return null;
+                string line = raw.TrimEnd();
+                if (line.Length == 0) continue;
+                if (sb.Length > 0) sb.Append("\r\n");
+                sb.Append(line);
             }
-            catch (Exception)
-            {
-                ms = sw.ElapsedMilliseconds;
-                return null;
-            }
-            finally
-            {
-                KillProcess(proc);
-            }
-        }
-
-        private static void Drain(object streamObj)
-        {
-            try
-            {
-                StreamReader r = (StreamReader)streamObj;
-                while (r.ReadLine() != null) { }
-            }
-            catch (Exception)
-            {
-            }
-        }
-
-        private static void KillProcess(Process proc)
-        {
-            if (proc == null) return;
-            try
-            {
-                if (!proc.HasExited)
-                {
-                    proc.Kill();
-                    proc.WaitForExit(300);
-                }
-            }
-            catch (Exception)
-            {
-            }
+            return sb.ToString();
         }
 
         private static string RunSystemOcr(string pngPath, out long ms)
@@ -853,6 +1799,22 @@ namespace QRSnap
             finally
             {
                 KillProcess(proc);
+            }
+        }
+
+        private static void KillProcess(Process proc)
+        {
+            if (proc == null) return;
+            try
+            {
+                if (!proc.HasExited)
+                {
+                    proc.Kill();
+                    proc.WaitForExit(300);
+                }
+            }
+            catch (Exception)
+            {
             }
         }
 
@@ -958,10 +1920,16 @@ namespace QRSnap
         public bool Confirmed;
         public Bitmap Crop;
 
+        // 自由圈选：多边形顶点（虚拟屏坐标），Freehand=true 时走这条路
+        public bool Freehand;
+        public List<Point> Polygon = new List<Point>();
+        public bool HasPolygon;
+
         public void Run()
         {
             try
             {
+                Dbg("run start screens=" + Screen.AllScreens.Length);
                 List<MonitorShot> blank = new List<MonitorShot>();
 
                 foreach (Screen sc in Screen.AllScreens)
@@ -984,6 +1952,17 @@ namespace QRSnap
                     {
                         shot.Dispose();
                         continue;
+                    }
+
+                    // 调试：SNAPSCAN_DEBUG_CAP=1 时把抓到的每块屏存成 png，方便排查“抓不到画面”
+                    if (Environment.GetEnvironmentVariable("SNAPSCAN_DEBUG_CAP") == "1")
+                    {
+                        try
+                        {
+                            string dbg = Path.Combine(Path.GetTempPath(), "snapcap_" + bounds.Width + "x" + bounds.Height + "_" + bounds.X + "_" + bounds.Y + ".png");
+                            shot.Image.Save(dbg, System.Drawing.Imaging.ImageFormat.Png);
+                        }
+                        catch (Exception) { }
                     }
 
                     // 纯黑的显示器（虚拟/已断开的幽灵屏）不弹出遮罩，避免屏幕上出现莫名的黑窗口
@@ -1016,9 +1995,11 @@ namespace QRSnap
                     _forms.Add(form);
                     form.Show();
                 }
+                Dbg("forms shown=" + _forms.Count);
 
                 OverlayForm focus = PickFocusForm();
                 if (focus != null) Native.BringToFront(focus.Handle);
+                Dbg("focus brought");
 
                 int started = Environment.TickCount;
                 while (!Done)
@@ -1042,7 +2023,7 @@ namespace QRSnap
                 }
                 _forms.Clear();
 
-                if (Confirmed) Crop = MakeCrop(Selection);
+                if (Confirmed) Crop = HasPolygon ? MakePolygonCrop(Polygon) : MakeCrop(Selection);
 
                 foreach (MonitorShot shot in _shots) shot.Dispose();
                 _shots.Clear();
@@ -1089,8 +2070,56 @@ namespace QRSnap
         public void Confirm(Rectangle selection)
         {
             Selection = selection;
+            HasPolygon = false;
             Confirmed = true;
             Done = true;
+        }
+
+        // 自由圈选确认：顶点不足 3 个或面积太小当取消处理
+        public void ConfirmPolygon(List<Point> pts)
+        {
+            if (pts == null || pts.Count < 3)
+            {
+                Cancel();
+                return;
+            }
+            Rectangle bbox = BoundsOf(pts);
+            if (bbox.Width < 8 || bbox.Height < 8)
+            {
+                Cancel();
+                return;
+            }
+            Polygon = new List<Point>(pts);
+            Selection = bbox;
+            HasPolygon = true;
+            Confirmed = true;
+            Done = true;
+        }
+
+        public static Rectangle BoundsOf(List<Point> pts)        {
+            if (pts == null || pts.Count == 0) return Rectangle.Empty;
+            int minX = pts[0].X, minY = pts[0].Y, maxX = minX, maxY = minY;
+            for (int i = 1; i < pts.Count; i++)
+            {
+                Point p = pts[i];
+                if (p.X < minX) minX = p.X;
+                if (p.Y < minY) minY = p.Y;
+                if (p.X > maxX) maxX = p.X;
+                if (p.Y > maxY) maxY = p.Y;
+            }
+            return new Rectangle(minX, minY, maxX - minX, maxY - minY);
+        }
+
+        // 仅调试用：SNAPSCAN_DEBUG_CAP=1 时记流水账到 %TEMP%\snapcap.log
+        internal static void Dbg(string msg)
+        {
+            if (Environment.GetEnvironmentVariable("SNAPSCAN_DEBUG_CAP") != "1") return;
+            try
+            {
+                File.AppendAllText(Path.Combine(Path.GetTempPath(), "snapcap.log"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + "\r\n", new UTF8Encoding(false));
+            }
+            catch (Exception) { }
         }
 
         public void Cancel()
@@ -1135,6 +2164,117 @@ namespace QRSnap
             }
             return null;
         }
+
+        // 自由圈选裁剪：只保留多边形内部的像素，其余全透明（背景透明，文字仍是原像素）
+        private Bitmap MakePolygonCrop(List<Point> pts)
+        {
+            Rectangle bbox = BoundsOf(pts);
+            if (bbox.Width < 8 || bbox.Height < 8) return null;
+
+            Point center = new Point(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height / 2);
+            MonitorShot host = null;
+            foreach (MonitorShot shot in _shots)
+            {
+                if (shot.Bounds.Contains(center)) { host = shot; break; }
+            }
+            if (host == null && _shots.Count > 0) host = _shots[0];
+            if (host == null || host.Image == null) return null;
+
+            Bitmap mask = new Bitmap(bbox.Width, bbox.Height, PixelFormat.Format32bppArgb);
+            using (Graphics mg = Graphics.FromImage(mask))
+            {
+                mg.Clear(Color.Transparent);
+                mg.SmoothingMode = SmoothingMode.None;
+                mg.PixelOffsetMode = PixelOffsetMode.Half;
+                Point[] local = new Point[pts.Count];
+                for (int i = 0; i < pts.Count; i++) local[i] = new Point(pts[i].X - bbox.X, pts[i].Y - bbox.Y);
+                using (SolidBrush white = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
+                {
+                    mg.FillPolygon(white, local);
+                }
+                // 描一圈边，把锯齿收干净，避免把字的边缘吃掉
+                using (Pen pen = new Pen(Color.FromArgb(255, 255, 255, 255), 2F))
+                {
+                    mg.DrawPolygon(pen, local);
+                }
+            }
+
+            Bitmap result = new Bitmap(bbox.Width, bbox.Height, PixelFormat.Format32bppArgb);
+            using (Graphics rg = Graphics.FromImage(result))
+            {
+                rg.Clear(Color.Transparent);
+                rg.CompositingMode = CompositingMode.SourceCopy;
+                rg.PixelOffsetMode = PixelOffsetMode.Half;
+                rg.InterpolationMode = InterpolationMode.NearestNeighbor;
+
+                // 多边形可能画到屏幕外（或跨屏），GDI+ 遇到越界的源矩形会直接抛“参数无效”，
+                // 所以这里手工把源矩形夹进图像范围，再换算成目标矩形。
+                int sx = bbox.X - host.Bounds.X;
+                int sy = bbox.Y - host.Bounds.Y;
+                int dx = 0, dy = 0;
+                int w = bbox.Width, h = bbox.Height;
+
+                if (sx < 0) { dx = -sx; w += sx; sx = 0; }
+                if (sy < 0) { dy = -sy; h += sy; sy = 0; }
+                if (sx + w > host.Image.Width) w = host.Image.Width - sx;
+                if (sy + h > host.Image.Height) h = host.Image.Height - sy;
+
+                if (w > 0 && h > 0)
+                {
+                    Rectangle dest = new Rectangle(dx, dy, w, h);
+                    Rectangle src = new Rectangle(sx, sy, w, h);
+                    rg.DrawImage(host.Image, dest, src, GraphicsUnit.Pixel);
+                }
+            }
+
+            ApplyMask(result, mask);
+            mask.Dispose();
+            return result;
+        }
+
+        // 用蒙版把多边形外的像素清零（透明度）
+        private static void ApplyMask(Bitmap target, Bitmap mask)
+        {
+            if (target.Width != mask.Width || target.Height != mask.Height) return;
+            int w = target.Width;
+            int h = target.Height;
+            BitmapData td = target.LockBits(new Rectangle(0, 0, w, h),
+                ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            BitmapData md = mask.LockBits(new Rectangle(0, 0, w, h),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                byte[] trow = new byte[td.Stride];
+                byte[] mrow = new byte[md.Stride];
+                for (int y = 0; y < h; y++)
+                {
+                    Marshal.Copy(IntPtr.Add(td.Scan0, td.Stride * y), trow, 0, trow.Length);
+                    Marshal.Copy(IntPtr.Add(md.Scan0, md.Stride * y), mrow, 0, mrow.Length);
+                    for (int x = 0; x < w; x++)
+                    {
+                        byte m = mrow[x * 4 + 3];
+                        int o = x * 4;
+                        if (m < 128)
+                        {
+                            trow[o] = 0;
+                            trow[o + 1] = 0;
+                            trow[o + 2] = 0;
+                            trow[o + 3] = 0;
+                        }
+                        else
+                        {
+                            trow[o + 3] = 255;
+                        }
+                    }
+                    Marshal.Copy(trow, 0, IntPtr.Add(td.Scan0, td.Stride * y), trow.Length);
+                }
+            }
+            finally
+            {
+                target.UnlockBits(td);
+                mask.UnlockBits(md);
+            }
+        }
     }
 
     internal sealed class OverlayForm : Form
@@ -1148,6 +2288,7 @@ namespace QRSnap
 
         private Point _anchor;
         private bool _down;
+        private readonly List<Point> _pts = new List<Point>();
 
         public MonitorShot Shot { get { return _shot; } }
 
@@ -1193,30 +2334,80 @@ namespace QRSnap
             }
 
             Rectangle sel = _session.Selection;
-            if (sel.Width > 2 && sel.Height > 2)
+            if (_session.Freehand)
             {
-                Rectangle frame = new Rectangle(sel.X - _shot.Bounds.X, sel.Y - _shot.Bounds.Y, sel.Width, sel.Height);
-                Rectangle local = Rectangle.Intersect(frame, new Rectangle(0, 0, ClientSize.Width, ClientSize.Height));
-
-                if (local.Width > 0 && local.Height > 0)
+                DrawFreehand(g);
+            }
+            else
+            {
+                if (sel.Width > 2 && sel.Height > 2)
                 {
-                    // 选区内用原图 1:1 重画一遍（不缩放）
-                    g.SetClip(local, CombineMode.Replace);
-                    if (_shot.Image != null) g.DrawImageUnscaled(_shot.Image, 0, 0);
-                    g.ResetClip();
-                }
+                    Rectangle frame = new Rectangle(sel.X - _shot.Bounds.X, sel.Y - _shot.Bounds.Y, sel.Width, sel.Height);
+                    Rectangle local = Rectangle.Intersect(frame, new Rectangle(0, 0, ClientSize.Width, ClientSize.Height));
 
-                using (Pen pen = new Pen(Color.FromArgb(255, 0, 132, 255), 2F))
-                {
-                    g.DrawRectangle(pen, frame);
-                }
+                    if (local.Width > 0 && local.Height > 0)
+                    {
+                        // 选区内用原图 1:1 重画一遍（不缩放）
+                        g.SetClip(local, CombineMode.Replace);
+                        if (_shot.Image != null) g.DrawImageUnscaled(_shot.Image, 0, 0);
+                        g.ResetClip();
+                    }
 
-                DrawSizeBadge(g, sel, local);
+                    using (Pen pen = new Pen(Color.FromArgb(255, 0, 132, 255), 2F))
+                    {
+                        g.DrawRectangle(pen, frame);
+                    }
+
+                    DrawSizeBadge(g, sel, local);
+                }
             }
 
             if (_shot.Bounds.Contains(Cursor.Position))
             {
                 DrawHint(g, sel);
+            }
+        }
+
+        // 自由圈选：沿鼠标轨迹画出多边形，内部露出原图，外部保持暗化
+        private void DrawFreehand(Graphics g)
+        {
+            // GDI+ 的 GraphicsPath.AddPolygon 至少需要 3 个点，少于 3 点会抛“参数无效”，
+            // 这里必须先拦掉（刚按下鼠标、只移动了一次时就只有 2 点）。
+            if (_pts.Count < 3) return;
+
+            GraphicsPath path = new GraphicsPath();
+            try
+            {
+                Point[] local = new Point[_pts.Count];
+                for (int i = 0; i < _pts.Count; i++)
+                {
+                    local[i] = new Point(_pts[i].X - _shot.Bounds.X, _pts[i].Y - _shot.Bounds.Y);
+                }
+                path.AddPolygon(local);
+
+                if (_shot.Image != null)
+                {
+                    g.SetClip(path, CombineMode.Replace);
+                    g.DrawImageUnscaled(_shot.Image, 0, 0);
+                    g.ResetClip();
+                }
+                using (Pen pen = new Pen(Color.FromArgb(255, 0, 132, 255), 2F))
+                {
+                    g.DrawPath(pen, path);
+                }
+                Rectangle vb = CaptureSession.BoundsOf(_pts);
+                Rectangle lb = Rectangle.Intersect(
+                    new Rectangle(vb.X - _shot.Bounds.X, vb.Y - _shot.Bounds.Y, vb.Width, vb.Height),
+                    new Rectangle(0, 0, ClientSize.Width, ClientSize.Height));
+                if (lb.Width > 0 && lb.Height > 0) DrawSizeBadge(g, vb, lb);
+            }
+            catch (Exception)
+            {
+                // 圈选过程中的绘制异常绝不能冒到 WinForms 的 Paint 处理里，否则整窗口报错退出
+            }
+            finally
+            {
+                path.Dispose();
             }
         }
 
@@ -1242,9 +2433,19 @@ namespace QRSnap
 
         private void DrawHint(Graphics g, Rectangle sel)
         {
-            string hint = (sel.Width > MIN_SIZE)
-                ? "松开鼠标开始识别    Esc 取消"
-                : "拖动鼠标框选要识别的内容    Esc / 右键 取消";
+            string hint;
+            if (_session.Freehand)
+            {
+                hint = _down
+                    ? "松开鼠标，按你画的轮廓裁剪    Esc 取消"
+                    : "按住鼠标自由圈出要识别的范围    Esc / 右键 取消";
+            }
+            else
+            {
+                hint = (sel.Width > MIN_SIZE)
+                    ? "松开鼠标开始识别    Esc 取消"
+                    : "拖动鼠标框选要识别的内容    Esc / 右键 取消";
+            }
             SizeF hs = g.MeasureString(hint, _hintFont);
             int hw = (int)hs.Width + 34;
             int hh = (int)hs.Height + 16;
@@ -1301,6 +2502,12 @@ namespace QRSnap
             {
                 _down = true;
                 _anchor = ToVirtual(e.Location);
+                if (_session.Freehand)
+                {
+                    _pts.Clear();
+                    _pts.Add(_anchor);
+                    _session.Polygon = new List<Point>(_pts);
+                }
                 _session.Selection = new Rectangle(_anchor.X, _anchor.Y, 0, 0);
                 _session.InvalidateAll();
             }
@@ -1312,7 +2519,20 @@ namespace QRSnap
             if (_down)
             {
                 Point p = ToVirtual(e.Location);
-                _session.Selection = MakeRect(_anchor, p);
+                if (_session.Freehand)
+                {
+                    // 点间至少留 3px，既能画出平滑轮廓，也不会攒出几万个点
+                    if (_pts.Count == 0 || Distance(_pts[_pts.Count - 1], p) >= 3)
+                    {
+                        _pts.Add(p);
+                        _session.Polygon = new List<Point>(_pts);
+                        _session.Selection = CaptureSession.BoundsOf(_pts);
+                    }
+                }
+                else
+                {
+                    _session.Selection = MakeRect(_anchor, p);
+                }
                 _session.InvalidateAll();
             }
             else
@@ -1323,6 +2543,13 @@ namespace QRSnap
             base.OnMouseMove(e);
         }
 
+        private static int Distance(Point a, Point b)
+        {
+            int dx = a.X - b.X;
+            int dy = a.Y - b.Y;
+            return (int)Math.Sqrt(dx * dx + dy * dy);
+        }
+
         protected override void OnMouseUp(MouseEventArgs e)
         {
             if (!_down)
@@ -1331,6 +2558,13 @@ namespace QRSnap
                 return;
             }
             _down = false;
+
+            if (_session.Freehand)
+            {
+                _session.ConfirmPolygon(_pts);
+                base.OnMouseUp(e);
+                return;
+            }
 
             Rectangle sel = _session.Selection;
             if (sel.Width >= MIN_SIZE && sel.Height >= MIN_SIZE) _session.Confirm(sel);
@@ -1736,6 +2970,57 @@ namespace QRSnap
         }
     }
 
+    // 结果区：原生 RichTextBox —— 可框选、可编辑、长文本自带滚动条；
+    // 背景不由控件自己画，而是回调主窗体用同一套毛玻璃采样填进来，
+    // 看上去还是透明透底，但文字是真文本，不再是一张画不出来的图片。
+    internal sealed class ResultBox : RichTextBox
+    {
+        public delegate void SurfacePainter(Graphics g, Rectangle rect);
+
+        public SurfacePainter PaintSurface;
+
+        public ResultBox()
+        {
+            BorderStyle = BorderStyle.None;
+            ScrollBars = RichTextBoxScrollBars.Vertical;
+            Multiline = true;
+            WordWrap = true;
+            DetectUrls = false;
+            AcceptsTab = false;
+            HideSelection = false;
+            ShortcutsEnabled = true;
+            AllowDrop = false;
+            BackColor = Color.White;
+            ForeColor = MainForm.Ink;
+            Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
+            LanguageOption = RichTextBoxLanguageOptions.UIFonts;
+            ZoomFactor = 1F;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            // WM_ERASEBKGND：用卡片自己的毛玻璃底把这块区域填掉，实现“真透明”又不失可编辑
+            if (m.Msg == 0x0014 && PaintSurface != null)
+            {
+                using (Graphics g = Graphics.FromHdc(m.WParam))
+                {
+                    g.SmoothingMode = SmoothingMode.None;
+                    PaintSurface(g, ClientRectangle);
+                }
+                m.Result = (IntPtr)1;
+                return;
+            }
+
+            base.WndProc(ref m);
+
+            // 滚动后 RichEdit 可能自己刷一遍白底，这里再补一次自绘，避免滚动残影
+            if (m.Msg == 0x0115 || m.Msg == 0x020A)
+            {
+                if (PaintSurface != null) Invalidate();
+            }
+        }
+    }
+
     internal sealed class MainForm : Form
     {
         private const int HOTKEY_QR = 0x5151;
@@ -1749,8 +3034,7 @@ namespace QRSnap
         internal static readonly Color Accent = Color.FromArgb(47, 111, 224);
         internal static readonly Color Border = Color.FromArgb(203, 213, 225);
 
-        private readonly Label _lblResult;
-        private string _resultText = "";
+        private readonly ResultBox _txtResult;
         private readonly Label _lblStatus;
         private readonly Label _lblEngine;
         private readonly Label _lblPath;
@@ -1771,11 +3055,9 @@ namespace QRSnap
         private bool _working;
         private bool _autoCopy = true;
 
-        private string _upstreamDir;
-        private string _modelSize = "Tiny";
         private bool _restoreWin = false;
-        private string _ocrDirCfg = string.Empty;
-        private string _engineMode = AppConfig.EngineAuto;
+        private bool _restoreQr = false;
+        private bool _freehand = false;
         private SettingsForm _settings;
 
         private Image _backImage;
@@ -1798,6 +3080,7 @@ namespace QRSnap
             _backOpacity = value;
             GlassAlpha = (int)(value * 2.55);
             Invalidate(true);
+            if (_txtResult != null && !_txtResult.IsDisposed) _txtResult.Invalidate();
             Update();
             SaveConfig();
         }
@@ -1820,6 +3103,8 @@ namespace QRSnap
             if (_backBlurred != null) { _backBlurred.Dispose(); _backBlurred = null; }
             if (_backImage == null) return;
             _backBlurred = FastBlur((Bitmap)_backImage, _frost);
+            // 结果区是自绘背景的子控件，背景图换了要让它重新擦一遍
+            if (_txtResult != null && !_txtResult.IsDisposed) _txtResult.Invalidate();
         }
 
         // 3 趟盒式模糊近似高斯；radius=0 直接用原图
@@ -2158,23 +3443,44 @@ namespace QRSnap
             capResult.Dock = DockStyle.Fill;
             capResult.Margin = new Padding(0);
 
-            Label capHint = MakeLabel("双击结果可全选 · Ctrl+A 全选", 8F, FaintInk, ContentAlignment.MiddleRight, false);
+            Label capHint = MakeLabel("可选中 / 编辑 · Ctrl+A 全选 · Ctrl+C 复制", 8F, FaintInk, ContentAlignment.MiddleRight, false);
             capHint.Dock = DockStyle.Right;
-            capHint.Width = 220;
+            capHint.Width = 250;
             capHint.Margin = new Padding(0);
 
             head.Controls.Add(capResult);
             head.Controls.Add(capHint);
 
-            _lblResult = new Label();
-            _lblResult.Dock = DockStyle.Fill;
-            _lblResult.BackColor = Color.Transparent;
-            _lblResult.ForeColor = Ink;
-            _lblResult.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
-            _lblResult.TextAlign = ContentAlignment.TopLeft;
-            _lblResult.AutoEllipsis = false;
-            _lblResult.Margin = new Padding(4, 2, 4, 4);
-            _lblResult.DoubleClick += delegate { if (_resultText.Length > 0) { try { Clipboard.SetText(_resultText); } catch {} } };
+            // 结果区：真透明背景 + 原生文字排版能力（可框选、可编辑、长文本自动出滚动条）
+            _txtResult = new ResultBox();
+            _txtResult.Dock = DockStyle.Fill;
+            _txtResult.Margin = new Padding(2, 2, 2, 4);
+            _txtResult.PaintSurface = PaintResultSurface;
+            _txtResult.TextChanged += delegate { SyncResultPlaceholder(); };
+            _txtResult.KeyDown += OnResultKeyDown;
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            ToolStripMenuItem miCopy = new ToolStripMenuItem("复制");
+            miCopy.Click += delegate { CopySelectionOrAll(); };
+            ToolStripMenuItem miCut = new ToolStripMenuItem("剪切");
+            miCut.Click += delegate { if (_txtResult.SelectionLength > 0) _txtResult.Cut(); };
+            ToolStripMenuItem miPaste = new ToolStripMenuItem("粘贴");
+            miPaste.Click += delegate
+            {
+                if (Clipboard.ContainsText()) _txtResult.SelectedText = Clipboard.GetText();
+            };
+            ToolStripMenuItem miAll = new ToolStripMenuItem("全选");
+            miAll.Click += delegate { _txtResult.SelectAll(); };
+            ToolStripMenuItem miClear = new ToolStripMenuItem("清空");
+            miClear.Click += delegate { ClearResult(); };
+            menu.Items.Add(miCopy);
+            menu.Items.Add(miCut);
+            menu.Items.Add(miPaste);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miAll);
+            menu.Items.Add(miClear);
+            _txtResult.ContextMenuStrip = menu;
 
             _lblStatus = MakeLabel("就绪", 8.5F, SubInk, ContentAlignment.MiddleLeft, false);
             _lblStatus.Dock = DockStyle.Fill;
@@ -2188,9 +3494,9 @@ namespace QRSnap
             statusRow.Margin = new Padding(0);
 
             Label lblVer = new Label();
-            lblVer.Text = "v1.1.4.0  ·  约 710 KB  ·  免安装  ·  不自启";
+            lblVer.Text = VersionLine();
             lblVer.Dock = DockStyle.Right;
-            lblVer.Width = 210;
+            lblVer.Width = 214;
             lblVer.TextAlign = ContentAlignment.MiddleRight;
             lblVer.BackColor = Color.Transparent;
             lblVer.ForeColor = FaintInk;
@@ -2200,7 +3506,7 @@ namespace QRSnap
             statusRow.Controls.Add(lblVer);
 
             resRows.Controls.Add(head, 0, 0);
-            resRows.Controls.Add(_lblResult, 0, 1);
+            resRows.Controls.Add(_txtResult, 0, 1);
             resRows.Controls.Add(statusRow, 0, 2);
 
             cardResult.Controls.Add(resRows);
@@ -2287,15 +3593,77 @@ namespace QRSnap
             return l;
         }
 
-        private void ResultKeyDown(object sender, KeyEventArgs e)
+        // ---------- 结果区 ----------
+        // 结果框每帧的背景都由卡片自己画，所以既保持毛玻璃透明，又能用原生文本控件框选/编辑
+        private void PaintResultSurface(Graphics g, Rectangle rect)
+        {
+            // 背景图还没生成时不要填任何东西：宁可留空，也不要糊一块白色
+            if (_backBlurred == null || rect.Width <= 0 || rect.Height <= 0) return;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            Point win = PointToClient(_txtResult.PointToScreen(Point.Empty));
+            float sx = (float)_backBlurred.Width / ClientSize.Width;
+            float sy = (float)_backBlurred.Height / ClientSize.Height;
+            RectangleF src = new RectangleF(win.X * sx, win.Y * sy, rect.Width * sx, rect.Height * sy);
+            g.DrawImage(_backBlurred, rect, src, GraphicsUnit.Pixel);
+
+            // 卡片上已经有一层白色蒙层；这里再叠一层，保证结果区和卡片完全同一档次
+            int a = (int)(_backOpacity * 2.55);
+            if (a > 0)
+            {
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(a, 255, 255, 255)))
+                    g.FillRectangle(b, rect);
+            }
+        }
+
+        private void OnResultKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Control && e.KeyCode == Keys.A)
             {
-                _resultText = "";
-                _lblResult.Text = "";
+                _txtResult.SelectAll();
                 e.Handled = true;
                 e.SuppressKeyPress = true;
             }
+        }
+
+        private void CopySelectionOrAll()
+        {
+            if (_txtResult.SelectionLength > 0)
+            {
+                if (TryCopy(_txtResult.SelectedText)) SetStatus("已复制选中的文字");
+                return;
+            }
+            CopyResult();
+        }
+
+        private void SyncResultPlaceholder()
+        {
+            // 结果为空时给一句轻提示，长文本时有内容就不打扰
+            if (_txtResult.TextLength == 0) return;
+        }
+
+        private static string VersionLine()
+        {
+            string ver = "1.1.5.0";
+            try
+            {
+                Version v = Assembly.GetExecutingAssembly().GetName().Version;
+                ver = v.Major + "." + v.Minor + "." + v.Build + "." + v.Revision;
+            }
+            catch (Exception)
+            {
+            }
+            long kb = 0;
+            try
+            {
+                FileInfo fi = new FileInfo(Application.ExecutablePath);
+                if (fi.Exists) kb = fi.Length / 1024;
+            }
+            catch (Exception)
+            {
+            }
+            string size = kb > 0 ? "约 " + kb.ToString() + " KB" : "免安装";
+            return "v" + ver + "  ·  " + size + "  ·  不自启";
         }
 
         // ---------- 生命周期 ----------
@@ -2320,34 +3688,20 @@ namespace QRSnap
         {
             base.OnLoad(e);
 
-            string hkQr;
-            string hkOcr;
-            bool autoCopy;
-            string ocrDir;
-            string engine;
-            int backOpacity;
-            int frost;
-            string modelSize;
-            bool restoreWin;
-            bool legacy;
-            AppConfig.Load(out hkQr, out hkOcr, out autoCopy, out ocrDir, out engine, out backOpacity, out frost, out modelSize, out restoreWin, out legacy);
-            _ocrDirCfg = ocrDir;
-            _modelSize = modelSize;
-            _restoreWin = restoreWin;
-            _autoCopy = autoCopy;
-            _backOpacity = backOpacity;
-            _frost = frost;
+            AppConfig.Load();
+            string hkQr = AppConfig.HotkeyQr;
+            string hkOcr = AppConfig.HotkeyOcr;
+            bool legacy = AppConfig.Legacy;
+            _restoreWin = AppConfig.RestoreWin;
+            _restoreQr = AppConfig.RestoreAfterQr;
+            _freehand = AppConfig.Freehand;
+            _autoCopy = AppConfig.AutoCopy;
+            _backOpacity = AppConfig.BackOpacity;
+            _frost = AppConfig.Frost;
             GlassAlpha = (int)(_backOpacity * 2.55);
             RebuildBlurred();
-            _engineMode = engine == AppConfig.EngineSystem ? AppConfig.EngineSystem : AppConfig.EngineAuto;
             Invalidate(true);
-
-            // 新版只认 exe 同目录的 OCR Model，老配置里指向别处的 ocr 路径作废
-            if (legacy && !string.Equals(_ocrDirCfg.TrimEnd('\\'), Ocr.ModelDir.TrimEnd('\\'),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                _ocrDirCfg = string.Empty;
-            }
+            if (_txtResult != null && !_txtResult.IsDisposed) _txtResult.Invalidate();
 
             // 老版本默认是 Ctrl+Alt+Q，新默认改成 Ctrl+Alt+D
             if (legacy && string.Equals(hkQr.Replace(" ", ""), "Ctrl+Alt+Q", StringComparison.OrdinalIgnoreCase))
@@ -2373,7 +3727,6 @@ namespace QRSnap
                 _vkOcr = (uint)Keys.X;
             }
 
-            _upstreamDir = Ocr.GetUpstream(_ocrDirCfg, _modelSize);
             UpdateEngineLabels();
 
             // 老配置在 %APPDATA%，顺手迁到 exe 同目录的 QRSnap_config.ini
@@ -2394,10 +3747,12 @@ namespace QRSnap
                 _modsQr, _vkQr, out noteOcr);
 
             UpdateHotkeyLabels();
+            UpdateEngineLabels();
 
             if (_qrRegistered && _ocrRegistered)
             {
-                string status = "就绪 · 识码 " + HotkeyText.Format(_modsQr, _vkQr) + " / 识字 " + HotkeyText.Format(_modsOcr, _vkOcr);
+                string status = "就绪 · " + EngineShortName() + " · 识码 " + HotkeyText.Format(_modsQr, _vkQr)
+                    + " / 识字 " + HotkeyText.Format(_modsOcr, _vkOcr);
                 if (noteQr.Length > 0) status += "  ·  " + noteQr;
                 if (noteOcr.Length > 0) status += "  ·  " + noteOcr;
                 SetStatus(status);
@@ -2408,7 +3763,7 @@ namespace QRSnap
                 string fail = !_qrRegistered ? noteQr : noteOcr;
                 SetStatus(fail + "，请到 设置 里换一个组合键");
             }
-            // _lblResult.Focus() not needed
+            // _txtResult.Focus() not needed
 
             if (OpenSettingsOnStart)
             {
@@ -2490,75 +3845,86 @@ namespace QRSnap
         }
 
         // ---------- 引擎信息 ----------
+        // 首页只写“这一台机器上真实探测到”的引擎，探不到就不许显示已就绪
         private void UpdateEngineLabels()
         {
-            bool systemOnly = (_engineMode == AppConfig.EngineSystem);
+            EngineProbe probe = Ocr.Probe();
+            string selected = AppConfig.NormalizeEngine(AppConfig.Engine);
 
-            if (systemOnly)
+            if (probe.WeChatUsable)
             {
-                _lblEngine.Text = "系统 OCR · 已选择";
-                _lblEngine.ForeColor = Color.FromArgb(154, 116, 36);
-                _lblPath.Text = _upstreamDir != null
-                    ? "PP-OCRv6 已就绪，可在设置里切回自动"
-                    : "模型未安装（不影响使用）";
+                bool ok = probe.WeChatVerified;
+                _lblEngine.Text = ok
+                    ? "微信 OCR · 中文支持好 · 已就绪"
+                    : "微信 OCR · 中文支持好 · 可用";
+                _lblEngine.ForeColor = ok ? Color.FromArgb(22, 138, 74) : Color.FromArgb(22, 120, 74);
+                _lblPath.Text = "当前：" + (selected == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR")
+                    + "  ·  微信 " + probe.WeChatVersion + " / 插件 " + probe.PluginVersion;
                 _lblPath.ForeColor = FaintInk;
                 return;
             }
 
-            if (_upstreamDir != null)
-            {
-                _lblEngine.Text = "PP-OCRv6 " + _modelSize + " · 已就绪";
-                _lblEngine.ForeColor = Color.FromArgb(22, 138, 74);
-                _lblPath.Text = "模型：" + _modelSize + " 规格（exe 同目录 OCR Model\\" + _modelSize + "）";
-                _lblPath.ForeColor = FaintInk;
-            }
-            else
-            {
-                _lblEngine.Text = "系统内置 OCR · 自动降级";
-                _lblEngine.ForeColor = Color.FromArgb(154, 116, 36);
-                _lblPath.Text = "没找到 OCR Model，设置里可导入";
-                _lblPath.ForeColor = FaintInk;
-            }
+            // 没探到微信 → 真正能用的只有系统 OCR，文案必须说实话
+            _lblEngine.Text = "Windows 内置 OCR · 中文一般";
+            _lblEngine.ForeColor = Color.FromArgb(154, 116, 36);
+            _lblPath.Text = "未检测到微信 OCR（" + ShortProblem(probe.Problem) + "）";
+            _lblPath.ForeColor = FaintInk;
         }
 
-        // 设置页改完引擎 / 模型后回来刷新
-        internal void RefreshEngineState(string ocrDir, string engineMode, bool autoCopy)
+        private static string ShortProblem(string problem)
         {
-            _ocrDirCfg = ocrDir;
-            _engineMode = engineMode == AppConfig.EngineSystem ? AppConfig.EngineSystem : AppConfig.EngineAuto;
-            _autoCopy = autoCopy;
-            _upstreamDir = Ocr.GetUpstream(_ocrDirCfg, _modelSize);
-            if (_engineMode == AppConfig.EngineSystem) _upstreamDir = null;
+            if (string.IsNullOrEmpty(problem)) return "未安装";
+            string s = problem.Trim();
+            int i = s.IndexOf('，');
+            if (i > 0 && i < 26) s = s.Substring(0, i);
+            if (s.Length > 28) s = s.Substring(0, 28) + "…";
+            return s;
+        }
+
+        private string EngineShortName()
+        {
+            string e = Ocr.EffectiveEngine();
+            return e == AppConfig.EngineWeChat ? "微信 OCR" : "Windows OCR";
+        }
+
+        // 设置页改完设置后统一回到这里刷新（引擎重新探测、开关同步、配置落盘）
+        internal void ReloadSettings()
+        {
+            _autoCopy = AppConfig.AutoCopy;
+            _restoreWin = AppConfig.RestoreWin;
+            _restoreQr = AppConfig.RestoreAfterQr;
+            _freehand = AppConfig.Freehand;
             UpdateEngineLabels();
+            UpdateHotkeyLabels();
             SaveConfig();
-        }
-
-        internal void SetModelSize(string size)
-        {
-            if (size == "Tiny" || size == "Small" || size == "Medium")
-            {
-                _modelSize = size;
-                _upstreamDir = Ocr.GetUpstream(_ocrDirCfg, _modelSize);
-                if (_engineMode == AppConfig.EngineSystem) _upstreamDir = null;
-                UpdateEngineLabels();
-                SaveConfig();
-            }
         }
 
         internal void SaveConfig()
         {
-            AppConfig.Save(HotkeyText.Format(_modsQr, _vkQr), HotkeyText.Format(_modsOcr, _vkOcr),
-                _autoCopy, _ocrDirCfg, _engineMode, _backOpacity, _frost, _modelSize, _restoreWin);
+            AppConfig.HotkeyQr = HotkeyText.Format(_modsQr, _vkQr);
+            AppConfig.HotkeyOcr = HotkeyText.Format(_modsOcr, _vkOcr);
+            AppConfig.AutoCopy = _autoCopy;
+            AppConfig.RestoreWin = _restoreWin;
+            AppConfig.RestoreAfterQr = _restoreQr;
+            AppConfig.Freehand = _freehand;
+            AppConfig.BackOpacity = _backOpacity;
+            AppConfig.Frost = _frost;
+            AppConfig.Save();
         }
 
-        private void RestoreWindowIfNeeded()
+        private void RestoreWindowIfNeeded(bool afterCapture)
         {
-            if (!_restoreWin) return;
-            if (WindowState == FormWindowState.Minimized)
-            {
-                WindowState = FormWindowState.Normal;
-                Activate();
-            }
+            bool want = afterCapture ? _restoreQr : _restoreWin;
+            if (!want) return;
+            ShowMainWindow();
+        }
+
+        private void ShowMainWindow()
+        {
+            if (!Visible) Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
         }
 
         // 设置页里改快捷键：校验 → 重注册 → 落盘
@@ -2622,9 +3988,14 @@ namespace QRSnap
         internal bool HotkeyRegistered(bool isQr) { return isQr ? _qrRegistered : _ocrRegistered; }
         internal bool AutoCopyEnabled { get { return _autoCopy; } }
         internal bool RestoreWinEnabled { get { return _restoreWin; } set { _restoreWin = value; } }
-        internal string EngineMode { get { return _engineMode; } }
-        internal string ModelSize { get { return _modelSize; } }
-        internal string OcrDirCfg { get { return _ocrDirCfg; } }
+        internal bool RestoreQrEnabled { get { return _restoreQr; } set { _restoreQr = value; } }
+        internal bool FreehandEnabled { get { return _freehand; } set { _freehand = value; } }
+
+        internal void SetAutoCopy(bool value)
+        {
+            _autoCopy = value;
+            SaveConfig();
+        }
 
         // ---------- 截屏 ----------
         private void StartCapture(bool forOcr)
@@ -2650,6 +4021,7 @@ namespace QRSnap
 
             Bitmap crop = null;
             CaptureSession session = new CaptureSession();
+            session.Freehand = _freehand;
             try
             {
                 session.Run();
@@ -2730,9 +4102,8 @@ namespace QRSnap
                 return;
             }
 
-            _resultText = text;
-            _lblResult.Text = text;
-            RestoreWindowIfNeeded();
+            _txtResult.Text = text;
+            RestoreWindowIfNeeded(true);
 
             string status = "识别成功 · " + info + " · " + elapsed.ToString() + " ms · " + text.Length.ToString() + " 字符";
             if (_autoCopy && TryCopy(text))
@@ -2746,12 +4117,10 @@ namespace QRSnap
         private void BeginOcr(Bitmap crop)
         {
             _working = true;
-            SetStatus(_upstreamDir != null
-                ? "正在识别文字…（PP-OCRv6，约 8 秒）"
-                : "正在识别文字…（系统 OCR）");
-            _toast.ShowBusy(_upstreamDir != null ? "识别中…  文字（PP-OCRv6）" : "识别中…  文字（系统 OCR）");
+            string want = Ocr.EffectiveEngine() == AppConfig.EngineWeChat ? "微信 OCR" : "Windows 内置 OCR";
+            SetStatus("正在识别文字…（" + want + "）");
+            _toast.ShowBusy("识别中…  文字（" + want + "）");
 
-            string upstream = _upstreamDir;
             Thread worker = new Thread(new ThreadStart(delegate
             {
                 string text = null;
@@ -2761,7 +4130,7 @@ namespace QRSnap
                 string error = null;
                 try
                 {
-                    text = Ocr.Recognize(crop, upstream, _engineMode == AppConfig.EngineSystem, out engine, out elapsed, out detail);
+                    text = Ocr.Recognize(crop, out engine, out elapsed, out detail);
                 }
                 catch (Exception ex)
                 {
@@ -2803,9 +4172,8 @@ namespace QRSnap
                 return;
             }
 
-            _resultText = text;
-            _lblResult.Text = text;
-            RestoreWindowIfNeeded();
+            _txtResult.Text = text;
+            RestoreWindowIfNeeded(false);
 
             string status = "文字识别成功 · " + engine + " · " + elapsed.ToString() + " ms · "
                 + text.Length.ToString() + " 字符";
@@ -2820,7 +4188,7 @@ namespace QRSnap
 
         private void CopyResult()
         {
-            string text = _resultText;
+            string text = _txtResult.Text;
             if (string.IsNullOrEmpty(text))
             {
                 SetStatus("没有可复制的内容");
@@ -2850,8 +4218,7 @@ namespace QRSnap
 
         private void ClearResult()
         {
-            _resultText = "";
-            _lblResult.Text = "";
+            _txtResult.Text = "";
             _toast.HideToast();
             SetStatus("已清空 · 识码 " + HotkeyText.Format(_modsQr, _vkQr) + " / 识字 " + HotkeyText.Format(_modsOcr, _vkOcr));
         }
@@ -2882,19 +4249,21 @@ namespace QRSnap
         }
     }
 
-    // 设置二级页：引擎选择 / 模型目录 / 快捷键 / 自动复制 / 配置路径
+    // 设置二级页：文字引擎 / 快捷键 / 外观 / 截图方式 / 行为
     internal sealed class SettingsForm : Form
     {
         private readonly MainForm _owner;
-        private readonly RadioButton _rdoAuto;
-        private readonly RadioButton _rdoSystem;
-        private readonly ComboBox _cboSize;
+        private readonly ComboBox _cboEngine;
+        private readonly List<string> _engineKeys = new List<string>();
         private readonly Label _lblNow;
         private readonly Label _lblModel;
+        private readonly Button _btnPickWx;
         private readonly TextBox _boxQr;
         private readonly TextBox _boxOcr;
         private readonly CheckBox _chkCopy;
         private readonly CheckBox _chkRestore;
+        private readonly CheckBox _chkRestoreQr;
+        private readonly CheckBox _chkFreehand;
         private readonly Label _lblCfg;
         private readonly TrackBar _barOpacity;
         private readonly Label _lblOpacity;
@@ -2902,18 +4271,21 @@ namespace QRSnap
         private readonly Label _lblFrost;
         private bool _loading = true;
 
+        private const int PageWidth = 480;
+        private const int PageHeight = 900;
+
         public SettingsForm(MainForm owner)
         {
             _owner = owner;
 
             Text = "XuYuan-SnapScan 设置";
             AutoScroll = true;
-            AutoScrollMinSize = new Size(480, 790);
-            ClientSize = new Size(480, 790);
+            AutoScrollMinSize = new Size(PageWidth, PageHeight);
+            ClientSize = new Size(PageWidth, PageHeight);
             // 屏幕不够高时缩小窗口并自动滚动
             Screen scr = Screen.FromPoint(Cursor.Position);
             int maxH = scr.WorkingArea.Height - 40;
-            if (ClientSize.Height > maxH) ClientSize = new Size(480, maxH);
+            if (ClientSize.Height > maxH) ClientSize = new Size(PageWidth, maxH);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -2941,85 +4313,73 @@ namespace QRSnap
             // ---------- 卡片一：文字引擎 ----------
             Card cardEng = new Card();
             cardEng.Location = new Point(20, 76);
-            cardEng.Size = new Size(440, 232);
+            cardEng.Size = new Size(440, 246);
 
             Label capEng = new Label();
-            capEng.Text = "文字引擎";
+            capEng.Text = "文字引擎（只列这台电脑上真正检测到的）";
             capEng.Location = new Point(16, 12);
             capEng.AutoSize = true;
             capEng.ForeColor = MainForm.SubInk;
             capEng.Font = new Font(Font.FontFamily, 9F, FontStyle.Bold, GraphicsUnit.Point);
 
-            _rdoAuto = new RadioButton();
-            _rdoAuto.Text = "自动：优先 PP-OCRv6，没有模型时用系统 OCR";
-            _rdoAuto.Location = new Point(14, 36);
-            _rdoAuto.AutoSize = true;
-            _rdoAuto.ForeColor = MainForm.Ink;
-            _rdoAuto.Font = new Font(Font.FontFamily, 9F, FontStyle.Regular, GraphicsUnit.Point);
-
-            _rdoSystem = new RadioButton();
-            _rdoSystem.Text = "只用系统 OCR：1~2 秒出结果，中文有错字";
-            _rdoSystem.Location = new Point(14, 62);
-            _rdoSystem.AutoSize = true;
-            _rdoSystem.ForeColor = MainForm.Ink;
-            _rdoSystem.Font = new Font(Font.FontFamily, 9F, FontStyle.Regular, GraphicsUnit.Point);
-
-            Label capSize = new Label();
-            capSize.Text = "模型规格";
-            capSize.Location = new Point(16, 92);
-            capSize.AutoSize = true;
-            capSize.ForeColor = MainForm.SubInk;
-            capSize.Font = new Font(Font.FontFamily, 8.5F, FontStyle.Regular, GraphicsUnit.Point);
-
-            _cboSize = new ComboBox();
-            _cboSize.Location = new Point(80, 88);
-            _cboSize.Size = new Size(180, 24);
-            _cboSize.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboSize.FlatStyle = FlatStyle.Flat;
-            foreach (string s in Ocr.Sizes)
+            _cboEngine = new ComboBox();
+            _cboEngine.Location = new Point(16, 38);
+            _cboEngine.Size = new Size(300, 24);
+            _cboEngine.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cboEngine.FlatStyle = FlatStyle.Flat;
+            _cboEngine.SelectedIndexChanged += delegate
             {
-                bool avail = Ocr.IsSizeAvailable(s);
-                string label = s + (avail ? "" : "  (未找到)");
-                _cboSize.Items.Add(label);
-            }
-            _cboSize.SelectedIndexChanged += delegate { if (!_loading) ApplySize(); };
+                if (_loading) return;
+                int i = _cboEngine.SelectedIndex;
+                if (i < 0 || i >= _engineKeys.Count) return;
+                AppConfig.Engine = _engineKeys[i];
+                _owner.ReloadSettings();
+                RefreshState();
+            };
+
+            _btnPickWx = MakeSmallButton("指定微信目录", new Point(324, 37), new Size(100, 27), false);
+            _btnPickWx.Click += delegate { PickWeChatDir(); };
 
             _lblNow = new Label();
-            _lblNow.Location = new Point(16, 120);
-            _lblNow.Size = new Size(406, 20);
+            _lblNow.Location = new Point(16, 70);
+            _lblNow.Size = new Size(404, 20);
             _lblNow.ForeColor = MainForm.SubInk;
             _lblNow.Font = new Font(Font.FontFamily, 8.5F, FontStyle.Bold, GraphicsUnit.Point);
 
             _lblModel = new Label();
-            _lblModel.Location = new Point(16, 140);
-            _lblModel.Size = new Size(406, 18);
+            _lblModel.Location = new Point(16, 92);
+            _lblModel.Size = new Size(404, 34);
             _lblModel.ForeColor = MainForm.FaintInk;
             _lblModel.Font = new Font(Font.FontFamily, 7.5F, FontStyle.Regular, GraphicsUnit.Point);
             _lblModel.AutoEllipsis = true;
 
-            Button btnImport = MakeSmallButton("导入模型", new Point(16, 172), new Size(96, 28), true);
-            btnImport.Click += delegate { ImportModels(); };
+            Button btnRecheck = MakeSmallButton("重新检测", new Point(16, 132), new Size(96, 28), true);
+            btnRecheck.Click += delegate
+            {
+                Ocr.Probe();
+                RebuildEngineList();
+                RefreshState();
+            };
 
-            Button btnOpen = MakeSmallButton("打开模型目录", new Point(120, 172), new Size(116, 28), false);
-            btnOpen.Click += delegate { OpenModelDir(); };
-
-            Button btnPick = MakeSmallButton("指定别的目录", new Point(244, 172), new Size(110, 28), false);
-            btnPick.Click += delegate { ChooseModelDir(); };
+            Label hintWx = new Label();
+            hintWx.Location = new Point(124, 136);
+            hintWx.Size = new Size(300, 74);
+            hintWx.ForeColor = MainForm.FaintInk;
+            hintWx.Font = new Font(Font.FontFamily, 7.5F, FontStyle.Regular, GraphicsUnit.Point);
+            hintWx.Text = "微信 OCR 是微信 4.x 自带的能力，中文识别明显更准；本软件直接调用它，"
+                + "不用另外装模型或 Python。没有微信时自动用 Windows 10/11 内置 OCR（免安装、中文一般）。";
 
             cardEng.Controls.Add(capEng);
-            cardEng.Controls.Add(_rdoAuto);
-            cardEng.Controls.Add(_rdoSystem);
-            cardEng.Controls.Add(capSize);
-            cardEng.Controls.Add(_cboSize);
+            cardEng.Controls.Add(_cboEngine);
+            cardEng.Controls.Add(_btnPickWx);
             cardEng.Controls.Add(_lblNow);
             cardEng.Controls.Add(_lblModel);
-            cardEng.Controls.Add(btnImport);
-            cardEng.Controls.Add(btnOpen);
-            cardEng.Controls.Add(btnPick);
+            cardEng.Controls.Add(btnRecheck);
+            cardEng.Controls.Add(hintWx);
 
             // ---------- 卡片二：快捷键 ----------
             Card cardKeys = new Card();
-            cardKeys.Location = new Point(20, 288);
+            cardKeys.Location = new Point(20, 296);
             cardKeys.Size = new Size(440, 136);
 
             Label capKeys = new Label();
@@ -3063,7 +4423,7 @@ namespace QRSnap
 
             // ---------- 卡片三：外观（毛玻璃） ----------
             Card cardBg = new Card();
-            cardBg.Location = new Point(20, 436);
+            cardBg.Location = new Point(20, 444);
             cardBg.Size = new Size(440, 150);
 
             Label capBg = new Label();
@@ -3152,26 +4512,34 @@ namespace QRSnap
             cardBg.Controls.Add(_lblFrost);
             cardBg.Controls.Add(hintBg);
 
-            // ---------- 卡片四：行为与配置 ----------
-            Card cardMisc = new Card();
-            cardMisc.Location = new Point(20, 600);
-            cardMisc.Size = new Size(440, 130);
+            // ---------- 卡片四：截图方式与行为 ----------
+            Card cardShot = new Card();
+            cardShot.Location = new Point(20, 606);
+            cardShot.Size = new Size(440, 146);
 
-            _chkCopy = new CheckBox();
-            _chkCopy.Text = "识别后自动复制到剪贴板";
-            _chkCopy.Location = new Point(14, 12);
-            _chkCopy.AutoSize = true;
-            _chkCopy.ForeColor = MainForm.Ink;
-            _chkCopy.Checked = _owner.AutoCopyEnabled;
-            _chkCopy.CheckedChanged += delegate
+            Label capShot = new Label();
+            capShot.Text = "截图方式与行为";
+            capShot.Location = new Point(16, 12);
+            capShot.AutoSize = true;
+            capShot.ForeColor = MainForm.SubInk;
+            capShot.Font = new Font(Font.FontFamily, 9F, FontStyle.Bold, GraphicsUnit.Point);
+
+            _chkFreehand = new CheckBox();
+            _chkFreehand.Text = "自由圈选（按住鼠标画任意形状，只裁轮廓内的内容）";
+            _chkFreehand.Location = new Point(14, 38);
+            _chkFreehand.AutoSize = true;
+            _chkFreehand.ForeColor = MainForm.Ink;
+            _chkFreehand.Checked = _owner.FreehandEnabled;
+            _chkFreehand.CheckedChanged += delegate
             {
                 if (_loading) return;
-                _owner.RefreshEngineState(_owner.OcrDirCfg, CurrentMode(), _chkCopy.Checked);
+                _owner.FreehandEnabled = _chkFreehand.Checked;
+                _owner.SaveConfig();
             };
 
             _chkRestore = new CheckBox();
-            _chkRestore.Text = "识别后恢复窗口（默认最小化不恢复）";
-            _chkRestore.Location = new Point(14, 38);
+            _chkRestore.Text = "识别后恢复本软件窗口（默认最小化不恢复）";
+            _chkRestore.Location = new Point(14, 66);
             _chkRestore.AutoSize = true;
             _chkRestore.ForeColor = MainForm.Ink;
             _chkRestore.Checked = _owner.RestoreWinEnabled;
@@ -3182,22 +4550,57 @@ namespace QRSnap
                 _owner.SaveConfig();
             };
 
+            _chkRestoreQr = new CheckBox();
+            _chkRestoreQr.Text = "扫码后显示本软件窗口（只对识码生效）";
+            _chkRestoreQr.Location = new Point(14, 94);
+            _chkRestoreQr.AutoSize = true;
+            _chkRestoreQr.ForeColor = MainForm.Ink;
+            _chkRestoreQr.Checked = _owner.RestoreQrEnabled;
+            _chkRestoreQr.CheckedChanged += delegate
+            {
+                if (_loading) return;
+                _owner.RestoreQrEnabled = _chkRestoreQr.Checked;
+                _owner.SaveConfig();
+            };
+
+            cardShot.Controls.Add(capShot);
+            cardShot.Controls.Add(_chkFreehand);
+            cardShot.Controls.Add(_chkRestore);
+            cardShot.Controls.Add(_chkRestoreQr);
+
+            // ---------- 卡片五：自动复制与配置 ----------
+            Card cardMisc = new Card();
+            cardMisc.Location = new Point(20, 762);
+            cardMisc.Size = new Size(440, 118);
+
+            _chkCopy = new CheckBox();
+            _chkCopy.Text = "识别后自动复制到剪贴板";
+            _chkCopy.Location = new Point(14, 12);
+            _chkCopy.AutoSize = true;
+            _chkCopy.ForeColor = MainForm.Ink;
+            _chkCopy.Checked = _owner.AutoCopyEnabled;
+            _chkCopy.CheckedChanged += delegate
+            {
+                if (_loading) return;
+                _owner.SetAutoCopy(_chkCopy.Checked);
+            };
+
             Label capCfg = new Label();
             capCfg.Text = "配置文件";
-            capCfg.Location = new Point(16, 74);
+            capCfg.Location = new Point(16, 44);
             capCfg.AutoSize = true;
             capCfg.ForeColor = MainForm.SubInk;
             capCfg.Font = new Font(Font.FontFamily, 8.5F, FontStyle.Bold, GraphicsUnit.Point);
 
             _lblCfg = new Label();
-            _lblCfg.Location = new Point(16, 96);
+            _lblCfg.Location = new Point(16, 68);
             _lblCfg.Size = new Size(320, 18);
             _lblCfg.ForeColor = MainForm.FaintInk;
             _lblCfg.Font = new Font(Font.FontFamily, 7.5F, FontStyle.Regular, GraphicsUnit.Point);
             _lblCfg.AutoEllipsis = true;
             _lblCfg.Text = AppConfig.ConfigPath;
 
-            Button btnFolder = MakeSmallButton("所在目录", new Point(340, 92), new Size(88, 26), false);
+            Button btnFolder = MakeSmallButton("所在目录", new Point(340, 62), new Size(88, 26), false);
             btnFolder.Click += delegate
             {
                 try
@@ -3210,12 +4613,11 @@ namespace QRSnap
             };
 
             cardMisc.Controls.Add(_chkCopy);
-            cardMisc.Controls.Add(_chkRestore);
             cardMisc.Controls.Add(capCfg);
             cardMisc.Controls.Add(_lblCfg);
             cardMisc.Controls.Add(btnFolder);
 
-            Button btnClose = MakeSmallButton("关闭", new Point(376, 740), new Size(84, 30), true);
+            Button btnClose = MakeSmallButton("关闭", new Point(376, 850), new Size(84, 30), true);
             btnClose.Click += delegate { Close(); };
 
             Controls.Add(title);
@@ -3223,72 +4625,111 @@ namespace QRSnap
             Controls.Add(cardEng);
             Controls.Add(cardKeys);
             Controls.Add(cardBg);
+            Controls.Add(cardShot);
             Controls.Add(cardMisc);
             Controls.Add(btnClose);
 
-            _rdoAuto.Checked = _owner.EngineMode != AppConfig.EngineSystem;
-            _rdoSystem.Checked = !_rdoAuto.Checked;
-            // 选中当前规格
-            string curSize = _owner.ModelSize;
-            for (int i = 0; i < Ocr.Sizes.Length; i++)
-            {
-                if (Ocr.Sizes[i] == curSize) { _cboSize.SelectedIndex = i; break; }
-            }
-            if (_cboSize.SelectedIndex < 0) _cboSize.SelectedIndex = 0;
             _boxQr.Text = HotkeyText.Format(_owner.HotkeyMods(true), _owner.HotkeyVk(true));
             _boxOcr.Text = HotkeyText.Format(_owner.HotkeyMods(false), _owner.HotkeyVk(false));
 
             _loading = false;
 
-            _rdoAuto.CheckedChanged += delegate { if (!_loading) ApplyEngine(); };
-            _rdoSystem.CheckedChanged += delegate { if (!_loading) ApplyEngine(); };
-
+            RebuildEngineList();
             RefreshState();
         }
 
-        private string CurrentMode()
+        // 引擎下拉只放真正可用的项；一项都没有时直接禁用并给出获取提示
+        private void RebuildEngineList()
         {
-            return _rdoSystem.Checked ? AppConfig.EngineSystem : AppConfig.EngineAuto;
-        }
+            _loading = true;
+            _engineKeys.Clear();
+            _cboEngine.Items.Clear();
 
-        private void ApplyEngine()
-        {
-            _owner.RefreshEngineState(_owner.OcrDirCfg, CurrentMode(), _chkCopy.Checked);
-            RefreshState();
-        }
-
-        private void ApplySize()
-        {
-            int idx = _cboSize.SelectedIndex;
-            if (idx >= 0 && idx < Ocr.Sizes.Length)
+            EngineProbe probe = Ocr.CurrentProbe;
+            if (probe != null && probe.WeChatUsable)
             {
-                _owner.SetModelSize(Ocr.Sizes[idx]);
-                _owner.RefreshEngineState(_owner.OcrDirCfg, CurrentMode(), _chkCopy.Checked);
+                _engineKeys.Add(AppConfig.EngineWeChat);
+                _cboEngine.Items.Add("微信 OCR · 中文支持好（本机已检测到微信 " + probe.WeChatVersion + "）");
             }
-            RefreshState();
+            _engineKeys.Add(AppConfig.EngineSystem);
+            _cboEngine.Items.Add("Windows 内置 OCR · 免安装（中文一般）");
+
+            string cur = AppConfig.NormalizeEngine(AppConfig.Engine);
+            int idx = _engineKeys.IndexOf(cur);
+            if (idx < 0)
+            {
+                idx = 0;
+                AppConfig.Engine = _engineKeys[0];
+                _owner.ReloadSettings();
+            }
+            _cboEngine.SelectedIndex = idx;
+            _cboEngine.Enabled = _engineKeys.Count > 0;
+            _loading = false;
         }
 
         private void RefreshState()
         {
-            string size = _owner.ModelSize;
-            string upstream = Ocr.GetUpstream(_owner.OcrDirCfg, size);
-            if (upstream != null)
+            EngineProbe probe = Ocr.CurrentProbe;
+            string cur = AppConfig.NormalizeEngine(AppConfig.Engine);
+            string name = cur == AppConfig.EngineWeChat ? "微信 OCR · 中文支持好" : "Windows 内置 OCR";
+
+            if (cur == AppConfig.EngineWeChat && (probe == null || !probe.WeChatUsable))
             {
-                _lblNow.Text = "当前：PP-OCRv6 可用";
-                _lblNow.ForeColor = Color.FromArgb(22, 138, 74);
-                _lblModel.Text = "模型：" + upstream;
+                name = "Windows 内置 OCR（微信 OCR 不可用，已自动降级）";
+            }
+
+            _lblNow.Text = "当前使用：" + name;
+            _lblNow.ForeColor = (cur == AppConfig.EngineWeChat && probe != null && probe.WeChatUsable)
+                ? Color.FromArgb(22, 138, 74)
+                : Color.FromArgb(154, 116, 36);
+
+            if (probe != null && probe.WeChatUsable)
+            {
+                _lblModel.Text = "微信 OCR：微信 " + probe.WeChatVersion + " · 插件 " + probe.PluginVersion
+                    + " · " + probe.WeChatInstallDir;
+                _btnPickWx.Text = "换微信目录";
             }
             else
             {
-                _lblNow.Text = "当前：未找到模型，用系统 OCR";
-                _lblNow.ForeColor = Color.FromArgb(154, 116, 36);
-                _lblModel.Text = "把 OcrEngine.exe + models 放进 " + Ocr.ModelDir;
-            }
-            if (CurrentMode() == AppConfig.EngineSystem)
-            {
-                _lblNow.Text = upstream != null ? "当前：只用系统 OCR（PP-OCRv6 已闲置）" : "当前：只用系统 OCR";
+                _lblModel.Text = "未检测到微信 OCR：" + (probe == null ? "探测失败" : probe.Problem);
+                _btnPickWx.Text = "指定微信目录";
             }
             _lblCfg.Text = AppConfig.ConfigPath;
+        }
+
+        // 微信装在非默认位置时，允许手动指定（会存进配置的 wxdir）
+        private void PickWeChatDir()
+        {
+            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+            {
+                dlg.Description = "选微信安装目录（含 mmmojo_64.dll 的那一层，例如 D:\\Tencent\\Weixin\\4.1.15.56），"
+                    + "或选上一级让程序自己往下找";
+                string cur = AppConfig.WeChatDir;
+                if (string.IsNullOrEmpty(cur)) cur = Ocr.CurrentProbe.WeChatInstallDir;
+                if (!string.IsNullOrEmpty(cur) && Directory.Exists(cur)) dlg.SelectedPath = cur;
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                AppConfig.WeChatDir = dlg.SelectedPath;
+                Ocr.Probe();
+                RebuildEngineList();
+                RefreshState();
+                _owner.ReloadSettings();
+
+                EngineProbe p = Ocr.CurrentProbe;
+                if (p != null && p.WeChatUsable)
+                {
+                    MessageBox.Show(this, "微信 OCR 已接通：\r\n" + p.WeChatInstallDir
+                        + "\r\n\r\n插件：" + p.PluginDll, "检测成功",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(this, (p == null ? "探测失败" : p.Problem)
+                        + "\r\n\r\n常见原因：微信是 3.x（只有 32 位插件）；或微信 4.x 还没登录、没用过截图识字。",
+                        "没找到微信 OCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
         }
 
         private Button MakeSmallButton(string text, Point loc, Size size, bool primary)
@@ -3365,93 +4806,6 @@ namespace QRSnap
             }
             box.Text = HotkeyText.Format(mods, (uint)code);
         }
-
-        private void ImportModels()
-        {
-            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
-            {
-                dlg.Description = "选一份完整的模型目录（要有 OcrEngine.exe 和 models 文件夹），"
-                    + "会整体复制到 " + Ocr.ModelDir;
-                if (Directory.Exists(Ocr.ModelDir)) dlg.SelectedPath = Ocr.ModelDir;
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-                string src = dlg.SelectedPath;
-                if (!Ocr.IsRapidDir(src))
-                {
-                    MessageBox.Show(this,
-                        "这个目录不完整。需要：OcrEngine.exe\r\n以及 models\\ch_PP-OCRv6_det_infer.onnx、"
-                        + "det.onnx、rec.onnx、keys.txt",
-                        "目录里没有模型", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-
-                Cursor old = Cursor;
-                Cursor = Cursors.WaitCursor;
-                string note;
-                int files;
-                long bytes;
-                bool ok;
-                try
-                {
-                    ok = Ocr.ImportIntoModels(src, out note, out files, out bytes);
-                }
-                catch (Exception ex)
-                {
-                    ok = false;
-                    note = ex.Message;
-                }
-                finally
-                {
-                    Cursor = old;
-                }
-
-                _owner.RefreshEngineState(string.Empty, CurrentMode(), _chkCopy.Checked);
-                RefreshState();
-
-                if (ok)
-                {
-                    MessageBox.Show(this, "模型已导入到 OCR Model。\r\n" + note, "完成",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                else
-                {
-                    MessageBox.Show(this, note, "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-        }
-
-        private void OpenModelDir()
-        {
-            try
-            {
-                if (!Directory.Exists(Ocr.ModelDir)) Directory.CreateDirectory(Ocr.ModelDir);
-                Process.Start("explorer.exe", "\"" + Ocr.ModelDir + "\"");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "打开文件夹失败：" + ex.Message, "打开失败",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        private void ChooseModelDir()
-        {
-            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
-            {
-                dlg.Description = "指定另一个模型目录（同样要满足 OcrEngine.exe + PP-OCRv6 模型）";
-                if (Directory.Exists(Ocr.ModelDir)) dlg.SelectedPath = Ocr.ModelDir;
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-                if (!Ocr.IsRapidDir(dlg.SelectedPath))
-                {
-                    MessageBox.Show(this, "这个目录里没有 OcrEngine.exe 或 PP-OCRv6 模型，不能用。",
-                        "目录不可用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                _owner.RefreshEngineState(dlg.SelectedPath, CurrentMode(), _chkCopy.Checked);
-                RefreshState();
-            }
-        }
     }
 
     internal static class Program
@@ -3461,6 +4815,16 @@ namespace QRSnap
         {
             AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbeddedAssembly;
 
+            // 正式界面：JadeView 2.0 + Web UI（新增 --classic 可退回旧的 WinForms 界面）
+            bool legacyUi = args.Length >= 1 && args[0] == "--classic";
+            bool selfTestArgs = args.Length >= 1 && (args[0] == "--selftest" || args[0] == "--ocrselftest"
+                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate");
+            if (!legacyUi && !selfTestArgs)
+            {
+                JadeHost.Run();
+                return;
+            }
+
             // 自检：QRSnap.exe --selftest 图片路径 [结果输出路径]
             if (args.Length >= 2 && args[0] == "--selftest")
             {
@@ -3468,10 +4832,48 @@ namespace QRSnap
                 return;
             }
 
-            // 文字识别自检：QRSnap.exe --ocrselftest 图片路径 [结果输出路径] [auto|rapid|system]
+            // 文字识别自检：QRSnap.exe --ocrselftest 图片路径 [结果输出路径] [wechat|system]
             if (args.Length >= 2 && args[0] == "--ocrselftest")
             {
-                OcrSelfTest(args[1], args.Length >= 3 ? args[2] : null, args.Length >= 4 ? args[3] : "auto");
+                OcrSelfTest(args[1], args.Length >= 3 ? args[2] : null, args.Length >= 4 ? args[3] : "wechat");
+                return;
+            }
+
+            // 界面状态自检：QRSnap.exe --dumpstate 输出路径
+            if (args.Length >= 2 && args[0] == "--dumpstate")
+            {
+                try
+                {
+                    AppConfig.Load();
+                    File.WriteAllText(args[1], JadeHost.BuildState(), new UTF8Encoding(false));
+                }
+                catch (Exception exState)
+                {
+                    try { File.WriteAllText(args[1], "ERROR: " + exState.ToString(), new UTF8Encoding(false)); } catch (Exception) { }
+                }
+                return;
+            }
+
+            // 引擎探测自检：QRSnap.exe --probe 结果输出路径
+            if (args.Length >= 2 && args[0] == "--probe")
+            {
+                EngineProbe probe = Ocr.Probe();
+                string report = "wechatFound=" + (probe.WeChatUsable ? "1" : "0")
+                    + "\r\nwechatVerified=" + (probe.WeChatVerified ? "1" : "0")
+                    + "\r\ndir=" + probe.WeChatInstallDir
+                    + "\r\nversion=" + probe.WeChatVersion
+                    + "\r\nhost=" + probe.WeChatHostExe
+                    + "\r\nplugin=" + probe.PluginDll
+                    + "\r\npluginVersion=" + probe.PluginVersion
+                    + "\r\nonly3=" + (probe.WeChat3Only ? "1" : "0")
+                    + "\r\nproblem=" + probe.Problem;
+                try
+                {
+                    File.WriteAllText(args[1], report, new UTF8Encoding(false));
+                }
+                catch (Exception)
+                {
+                }
                 return;
             }
 
@@ -3487,7 +4889,7 @@ namespace QRSnap
                 seq.Tick += delegate
                 {
                     step++;
-                    if (step == 1) toast.ShowBusy("识别中…  文字（PP-OCRv6）");
+                    if (step == 1) toast.ShowBusy("识别中…  文字（微信 OCR）");
                     if (step == 6) toast.ShowDone("识别完成", true);
                     if (step == 10)
                     {
@@ -3599,17 +5001,29 @@ namespace QRSnap
             string report;
             try
             {
-                string upstream = (mode == "system") ? null : Ocr.GetUpstream(string.Empty, "Tiny");
+                // 自检也要按 ini 里的设置跑（尤其是 wxdir 手动指定的微信目录）
+                AppConfig.Load();
+                if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
+                else if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
+                else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
+                else if (mode == "ppsmall") AppConfig.Engine = AppConfig.EnginePpSmall;
+                else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
 
+                EngineProbe probe = Ocr.Probe();
                 Bitmap bmp = LoadBitmap(imagePath);
                 string engine;
                 long ms;
                 string detail;
-                string text = Ocr.Recognize(bmp, upstream, mode == "system", out engine, out ms, out detail);
+                string text = Ocr.Recognize(bmp, out engine, out ms, out detail);
                 bmp.Dispose();
 
-                report = "engine=" + engine + "\r\nms=" + ms.ToString() + "\r\nupstream="
-                    + (upstream == null ? "(none)" : upstream) + "\r\nmirror=" + Ocr.MirrorDir + "\r\ndetail=" + detail
+                report = "engine=" + engine + "\r\nms=" + ms.ToString()
+                    + "\r\nwechatFound=" + (probe.WeChatUsable ? "1" : "0")
+                    + "\r\nwechatVerified=" + (probe.WeChatVerified ? "1" : "0")
+                    + "\r\nwechatDir=" + probe.WeChatInstallDir
+                    + "\r\nplugin=" + probe.PluginDll
+                    + "\r\nproblem=" + probe.Problem
+                    + "\r\ndetail=" + detail
                     + "\r\nTEXT_BEGIN\r\n" + (text ?? "(null)") + "\r\nTEXT_END\r\n";
             }
             catch (Exception ex)
