@@ -880,7 +880,6 @@ namespace QRSnap
             Bind("recheck", OnRecheck);
             Bind("pickwx", OnPickWx);
             Bind("importmodel", OnImportModel);
-            Bind("downloadmodel", OnDownloadModel);
             Bind("capture", OnCapture);
             Bind("clipcopy", OnCopy);
             Bind("win", OnWin);
@@ -1064,10 +1063,6 @@ namespace QRSnap
             sb.Append(",\"mtperf\":").Append(J.S(AppConfig.MtPerf));
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
-            sb.Append(",\"dl\":{\"running\":").Append(J.B(ModelDownload.Running));
-            sb.Append(",\"key\":").Append(J.S(ModelDownload.CurrentKey));
-            sb.Append(",\"status\":").Append(J.S(ModelDownload.Status));
-            sb.Append(",\"percent\":").Append(ModelDownload.Percent).Append("}");
             sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
             sb.Append("}");
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
@@ -1566,14 +1561,6 @@ namespace QRSnap
             catch (Exception ex) { result = "导入失败：" + ex.Message; }
 
             return Reply("{\"ok\":true,\"msg\":" + J.S(result) + ",\"state\":" + BuildState() + "}");
-        }
-
-        // 下载按钮：从 GitHub Releases 拉对应模型 zip，下完自动导入并清理临时文件
-        private static IntPtr OnDownloadModel(uint win, IntPtr msg)
-        {
-            string key = MiniJson.GetString(ReadUtf8(msg), "key");
-            string r = ModelDownload.Start(key);
-            return Reply("{\"ok\":true,\"msg\":" + J.S(r) + "}");
         }
 
         private static IntPtr OnCapture(uint win, IntPtr msg)
