@@ -66,7 +66,6 @@
       if (demo) demo.style.background = "rgba(14,18,26," + (a / 100).toFixed(2) + ")";
       if ($("lblMtAlpha")) $("lblMtAlpha").textContent = a + "%";
     }
-    if (c.dl && c.dl.running) { /* 下载功能已下线 */ }
 
     if (document.activeElement !== $("rgOpacity")) $("rgOpacity").value = c.opacity != null ? c.opacity : 30;
     if (document.activeElement !== $("rgFrost")) $("rgFrost").value = c.frost != null ? c.frost : 3;
