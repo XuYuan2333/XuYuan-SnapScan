@@ -7,24 +7,29 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $core = @(
   "QRSnap.exe", "QRSnap.exe.config",
+  "XuYuan-SnapScan.ico", "README.md", "下载说明.txt"
+)
+# 只有 PP-OCR 走 onnxruntime；微信 OCR / Windows OCR 不需要，包里就不放这 11.5 MB
+$coreOnnx = @(
   "Microsoft.ML.OnnxRuntime.dll", "onnxruntime.dll",
   "System.Memory.dll", "System.Buffers.dll",
-  "System.Numerics.Vectors.dll", "System.Runtime.CompilerServices.Unsafe.dll",
-  "XuYuan-SnapScan.ico", "README.md", "下载说明.txt"
+  "System.Numerics.Vectors.dll", "System.Runtime.CompilerServices.Unsafe.dll"
 )
 
 $pkgs = @(
-  @{ Name = "XuYuan-SnapScan-v1.1.5-微信OCR";        Models = @("WeChat") },
-  @{ Name = "XuYuan-SnapScan-v1.1.5-PP-OCR-极速";    Models = @("PP-OCR\tiny") },
-  @{ Name = "XuYuan-SnapScan-v1.1.5-PP-OCR-标准";    Models = @("PP-OCR\small") },
-  @{ Name = "XuYuan-SnapScan-v1.1.5-PP-OCR-高精";    Models = @("PP-OCR\medium") },
-  @{ Name = "XuYuan-SnapScan-v1.1.5-仅WindowsOCR";   Models = @() }
+  @{ Name = "XuYuan-SnapScan-v1.1.6-微信OCR";        Models = @("WeChat"); Onnx = $false },
+  @{ Name = "XuYuan-SnapScan-v1.1.6-PP-OCR-极速";    Models = @("PP-OCR\tiny"); Onnx = $true },
+  @{ Name = "XuYuan-SnapScan-v1.1.6-PP-OCR-标准";    Models = @("PP-OCR\small"); Onnx = $true },
+  @{ Name = "XuYuan-SnapScan-v1.1.6-PP-OCR-高精";    Models = @("PP-OCR\medium"); Onnx = $true },
+  @{ Name = "XuYuan-SnapScan-v1.1.6-仅WindowsOCR";   Models = @(); Onnx = $false }
 )
 
 foreach ($p in $pkgs) {
   $dir = Join-Path $out $p.Name
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  foreach ($f in $core) {
+  $files = $core
+  if ($p.Onnx) { $files = $core + $coreOnnx }
+  foreach ($f in $files) {
     $src = Join-Path $rel $f
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $dir $f) -Force }
   }

@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.1.5.0")]
-[assembly: AssemblyFileVersion("1.1.5.0")]
+[assembly: AssemblyVersion("1.1.6.0")]
+[assembly: AssemblyFileVersion("1.1.6.0")]
 
 namespace QRSnap
 {
@@ -31,6 +31,8 @@ namespace QRSnap
 
         private const int SRCCOPY = 0x00CC0020;
         private const int SW_RESTORE = 9;
+        private const int SW_MINIMIZE = 6;
+        private const int SW_SHOWNOACTIVATE = 4;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr GetDC(IntPtr hWnd);
@@ -53,6 +55,42 @@ namespace QRSnap
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        // 找自己进程里的 JadeView 主窗口（不靠标题，标题里带中文/中点容易匹配不上）
+        public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentProcessId();
+
+        public static IntPtr OwnMainWindow()
+        {
+            IntPtr found = IntPtr.Zero;
+            uint me = GetCurrentProcessId();
+            EnumWindows(delegate(IntPtr h, IntPtr l)
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (pid != me) return true;
+                StringBuilder cls = new StringBuilder(128);
+                GetClassName(h, cls, cls.Capacity);
+                if (cls.ToString() == "Window Class") { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -97,6 +135,35 @@ namespace QRSnap
         public static void ActivateWindow(string title)
         {
             IntPtr h = FindWindow(null, title);
+            if (h == IntPtr.Zero) return;
+            ShowWindow(h, SW_RESTORE);
+            SetForegroundWindow(h);
+        }
+
+        // 缩到任务栏（保留任务栏按钮）
+        public static bool MinimizeHandle(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return false;
+            ShowWindow(h, SW_MINIMIZE);
+            return true;
+        }
+
+        public static bool IsMinimizedHandle(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return false;
+            return IsIconic(h);
+        }
+
+        // 显示但不抢焦点、不抬到最前（还原后该多大就多大、该被谁盖住就盖住）
+        public static void ShowNoActivate(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return;
+            ShowWindow(h, SW_SHOWNOACTIVATE);
+        }
+
+        // 强制提到最前
+        public static void BringFront(IntPtr h)
+        {
             if (h == IntPtr.Zero) return;
             ShowWindow(h, SW_RESTORE);
             SetForegroundWindow(h);
@@ -3644,7 +3711,7 @@ namespace QRSnap
 
         private static string VersionLine()
         {
-            string ver = "1.1.5.0";
+            string ver = "1.1.6.0";
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;

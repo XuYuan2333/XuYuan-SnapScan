@@ -7,8 +7,9 @@
 - **截图识码**：圈选屏幕任意区域，自动识别二维码 / 条形码
 - **截图识字**：支持自由圈选（任意形状）或方形框选，圈住即识别
 - **全局快捷键**：`Ctrl+Alt+D` 截图识码，`Ctrl+Alt+X` 截图识字（可自定义）
-- **多识别引擎**：微信 OCR（推荐）/ PP-OCR 极速 / PP-OCR 标准 / PP-OCR 高精 / Windows 内置 OCR
+- **多识别引擎**：微信 OCR（推荐）/ PP-OCR 极速 / PP-OCR 标准 / PP-OCR 高精 / Windows 内置 OCR，设置里下拉选择，缺模型的项置灰
 - **界面**：JadeView 2.0 + HTML/CSS/JS（复用系统 WebView2，不打包浏览器内核），软件图标 + 背景图 + 毛玻璃
+- **无托盘**：程序只以任务栏按钮存在，关窗口＝退出
 - **外观可调**：设置里实时调节「透明度」（0–100，默认 30）与「毛玻璃强度」（0–20，默认 3）
 - **结果区**：全透明只留边框，背景图完整透出；文本可直接选中、编辑、`Ctrl+C` 复制，长文本自动出细滚动条
 
@@ -19,14 +20,21 @@
 
 | 你想要的 | 下载 | 包大小 | 说明 |
 |---|---|---|---|
-| 中文最准（**推荐**） | `SnapScan-v1.1.5-WeChatOCR.zip` | 28.8 MB | 微信 OCR，随包离线，不装微信也能用 |
-| 体积最小、速度最快 | `SnapScan-v1.1.5-PP-OCR-Tiny.zip` | 12.3 MB | PP-OCR tiny，约 200 ms |
-| 均衡（中英混排都稳） | `SnapScan-v1.1.5-PP-OCR-Small.zip` | 31.8 MB | PP-OCR small |
-| 高精度（小字、复杂排版） | `SnapScan-v1.1.5-PP-OCR-Medium.zip` | 102.8 MB | PP-OCR medium，体积最大 |
-| 完全不想下模型 | `SnapScan-v1.1.5-WindowsOCR-only.zip` | 6.9 MB | 只用系统自带 OCR |
+| 中文最准（**推荐**） | `SnapScan-v1.1.6-WeChatOCR.zip` | 24.4 MB | 微信 OCR，随包离线，不装微信也能用 |
+| 体积最小、速度最快 | `SnapScan-v1.1.6-PP-OCR-Tiny.zip` | 12.3 MB | PP-OCR tiny，约 200 ms |
+| 均衡（中英混排都稳） | `SnapScan-v1.1.6-PP-OCR-Small.zip` | 31.8 MB | PP-OCR small |
+| 高精度（小字、复杂排版） | `SnapScan-v1.1.6-PP-OCR-Medium.zip` | 102.8 MB | PP-OCR medium，体积最大 |
+| 完全不想下模型 | `SnapScan-v1.1.6-WindowsOCR-only.zip` | 2.5 MB | 只用系统自带 OCR |
+
+> 只有 PP-OCR 的三个包需要 `onnxruntime.dll`；微信 OCR / Windows OCR 包不带推理库，所以体积更小。
 
 想同时要多个引擎，就下多个包，把它们 `OCR Model` 目录里的子文件夹互相拷到一起即可
 （例如把 `PP-OCR\tiny` 拷进微信 OCR 包的 `OCR Model\PP-OCR\` 下），设置里就会多出一项。
+
+## 版本变更
+
+- **v1.1.6**：删除托盘图标与「隐藏＝最小化」；关闭主窗口即退出程序；截图期间真正隐藏窗口，结束后按原状态还原（勾选「显示本软件窗口」才强制置顶）；分引擎包去掉用不到的 onnxruntime（微信包 28.8→24.4 MB，Windows 包 6.9→2.5 MB）
+- **v1.1.5**：JadeView 2.0 网页界面重做、微信 OCR 随包离线、按引擎分包
 
 ## 运行要求
 
@@ -62,10 +70,11 @@ OCR Model\                    模型根目录，只认这一处
 
 ## 使用
 
-1. 解压后双击 `QRSnap.exe`（托盘常驻）
+1. 解压后双击 QRSnap.exe（没有托盘图标；关掉窗口就是退出程序，不留后台）
 2. 按 `Ctrl+Alt+D` 截图识码，`Ctrl+Alt+X` 截图识字
 3. 圈选区域后自动识别，结果显示在主窗口
 4. 点右上角齿轮进设置：切换引擎、开关自由圈选、改快捷键、调透明度 / 毛玻璃
+5. 截图时本窗口会先隐藏，截完按原状态还原（原来最小化就仍最小化、原来被挡住就仍被挡住）；设置里勾了「显示本软件窗口」才强制提到最前
 
 ## 识别引擎说明
 

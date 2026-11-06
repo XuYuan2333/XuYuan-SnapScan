@@ -145,8 +145,9 @@ namespace QRSnap
         const int WM_HOTKEY = 0x0312;
         const int ID_QR = 1, ID_OCR = 2;
 
-        private readonly NotifyIcon _tray;
         private ToastForm _toast;
+        private readonly System.Windows.Forms.Timer _watch;
+        private bool _seenWindow;
         private uint _modsQr = Native.MOD_CONTROL | Native.MOD_ALT, _vkQr = (uint)Keys.D;
         private uint _modsOcr = Native.MOD_CONTROL | Native.MOD_ALT, _vkOcr = (uint)Keys.X;
 
@@ -164,21 +165,19 @@ namespace QRSnap
             Location = new Point(-3000, -3000);
 
             _toast = new ToastForm();
-
-            _tray = new NotifyIcon();
-            _tray.Text = "XuYuan-SnapScan";
-            _tray.Icon = LoadIcon();
-            _tray.Visible = true;
-            _tray.DoubleClick += delegate { JadeHost.ShowWindow(true); };
-
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("截图识码", null, delegate { HotkeyCapture("qr"); });
-            menu.Items.Add("截图识字", null, delegate { HotkeyCapture("ocr"); });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("显示主窗口", null, delegate { JadeHost.ShowWindow(true); });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出", null, delegate { JadeHost.Quit(); });
-            _tray.ContextMenuStrip = menu;
+            // 不再有托盘图标：程序只以任务栏按钮的形式存在，关掉窗口就是退出
+            _watch = new System.Windows.Forms.Timer();
+            _watch.Interval = 1000;
+            _watch.Tick += delegate
+            {
+                if (!JadeHost.Started) return;
+                if (Native.OwnMainWindow() == IntPtr.Zero)
+                {
+                    if (_seenWindow) JadeHost.Quit();   // 主窗口被关掉 → 整个程序退出
+                }
+                else _seenWindow = true;
+            };
+            _watch.Start();
         }
 
         private static Icon LoadIcon()
@@ -377,7 +376,6 @@ namespace QRSnap
         public void DisposeShell()
         {
             try { Native.UnregisterHotKey(Handle, ID_QR); Native.UnregisterHotKey(Handle, ID_OCR); } catch (Exception) { }
-            try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch (Exception) { }
         }
     }
 
@@ -386,6 +384,7 @@ namespace QRSnap
     {
         internal static uint WindowId;
         internal static bool Started;
+        internal const string WindowTitle = "XuYuan-SnapScan · 二维码 / 文字识别";
         private static NativeShell _shell;
         private static readonly List<IntPtr> _alloc = new List<IntPtr>();
         private static readonly List<JadeNative.IpcCallback> _cbs = new List<JadeNative.IpcCallback>();
@@ -426,7 +425,7 @@ namespace QRSnap
             _shell.OnCaptured = delegate(string mode, string json)
             {
                 bool show = mode == "qr" ? AppConfig.RestoreAfterQr : AppConfig.RestoreWin;
-                if (show) ShowWindow(true);
+                ShowWindow(show);
                 Send("capture-done", json);
             };
             _uiThread = new Thread(delegate()
@@ -532,6 +531,14 @@ namespace QRSnap
             _cbs.Add(appReady);
             JadeNative.jade_on(U("app-ready"), appReady);
 
+            // 关掉主窗口 = 退出程序（没有托盘图标，也没有后台常驻）
+            JadeNative.IpcCallback onClosed = OnWindowClosed;
+            _cbs.Add(onClosed);
+            JadeNative.jade_on(U("window-closed"), onClosed);
+            JadeNative.IpcCallback onClosing = OnWindowClosing;
+            _cbs.Add(onClosing);
+            JadeNative.jade_on(U("window-closing"), onClosing);
+
             Bind("state", OnState);
             Bind("config", OnConfig);
             Bind("recheck", OnRecheck);
@@ -588,7 +595,7 @@ namespace QRSnap
             JadeNative.set_protocol_service_path(U(_uiDir), sb, sb.Capacity, 0);
 
             JadeNative.Options o = new JadeNative.Options();
-            o.title = U("XuYuan-SnapScan · 二维码 / 文字识别");
+            o.title = U(WindowTitle);
             o.width = 980; o.height = 660; o.resizable = 1;
             o.frame_style = U("normal");
             o.background_color = U("#F5F8FFFF");
@@ -612,6 +619,18 @@ namespace QRSnap
             return IntPtr.Zero;
         }
 
+        // JadeView 关窗回调：主窗口关掉就直接退出，不留后台、不留托盘
+        private static IntPtr OnWindowClosing(uint win, IntPtr msg)
+        {
+            return IntPtr.Zero;   // 0 = 允许关闭
+        }
+
+        private static IntPtr OnWindowClosed(uint win, IntPtr msg)
+        {
+            if (WindowId == 0 || win != WindowId) return IntPtr.Zero;
+            ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(120); Quit(); });
+            return IntPtr.Zero;
+        }
         private static IntPtr StructToPtr(object obj)
         {
             IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf(obj.GetType()));
@@ -723,7 +742,7 @@ namespace QRSnap
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
                 return "v" + v.Major + "." + v.Minor + "." + v.Build + "." + v.Revision;
             }
-            catch (Exception) { return "v1.1.5.0"; }
+            catch (Exception) { return "v1.1.6.0"; }
         }
 
         private static string HotkeyQrText() { return AppConfig.HotkeyQr; }
@@ -792,7 +811,7 @@ namespace QRSnap
             bool cancelled;
             string json = _shell.CaptureSync(mode, false, out cancelled);
 
-            if (restore || json != null) ShowWindow(true);
+            ShowWindow(restore);
             if (json == null) json = "{\"ok\":false,\"cancelled\":true,\"mode\":" + J.S(mode) + "}";
             return Reply(json);
         }
@@ -840,17 +859,44 @@ namespace QRSnap
             catch (Exception) { }
         }
 
+        private static bool _wasMinimized;
+
+        // 截屏开始：真的把窗口藏起来（藏之前先记住它原来是"最小化"还是"在桌面上"）
         internal static void HideWindow()
         {
-            try { JadeNative.set_window_visible(WindowId, 0); } catch (Exception) { }
+            try
+            {
+                IntPtr h = Native.OwnMainWindow();
+                _wasMinimized = Native.IsMinimizedHandle(h);
+                JadeNative.set_window_visible(WindowId, 0);
+                Log("hide: wasMin=" + _wasMinimized + " visibleNow=" + JadeNative.is_window_visible(WindowId));
+            }
+            catch (Exception) { }
         }
 
-        internal static void ShowWindow(bool focus)
+        // 截屏结束：按原状态还原。toFront=false 只放回原处（原来最小化就仍最小化、原来被挡住就仍被挡住）；
+        // toFront=true（设置里勾了"显示本软件窗口"）才强制提到最前。
+        internal static void ShowWindow(bool toFront)
         {
             try
             {
                 JadeNative.set_window_visible(WindowId, 1);
-                if (focus) JadeNative.set_window_focus(WindowId);
+                IntPtr h = Native.OwnMainWindow();
+                if (toFront)
+                {
+                    Native.BringFront(h);              // 勾了"显示本软件窗口"：强制提到最前（最小化的也会展开）
+                    JadeNative.set_window_focus(WindowId);
+                }
+                else if (Native.IsMinimizedHandle(h) || _wasMinimized)
+                {
+                    Native.MinimizeHandle(h);          // 原来是缩着的，还原后照样缩着
+                }
+                else
+                {
+                    Native.ShowNoActivate(h);          // 不抢焦点、不抬到最前，原来被挡住就仍被挡住
+                }
+                Log("restore: toFront=" + toFront + " wasMin=" + _wasMinimized + " iconic=" + Native.IsMinimizedHandle(h) + " visible=" + JadeNative.is_window_visible(WindowId));
+                _wasMinimized = false;
                 Send("state-refresh", BuildState());
             }
             catch (Exception) { }
@@ -870,7 +916,7 @@ namespace QRSnap
             bool cancelled;
             string json = _shell.CaptureSync(mode, fromHotkey, out cancelled);
             if (json == null) return null;
-            if (AppConfig.RestoreWin || AppConfig.RestoreAfterQr) ShowWindow(true);
+            ShowWindow(mode == "qr" ? AppConfig.RestoreAfterQr : AppConfig.RestoreWin);
             Send("capture-done", json);
             return json;
         }
