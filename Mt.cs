@@ -25,7 +25,11 @@ namespace QRSnap
                 else if (char.IsLetter(c)) other++;
             }
             if (kana > 0 && (kana + han) > 0 && kana * 4 >= han) return "ja";
-            if (han > 0 && han >= kana) return "zh";
+            // 判「这段已经是中文」要严格：以前只要出现一个汉字就判中文，
+            // 英文页面里混进一个汉字（或 OCR 把一个汉字认进来）就整段不再翻译。
+            // 现在要求汉字占（汉字+拉丁字母）的 75% 以上、且至少 4 个汉字。
+            int cjkLatin = han + latin;
+            if (han >= 4 && cjkLatin > 0 && han * 4 >= cjkLatin * 3) return "zh";
             if (hangul > 0) return "ko";
             if (cyr > 0 && cyr > latin) return "ru";
             if (latin > 0) return "en";
