@@ -21,10 +21,11 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 |---|---:|---|
 | `SnapScan-v1.4.2-Body.zip` | 约 70 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
 | `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速 |
-| `SnapScan-Model-PLaMo3-Translate-0.8B-v1.4.1.zip` | 约 923 MB | PLaMo 3 Translate 0.8B：Q4_K_M（效率）+ Q2_K（极速） |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 约 547 MiB | 效率档 PLaMo Q4_K_M |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 约 391 MiB | 极速档 PLaMo Q2_K |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | HyMT1.5 1.8B Q4_K_M（标准） |
 
-本体不带翻译/OCR 模型；导入哪个包，就启用对应功能。
+本体不带翻译/OCR 模型；PLaMo 的 Q4_K_M 和 Q2_K 是两个独立包，按需分别导入。
 
 ## 翻译模型选择
 
@@ -54,6 +55,7 @@ OCR 引擎：
 2. 设置 → 识别引擎 / 翻译 → 导入模型包，选需要的 zip。
 3. `Ctrl+Alt+D` 识码，`Ctrl+Alt+X` 识字，`Ctrl+Alt+F` 翻译。
 4. 游戏模式：设置 → 游戏专属配置 → 开启游戏模式 → 添加固定字幕区域 → 按 `Ctrl+Alt+F` 手动翻译。
+5. PLaMo 只导入 Q4 也能用效率档；需要极速档时再单独导入 Q2 包。
 5. 清除 API Key 会自动关闭所有依赖 Key 的 AI 功能。
 
 ## 系统要求

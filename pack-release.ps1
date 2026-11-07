@@ -7,6 +7,7 @@ $rel  = Join-Path $root 'release'
 $tmp  = Join-Path $root '_pack'
 $ver  = 'v1.4.2'
 $modelVer = 'v1.4.1'
+$plamoVer = 'v1.4.2'
 
 if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
 if (!(Test-Path $rel)) { New-Item -ItemType Directory -Force -Path $rel | Out-Null }
@@ -78,13 +79,18 @@ Copy-Item (Join-Path $root 'OCR Model\PP-OCR\tiny') (Join-Path $ocrModel 'PP-OCR
 Copy-Item (Join-Path $root 'OCR Model\WeChat') (Join-Path $ocrModel 'WeChat') -Recurse -Force
 ZipDir $ocr (Join-Path $rel "SnapScan-Model-OCR-$modelVer.zip")
 
-# ---------- PLaMo 翻译包：Q4_K_M + Q2_K ----------
-$plamo = Stage 'plamo'
-$plamoMt = Join-Path $plamo 'MT Model\Game'
-New-Item -ItemType Directory -Force -Path $plamoMt | Out-Null
-CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q4_K_M.gguf') $plamoMt
-CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q2_K.gguf') $plamoMt
-ZipDir $plamo (Join-Path $rel "SnapScan-Model-PLaMo3-Translate-0.8B-$modelVer.zip")
+# ---------- PLaMo 翻译包：Q4 和 Q2 分开打包，按需导入 ----------
+$plamoQ4 = Stage 'plamo-q4'
+$plamoQ4Mt = Join-Path $plamoQ4 'MT Model\Game'
+New-Item -ItemType Directory -Force -Path $plamoQ4Mt | Out-Null
+CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q4_K_M.gguf') $plamoQ4Mt
+ZipDir $plamoQ4 (Join-Path $rel "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-$plamoVer.zip")
+
+$plamoQ2 = Stage 'plamo-q2'
+$plamoQ2Mt = Join-Path $plamoQ2 'MT Model\Game'
+New-Item -ItemType Directory -Force -Path $plamoQ2Mt | Out-Null
+CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q2_K.gguf') $plamoQ2Mt
+ZipDir $plamoQ2 (Join-Path $rel "SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-$plamoVer.zip")
 
 # ---------- 标准大模型包 ----------
 $pro = Stage 'pro'
