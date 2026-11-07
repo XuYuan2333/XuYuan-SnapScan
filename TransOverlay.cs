@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -264,7 +264,7 @@ namespace QRSnap
 
         private IntPtr OnKey(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && !_closing)
+            if (nCode >= 0 && !_closing && !AppConfig.GameOn)
             {
                 int msg = wParam.ToInt32();
                 if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
@@ -283,7 +283,7 @@ namespace QRSnap
 
         private IntPtr OnMouse(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && !_closing && wParam.ToInt32() == WM_MOUSEWHEEL)
+            if (nCode >= 0 && !_closing && !AppConfig.GameOn && wParam.ToInt32() == WM_MOUSEWHEEL)
             {
                 _closing = true;
                 NativeShell.Log("trans wheel close");
