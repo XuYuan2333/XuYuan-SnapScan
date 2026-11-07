@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -276,8 +275,7 @@ namespace QRSnap
                     : Ocr.LayoutSegments(bmp, out obstacles, out log);
                 if (segs == null) segs = new List<OcrSegment>();
 
-                if (AppConfig.GameFilter)
-                    segs = GameFilter.KeepDialogue(segs, union, regions);
+                segs = GameFilter.KeepDialogue(segs, union, regions);
                 if (AppConfig.GameMerge)
                     segs = GameFilter.MergeLines(segs, union, regions);
 
@@ -324,13 +322,6 @@ namespace QRSnap
 
     internal static class GameFilter
     {
-        private static readonly string[] HudWords = new string[]
-        {
-            "HP", "MP", "SP", "EXP", "FPS", "LV", "LV.", "WASD", "ESC", "TAB",
-            "SHIFT", "CTRL", "ALT", "ENTER", "SPACE", "GPU", "CPU", "RAM", "VRAM",
-            "DX", "API", "DLSS", "FSR", "HUD"
-        };
-
         public static List<OcrSegment> KeepDialogue(List<OcrSegment> segs, Rectangle union, List<Rectangle> regions)
         {
             List<OcrSegment> res = new List<OcrSegment>();
@@ -339,7 +330,6 @@ namespace QRSnap
                 OcrSegment s = segs[i];
                 if (s.Box.Width < 4 || s.Box.Height < 4) continue;
                 if (!InAnyRegion(s.Box, union, regions)) continue;
-                if (IsHud(s.Text)) continue;
                 res.Add(s);
             }
             return res;
@@ -417,31 +407,6 @@ namespace QRSnap
                 if (cx >= l && cx <= rr && cy >= t && cy <= bb) return i;
             }
             return -1;
-        }
-
-        private static bool IsHud(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return true;
-            string t = text.Trim();
-            if (t.Length == 0) return true;
-            if (LayoutBoost.PreTranslate(t) != null) return true;
-            string compact = Regex.Replace(t, @"\s+", "");
-            if (compact.Length <= 8 && Regex.IsMatch(compact, @"^[vV]?\d+(\.\d+){1,3}$")) return true;
-            if (Regex.IsMatch(compact, @"^\d+([/:]\d+)+$")) return true;
-            int digits = 0, letters = 0;
-            for (int i = 0; i < compact.Length; i++)
-            {
-                if (compact[i] >= '0' && compact[i] <= '9') digits++;
-                else if (char.IsLetter(compact[i])) letters++;
-            }
-            if (letters == 0 && digits > 0) return true;
-            if (compact.Length <= 8 && letters > 0 && digits >= letters) return true;
-            string up = compact.ToUpperInvariant();
-            for (int i = 0; i < HudWords.Length; i++)
-                if (up == HudWords[i] || up == HudWords[i] + ":" || up == HudWords[i] + "：") return true;
-            if (compact.Length <= 6 && Regex.IsMatch(up, @"^(HP|MP|SP|EXP|FPS|LV|WASD|ESC|TAB|SHIFT|CTRL|ALT|ENTER|SPACE)[:：]?\d*$")) return true;
-            if (t.Length <= 18 && (up.Contains("FPS") || up.Contains("VRAM") || up.Contains("GPU"))) return true;
-            return false;
         }
 
         private static string Join(string a, string b)

@@ -2031,7 +2031,6 @@ namespace QRSnap
             sb.Append("\"on\":").Append(J.B(AppConfig.GameOn));
             sb.Append(",\"trigger\":").Append(AppConfig.GameTrigger);
             sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
-            sb.Append(",\"filter\":").Append(J.B(AppConfig.GameFilter));
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
@@ -2264,10 +2263,6 @@ namespace QRSnap
                             try { LlamaMt.Shutdown(); } catch (Exception) { }
                             GameRuntime.Reconfigure();
                         }
-                    }
-                    else if (k == "gamefilter")
-                    {
-                        AppConfig.GameFilter = v == "true" || v == "1";
                     }
                     else if (k == "gamemerge")
                     {
