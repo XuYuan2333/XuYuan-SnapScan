@@ -185,10 +185,11 @@ internal static class LlamaMt
         int port = FreePort();
         int threads = ThreadsForMode();
         string perfArgs = PerfArgs();
+        string plamoArg = IsPlamo(model) ? " --no-prefill-assistant" : "";
         ProcessStartInfo si = new ProcessStartInfo();
         si.FileName = Path.Combine(dir, "llama-server.exe");
         si.Arguments = "--model \"" + model + "\" --host 127.0.0.1 --port " + port
-            + " --jinja -c 2048 -t " + threads + (gpu ? " -ngl 99" : " -ngl 0") + perfArgs + " --no-warmup";
+            + " --jinja -c 2048 -t " + threads + (gpu ? " -ngl 99" : " -ngl 0") + perfArgs + plamoArg + " --no-warmup";
         si.WorkingDirectory = dir;
         si.UseShellExecute = false;
         si.CreateNoWindow = true;
@@ -238,8 +239,9 @@ internal static class LlamaMt
                 if (_proc == null) return;
                 // 游戏模式期间不释放任何模型；退出游戏模式时由 GameRuntime 统一释放
                 if (AppConfig.GameOn) return;
-                // 效率档的 0.5B 短句模型常驻；标准档仍按空闲释放
-                if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency
+                // 效率 / 极速档的 PLaMo 常驻；标准档仍按空闲释放
+                string idleProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+                if ((idleProfile == AppConfig.MtProfileEfficiency || idleProfile == AppConfig.MtProfileTurbo)
                     && MtRouter.IsGameModelPath(_model)) return;
                 int idle = IdleSeconds;
                 if (idle <= 0) return;                                   // 0 = 常驻，不释放
@@ -295,12 +297,27 @@ internal static class LlamaMt
                 StartServer(model);
             _lastUse = DateTime.UtcNow;
 
-            string payload = BuildRequest(Prompt(text, tgt), 192);
+            string payload = IsPlamo(model) ? BuildPlamoRequest(text, 192) : BuildRequest(Prompt(text, tgt), 192);
             string resp = HttpPost("http://127.0.0.1:" + _port + "/v1/chat/completions", payload, 120);
             string content = JsonField(resp, "content");
             _lastUse = DateTime.UtcNow;
             return Clean(content);
         }
+    }
+
+    private static bool IsPlamo(string model)
+    {
+        return !string.IsNullOrEmpty(model) && Path.GetFileName(model).IndexOf("plamo", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string BuildPlamoRequest(string text, int maxTokens)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.Append("{\"messages\":[{\"role\":\"user\",\"content\":").Append(J(text)).Append("}]");
+        sb.Append(",\"chat_template_kwargs\":{\"target_lang\":\"zh\"}");
+        sb.Append(",\"temperature\":0,\"max_tokens\":").Append(maxTokens);
+        sb.Append(",\"stop\":[\"<|plamo:tag|>\",\"<|plamo:bos|>\"],\"stream\":false}");
+        return sb.ToString();
     }
 
     private static string BuildRequest(string prompt)
@@ -333,6 +350,14 @@ internal static class LlamaMt
             if (_proc == null || !string.Equals(_model, model, StringComparison.OrdinalIgnoreCase) || (_proc != null && _proc.HasExited))
                 StartServer(model);
             _lastUse = DateTime.UtcNow;
+
+            // PLaMo 官方要求一条原文一个请求；不要用多行 prompt 批翻
+            if (IsPlamo(model))
+            {
+                List<string> one = new List<string>();
+                for (int i = 0; i < lines.Count; i++) one.Add(Translate(model, lines[i], tgt));
+                return one;
+            }
 
             StringBuilder prompt = new StringBuilder();
             int chars = 0;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -154,6 +154,30 @@ namespace QRSnap
         private uint _modsHide = Native.MOD_CONTROL | Native.MOD_ALT, _vkHide = (uint)Keys.G;
 
         internal Action<string, string> OnCaptured;   // (mode, json)
+
+        internal void GameBusy(string text)
+        {
+            if (_toast == null) return;
+            try { _toast.ShowBusy(text); } catch (Exception) { }
+        }
+
+        internal void GameBusy(string text, string sub)
+        {
+            if (_toast == null) return;
+            try { _toast.ShowBusy(text, sub); } catch (Exception) { }
+        }
+
+        internal void GameDone(string text, bool ok)
+        {
+            if (_toast == null) return;
+            try { _toast.ShowDone(text, ok); } catch (Exception) { }
+        }
+
+        internal void GameDone(string text, string sub, bool ok)
+        {
+            if (_toast == null) return;
+            try { _toast.ShowDone(text, sub, ok); } catch (Exception) { }
+        }
 
         public NativeShell()
         {
@@ -517,7 +541,7 @@ namespace QRSnap
 
             if (mode == "qr")
             {
-                if (_toast != null) _toast.ShowBusy("正在识码…");
+                if (_toast != null) _toast.ShowBusy("识码中", "二维码");
                 string qrText = null;
                 string qrInfo = string.Empty;
                 RunPumped(delegate()
@@ -540,10 +564,9 @@ namespace QRSnap
                 AiTextFix.Suppress = mode == "mt" && AppConfig.AiMt;
                 if (_toast != null)
                 {
-                    string sub2 = null;
-                    if (AppConfig.AiOcr && JadeHost.AiReadyNow())
-                        sub2 = "AI 识字强化已开：认错的符号交给大模型修，每张图多几秒";
-                    _toast.ShowBusy("正在识字…  " + busyEngine, sub2);
+                    string sub2 = "OCR · " + busyEngine;
+                    if (AppConfig.AiOcr && JadeHost.AiReadyNow()) sub2 += " + AI";
+                    _toast.ShowBusy("识字中", sub2);
                 }
                 AiTextFix.LastAsked = 0;
                 AiTextFix.LastChanged = 0;
@@ -646,10 +669,9 @@ namespace QRSnap
                         // 空闲释放后引擎是停着的，这一句会明显慢一拍，先说清楚，别让人以为卡死
                         if (_toast != null)
                         {
-                            string sub3 = null;
-                            if (AppConfig.AiMt) sub3 = "AI 接管：整段交给大模型翻，不用本地模型";
-                            else if (!LlamaMt.ServerRunning) sub3 = "首次加载模型，稍等";
-                            _toast.ShowBusy(LlamaMt.ServerRunning || AppConfig.AiMt ? "正在翻译…" : "正在翻译…（首次加载模型，稍等）", sub3);
+                            string sub3 = "模型 · " + JadeHost.ModelLabel(AppConfig.MtProfile);
+                            if (!AppConfig.AiMt && !LlamaMt.ServerRunning) sub3 += " · 首次加载";
+                            _toast.ShowBusy("翻译中", sub3);
                         }
                         int shown = TranslateAndShow(segs, session.Selection, crop, preLayout);
                         if (shown > 0) mtLines = shown;
@@ -1261,6 +1283,12 @@ namespace QRSnap
             }
         }
 
+        public static bool GameReadyFor(string profile)
+        {
+            try { return Router.GameReadyFor(profile); }
+            catch (Exception) { return false; }
+        }
+
         public static List<string> Pairs()
         {
             try { return Router.AvailablePairs(); }
@@ -1305,6 +1333,7 @@ namespace QRSnap
         internal static bool Started;
         internal const string WindowTitle = "XuYuan-SnapScan · 二维码 / 文字识别";
         private static NativeShell _shell;
+        private static Mutex _single;
         private static readonly List<IntPtr> _alloc = new List<IntPtr>();
         private static readonly List<JadeNative.IpcCallback> _cbs = new List<JadeNative.IpcCallback>();
         private static string _uiDir;
@@ -1336,6 +1365,16 @@ namespace QRSnap
         public static void Run()
         {
             AppConfig.Load();
+
+            bool createdNew;
+            _single = new Mutex(true, "XuYuan-SnapScan_JadeSingleInstance", out createdNew);
+            if (!createdNew)
+            {
+                Native.ActivateWindow(WindowTitle);
+                MessageBox.Show("SnapScan 已经在运行，已尝试切回原窗口。\n如果仍然看不到，请先在任务管理器结束旧的 QRSnap.exe，再重新打开。",
+                    "XuYuan-SnapScan", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
             PrepareDll();
             PrepareUi();
@@ -1467,6 +1506,7 @@ namespace QRSnap
             Bind("gamepick", OnGamePick);
             Bind("gamedel", OnGameDel);
             Bind("gameclear", OnGameClear);
+            Bind("gamehover", OnGameHover);
             Bind("capture", OnCapture);
             Bind("clipcopy", OnCopy);
             Bind("win", OnWin);
@@ -1955,6 +1995,39 @@ namespace QRSnap
             return shell.TranslateAndShow(segs, rect, bmp, true);
         }
 
+        internal static void GameBusy(string text)
+        {
+            NativeShell shell = _shell;
+            if (shell != null && AppConfig.GameToastOn) shell.GameBusy(text);
+        }
+
+        internal static void GameBusy(string text, string sub)
+        {
+            NativeShell shell = _shell;
+            if (shell != null && AppConfig.GameToastOn) shell.GameBusy(text, sub);
+        }
+
+        internal static void GameDone(string text, bool ok)
+        {
+            NativeShell shell = _shell;
+            if (shell != null && AppConfig.GameToastOn) shell.GameDone(text, ok);
+        }
+
+        internal static void GameDone(string text, string sub, bool ok)
+        {
+            NativeShell shell = _shell;
+            if (shell != null && AppConfig.GameToastOn) shell.GameDone(text, sub, ok);
+        }
+
+        internal static string ModelLabel(string profile)
+        {
+            if (AppConfig.AiMt) return "AI · " + AppConfig.AiModel;
+            string p = AppConfig.NormalizeMtProfile(profile);
+            if (p == AppConfig.MtProfileEfficiency) return "PLaMo 3 Translate Q4_K_M";
+            if (p == AppConfig.MtProfileTurbo) return "PLaMo 3 Translate Q2_K";
+            return "HyMT1.5 1.8B";
+        }
+
         internal static string BuildState()
         {
             EngineProbe p = Ocr.Probe();
@@ -2022,10 +2095,6 @@ namespace QRSnap
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
             sb.Append(",\"mtmode\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
-            sb.Append(",\"mttextstyle\":").Append(J.S(AppConfig.MtTextStyle));
-            sb.Append(",\"mttextpos\":").Append(AppConfig.MtTextPos);
-            sb.Append(",\"mttextautosize\":").Append(J.B(AppConfig.MtTextAutoSize));
-            sb.Append(",\"mttextsize\":").Append(AppConfig.MtTextSize);
             sb.Append(",\"mtprofile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.MtProfile)));
             sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
             sb.Append(",\"ai\":{");
@@ -2054,8 +2123,9 @@ namespace QRSnap
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
+            sb.Append(",\"toastOn\":").Append(J.B(AppConfig.GameToastOn));
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
-            bool gready = gp == AppConfig.MtProfileEfficiency ? MtRunner.GameReady : MtRunner.Ready;
+            bool gready = (gp == AppConfig.MtProfileEfficiency || gp == AppConfig.MtProfileTurbo) ? MtRunner.GameReadyFor(gp) : MtRunner.Ready;
             string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
                 : (!gready ? "缺少对应翻译模型" : (AppConfig.GameTrigger == 2 ? "手动快捷键：Ctrl+Alt+F" : "就绪"));
             if (!string.IsNullOrEmpty(GameRuntime.LastError)) gmsg = GameRuntime.LastError;
@@ -2087,6 +2157,8 @@ namespace QRSnap
             long multiSize = 0;
             string gameFile = "";
             long gameSize = 0;
+            string q4File = "", q2File = "";
+            long q4Size = 0, q2Size = 0;
             for (int i = 0; i < models.Count; i++)
             {
                 MtModelInfo m = models[i];
@@ -2094,8 +2166,11 @@ namespace QRSnap
                 try { if (!File.Exists(m.Gguf)) continue; } catch (Exception) { continue; }
                 if (m.Game)
                 {
-                    gameFile = Path.GetFileName(m.Gguf);
-                    gameSize = new FileInfo(m.Gguf).Length;
+                    string gf = Path.GetFileName(m.Gguf);
+                    long gs = new FileInfo(m.Gguf).Length;
+                    if (gf.IndexOf("q2_k", StringComparison.OrdinalIgnoreCase) >= 0) { q2File = gf; q2Size = gs; }
+                    else { q4File = gf; q4Size = gs; }
+                    gameFile = gf; gameSize = gs;
                     continue;
                 }
                 if (!m.Multi || multiName.Length > 0) continue;
@@ -2105,13 +2180,14 @@ namespace QRSnap
             bool gameReady = MtRunner.GameReady;
             bool profReady;
             string profNow = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
-            if (profNow == AppConfig.MtProfileEfficiency) profReady = gameReady;
+            if (profNow == AppConfig.MtProfileEfficiency || profNow == AppConfig.MtProfileTurbo) profReady = MtRunner.GameReadyFor(profNow);
             else profReady = multiName.Length > 0;
             if (AppConfig.AiMt) profReady = true;   // AI 接管不依赖本地模型
             string active = "", shortTag = "";
             if (profReady)
             {
-                if (profNow == AppConfig.MtProfileEfficiency) { active = "0.5B 短句模型"; shortTag = "0.5B 效率模型"; }
+                if (profNow == AppConfig.MtProfileEfficiency) { active = "PLaMo 3 Translate Q4_K_M"; shortTag = "PLaMo Q4"; }
+                else if (profNow == AppConfig.MtProfileTurbo) { active = "PLaMo 3 Translate Q2_K"; shortTag = "PLaMo Q2"; }
                 else { active = "HyMT1.5全语种模型"; shortTag = "HyMT1.5全语种模型"; }
             }
             else shortTag = "缺模型";
@@ -2122,11 +2198,20 @@ namespace QRSnap
             for (int i = 0; i < miss.Count; i++) { if (i > 0) sb.Append(','); sb.Append(J.S(miss[i])); }
             sb.Append("],\"kit\":[");
             sb.Append("{\"key\":\"gguf\",\"title\":\"HyMT1.5全语种模型\",\"sub\":")
-              .Append(J.S(multiFile.Length > 0 ? (multiFile + " · " + (multiSize / (1024L * 1024L)) + " MB") : "未装 · 所有语种 → 中文"))
+              .Append(J.S(multiFile.Length > 0 ? multiFile : "未装"))
+              .Append(",\"size\":").Append(J.S(multiFile.Length > 0 ? ((multiSize / (1024L * 1024L)) + " MB") : "未装"))
+              .Append(",\"mem\":").Append(J.S(multiFile.Length > 0 ? "占用约 2.0 GB" : ""))
               .Append(",\"ready\":").Append(J.B(multiName.Length > 0)).Append("}");
-            sb.Append(",{\"key\":\"game\",\"title\":\"效率小模型 Qwen2.5-0.5B\",\"sub\":")
-              .Append(J.S(gameFile.Length > 0 ? (gameFile + " · " + (gameSize / (1024L * 1024L)) + " MB") : "未装 · 效率档短句"))
-              .Append(",\"ready\":").Append(J.B(gameReady)).Append("}");
+            sb.Append(",{\"key\":\"plamo-q4\",\"title\":\"效率 · PLaMo Q4_K_M\",\"sub\":")
+              .Append(J.S(q4File.Length > 0 ? q4File : "未装"))
+              .Append(",\"size\":").Append(J.S(q4File.Length > 0 ? ((q4Size / (1024L * 1024L)) + " MB") : "未装"))
+              .Append(",\"mem\":").Append(J.S(q4File.Length > 0 ? "占用约 1.0 GB" : ""))
+              .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("efficiency"))).Append("}");
+            sb.Append(",{\"key\":\"plamo-q2\",\"title\":\"极速 · PLaMo Q2_K\",\"sub\":")
+              .Append(J.S(q2File.Length > 0 ? q2File : "未装"))
+              .Append(",\"size\":").Append(J.S(q2File.Length > 0 ? ((q2Size / (1024L * 1024L)) + " MB") : "未装"))
+              .Append(",\"mem\":").Append(J.S(q2File.Length > 0 ? "占用约 0.8 GB" : ""))
+              .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("turbo"))).Append("}");
             sb.Append("]}");
             sb.Append("}");
             return sb.ToString();
@@ -2236,26 +2321,6 @@ namespace QRSnap
                         AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
                         try { TransOverlay.Repaint(); } catch (Exception) { }
                     }
-                    else if (k == "mttextstyle")
-                    {
-                        AppConfig.MtTextStyle = v == "black" ? "black" : "white";
-                        try { TransOverlay.Repaint(); } catch (Exception) { }
-                    }
-                    else if (k == "mttextpos")
-                    {
-                        int gv; if (int.TryParse(v, out gv)) AppConfig.MtTextPos = Math.Max(0, Math.Min(5, gv));
-                        try { TransOverlay.Repaint(); } catch (Exception) { }
-                    }
-                    else if (k == "mttextautosize")
-                    {
-                        AppConfig.MtTextAutoSize = v == "true" || v == "1";
-                        try { TransOverlay.Repaint(); } catch (Exception) { }
-                    }
-                    else if (k == "mttextsize")
-                    {
-                        int gv; if (int.TryParse(v, out gv)) AppConfig.MtTextSize = Math.Max(8, Math.Min(72, gv));
-                        try { TransOverlay.Repaint(); } catch (Exception) { }
-                    }
                     else if (k == "mtprofile")
                     {
                         AppConfig.MtProfile = AppConfig.NormalizeMtProfile(v);
@@ -2268,7 +2333,23 @@ namespace QRSnap
                     else if (k == "aiprovider") { if (v.Length > 0 && AppConfig.AiProvider != v.Trim()) { AppConfig.AiProvider = v.Trim(); aiDirty = true; } }
                     else if (k == "aimodel") { if (AppConfig.AiModel != v.Trim()) { AppConfig.AiModel = v.Trim(); aiDirty = true; } }
                     else if (k == "aibase") { if (v.Length > 0 && AppConfig.AiBase != v.Trim()) { AppConfig.AiBase = v.Trim(); aiDirty = true; } }
-                    else if (k == "aikey") { if (AppConfig.AiKey != v.Trim()) { AppConfig.AiKey = v.Trim(); aiDirty = true; } }
+                    else if (k == "aikey")
+                    {
+                        string nk = (v ?? "").Trim();
+                        if (AppConfig.AiKey != nk)
+                        {
+                            AppConfig.AiKey = nk;
+                            aiDirty = true;
+                            if (nk.Length == 0)
+                            {
+                                // 清空 Key 视为关闭所有 AI 功能，避免开关还亮着但实际不可用
+                                AppConfig.AiOcr = false;
+                                AppConfig.AiCheck = false;
+                                AppConfig.AiMerge = false;
+                                AppConfig.AiMt = false;
+                            }
+                        }
+                    }
                     else if (k == "aiocr") { AppConfig.AiOcr = v == "true" || v == "1"; }
                     else if (k == "aicheck") { AppConfig.AiCheck = v == "true" || v == "1"; }
                     else if (k == "aimerge") { AppConfig.AiMerge = v == "true" || v == "1"; }
@@ -2316,6 +2397,14 @@ namespace QRSnap
                     {
                         AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
                         try { TransOverlay.Repaint(); } catch (Exception) { }
+                    }
+                    else if (k == "gametoaston")
+                    {
+                        AppConfig.GameToastOn = v == "true" || v == "1";
+                        if (!AppConfig.GameToastOn && ToastForm.Current != null)
+                        {
+                            try { ToastForm.Current.HideToast(); } catch (Exception) { }
+                        }
                     }
                     else if (k == "gamemerge")
                     {
@@ -2740,10 +2829,20 @@ namespace QRSnap
             }
         }
 
+        private static IntPtr OnGameHover(uint win, IntPtr msg)
+        {
+            int index = -1;
+            try { int.TryParse(MiniJson.GetString(ReadUtf8(msg), "index"), out index); } catch (Exception) { }
+            JadeHost.RunOnUi(delegate { GameRuntime.HighlightRegion(index); });
+            NativeShell.Log("[gamehover] api index=" + index + " regions=" + GameRuntime.Regions().Count);
+            return Reply("{\"ok\":true}");
+        }
+
         private static IntPtr OnGameDel(uint win, IntPtr msg)
         {
             int index = 0;
             try { int.TryParse(MiniJson.GetString(ReadUtf8(msg), "index"), out index); } catch (Exception) { }
+            GameRuntime.HighlightRegion(-1);
             GameRuntime.RemoveRegion(index);
             if (GameRuntime.Regions().Count == 0 && AppConfig.GameOn) GameRuntime.Stop();
             return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");

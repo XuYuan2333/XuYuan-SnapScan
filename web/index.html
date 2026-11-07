@@ -174,15 +174,15 @@
       <div class="acc-body">
         <div class="sub-title">翻译模式</div>
         <div class="engine-list" id="mtProfList"></div>
-        <div class="group-note" id="noteMtProfile">标准：HyMT1.5全语种模型，所有语种，按需加载，空闲 60 秒释放。<br>效率：Qwen2.5-0.5B 短句/游戏字幕模型，常驻（约 0.4–0.6 GB 显存/内存），切档或退出释放。<br>AI 接管：不占用本地显存，走云端。</div>
+        <div class="group-note" id="noteMtProfile">标准：HyMT1.5全语种模型，所有语种，按需加载，空闲 60 秒释放。<br>效率：PLaMo 3 Translate 0.8B Q4_K_M，常驻，质量优先。<br>极速：PLaMo 3 Translate 0.8B Q2_K，常驻，速度优先。<br>AI 接管：不占用本地显存，走云端。</div>
 
         <div class="sub-title">翻译模型（按档位）</div>
         <div class="engine-list" id="mtList"></div>
-        <div class="group-note" id="mtNote">按档位取模型：标准要 HyMT1.5 全语种模型；效率要 Qwen2.5-0.5B 短句模型。缺哪个只影响对应档位，不再整体禁用。</div>
+        <div class="group-note" id="mtNote">按档位取模型：标准要 HyMT1.5 全语种模型；效率要 PLaMo Q4_K_M，极速要 PLaMo Q2_K。缺哪个只影响对应档位，不再整体禁用。</div>
         <div class="row-btns">
           <button class="btn" id="btnImportMt">导入翻译模型包</button>
         </div>
-        <div class="group-note">只支持含 .gguf 单文件的模型包（HyMT1.5 1.8B / Qwen2.5-0.5B）。en-zh / ja-zh 目录包已不再支持。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
+        <div class="group-note">只支持含 .gguf 单文件的模型包（HyMT1.5 1.8B / PLaMo 3 Translate 0.8B）。en-zh / ja-zh 目录包已不再支持。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
 
         <div class="sub-title">译文遮罩</div>
         <label class="field">
@@ -190,21 +190,9 @@
           <select id="selMtMode">
             <option value="efficiency">效率 · 遮罩块盖住原文</option>
             <option value="realistic">拟真 · 擦掉原字再重绘</option>
-            <option value="textonly">仅译文 · 不盖原文</option>
           </select>
         </label>
-        <div class="group-note" id="noteMtMode">效率：秒出结果，原文被半透明遮罩块盖住，放大看得到块边。<br>拟真：把原文笔画擦掉、按周围背景补洞，再把译文按原框大小画回去。<br>仅译文：原文完全不动，只把白字/黑字的译文贴在原文附近。</div>
-        <div id="textOnlyOpts" style="display:none">
-          <div class="field-grid">
-            <label class="field"><span>文字颜色</span><select id="selMtTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
-            <label class="field"><span>位置</span><select id="selMtTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
-            <label class="field"><span>字号</span><select id="selMtTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
-            <label class="field"><span>固定大小</span><input type="number" id="numMtTextSize" min="8" max="72" step="1" value="18"></label>
-          </div>
-          <div class="mask-preview" id="textOnlyPreview">
-            <div class="mask-demo textonly-demo" id="textOnlyDemo">我喜欢尼娅，还有大家！</div>
-          </div>
-        </div>
+        <div class="group-note" id="noteMtMode">效率：秒出结果，原文被半透明遮罩块盖住，放大看得到块边。<br>拟真：把原文笔画擦掉、按周围背景补洞，再把译文按原框大小画回去。</div>
         <div class="mask-preview" id="maskPreview">
           <div class="mask-demo" id="maskDemo">我喜欢尼娅，还有大家！</div>
         </div>
@@ -255,7 +243,7 @@
           <input type="number" id="numMtIdle" min="0" max="86400" step="5" value="60" inputmode="numeric">
           <span class="val" style="width:auto;">秒后释放</span>
         </label>
-        <div class="group-note">只对标准档的 1.8B 生效：超过这么多秒没有再次翻译就退出服务，内存/显存还回去；填 0 表示常驻。效率档的 0.5B 是常驻模型，不参与这个计时，切档或退出软件时才释放；AI 接管不占本地模型。</div>
+        <div class="group-note">只对标准档的 1.8B 生效：超过这么多秒没有再次翻译就退出服务，内存/显存还回去；填 0 表示常驻。效率/极速档的 PLaMo 是常驻模型，不参与这个计时，切档或退出软件时才释放；AI 接管不占本地模型。</div>
 
         <div class="sub-title">截图缓存</div>
         <label class="field">
@@ -339,7 +327,7 @@
   </div>
   <div class="drawer-body" id="gameDetail">
     <label class="switch-row">
-      <div><b>启用游戏模式</b><i>只翻译固定区域内的字幕；启动时自动加载 0.5B，关闭时释放所有本地模型。</i></div>
+      <div><b>启用游戏模式</b><i>只翻译固定区域内的字幕；启动时自动加载 PLaMo，关闭时释放所有本地模型。</i></div>
       <input type="checkbox" id="gameOn"><span class="sw"></span>
     </label>
     <div class="group-note" id="gameMsg">先添加固定字幕区域</div>
@@ -351,40 +339,15 @@
       <button class="btn ghost" id="btnGameClear" type="button">全部清空</button>
     </div>
 
-    <div class="sub-title">翻译触发</div>
-    <label class="field">
-      <span>触发方式</span>
-      <select id="gameTrigger">
-        <option value="0">变化时立即翻译（上一轮没结束不排下一轮）</option>
-        <option value="1">固定时间间隔翻译</option>
-        <option value="2">手动快捷键翻译（Ctrl+Alt+F）</option>
-      </select>
-    </label>
+    <div class="sub-title">手动翻译</div>
+    <div class="group-note">按 Ctrl+Alt+F 翻译一次；翻译中再按会强制开新一轮。</div>
     <div class="field-grid">
-      <label class="field">
-        <span>固定间隔</span>
-        <select id="gameInterval">
-          <option value="500">0.5 秒</option>
-          <option value="1000">1.0 秒</option>
-          <option value="1500">1.5 秒</option>
-          <option value="2000">2.0 秒</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>变化敏感度</span>
-        <select id="gameSens">
-          <option value="0">超灵敏</option>
-          <option value="1">灵敏</option>
-          <option value="2">平衡</option>
-          <option value="3">迟钝</option>
-          <option value="4">最迟钝</option>
-        </select>
-      </label>
       <label class="field">
         <span>游戏模型</span>
         <select id="gameModel">
-          <option value="efficiency">0.5B 效率（推荐）</option>
-          <option value="standard">HyMT1.5 标准（较慢）</option>
+          <option value="efficiency">效率 · PLaMo Q4_K_M · 546 MB · 占用约 1 GB（推荐）</option>
+          <option value="turbo">极速 · PLaMo Q2_K · 391 MB · 占用约 0.8 GB</option>
+          <option value="standard">HyMT1.5 · 1080 MB · 占用约 2 GB（较慢）</option>
         </select>
       </label>
       <label class="field">
@@ -392,7 +355,6 @@
         <select id="gameMask">
           <option value="efficiency">效率 · 遮罩块盖住原文</option>
           <option value="realistic">拟真 · 擦掉原字再重绘</option>
-          <option value="textonly">仅译文 · 不盖原文</option>
         </select>
       </label>
     </div>
@@ -405,14 +367,12 @@
       <input type="range" id="gameRngMtAlpha" min="0" max="100" step="1" value="100">
       <span class="val" id="gameLblMtAlpha" style="width:44px;">100%</span>
     </label>
-    <div id="gameTextOnlyOpts" style="display:none">
-      <div class="field-grid">
-        <label class="field"><span>文字颜色</span><select id="gameTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
-        <label class="field"><span>位置</span><select id="gameTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
-        <label class="field"><span>字号</span><select id="gameTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
-        <label class="field"><span>固定大小</span><input type="number" id="gameTextSize" min="8" max="72" step="1" value="18"></label>
-      </div>
-    </div>
+
+    <label class="switch-row">
+      <div><b>显示识别提示</b><i>游戏模式在右下角显示「正在识别 / 翻译完成」提示；关闭后游戏仍会正常翻译和显示遮罩。</i></div>
+      <input type="checkbox" id="gameToastOn"><span class="sw"></span>
+    </label>
+    <div class="group-note" id="gameMaskHint">游戏遮罩只在游戏模式启用、按 Ctrl+Alt+F 翻译后显示。游戏建议使用无边框窗口；独占全屏可能看不到遮罩。</div>
 
     <label class="switch-row">
       <div><b>合并被拆成两行的字幕</b><i>同一区域、上一行没句末标点、下一行是续行时，先合并再翻译。</i></div>

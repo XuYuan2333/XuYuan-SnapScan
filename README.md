@@ -1,147 +1,83 @@
-﻿# XuYuan-SnapScan
+# XuYuan-SnapScan v1.4.1
 
-> 轻量级截图识别工具 · 二维码 / 文字 OCR / 离线截图翻译 · 全局快捷键呼出 · JadeView 2.0 网页界面 + 毛玻璃
+Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻译、手动游戏字幕翻译。
+界面为 JadeView 2 + WebView2，模型按需导入，本体不内置大模型。
 
 ## 功能
 
-- **截图识码**：圈选屏幕任意区域，自动识别二维码 / 条形码
-- **截图识字**：支持自由圈选（任意形状）或方形框选，圈住即识别
-- **截图翻译**：独立入口（默认 `Ctrl+Alt+F`）。HyMT1.5 1.8B / Qwen2.5-0.5B 离线翻译，把译文**原位置盖在原文上**（字号自适应、倾斜行同角度、底色只垫文字），默认鼠标点击穿透
-- **三条独立入口**：识码 / 识字 / 翻译各自一个按钮、一个快捷键，互不干扰；翻译没装模型时整块置灰
-- **全局快捷键**：`Ctrl+Alt+D` 识码、`Ctrl+Alt+X` 识字、`Ctrl+Alt+F` 翻译、`Ctrl+Alt+G` 显示/隐藏译文（都可自定义）
-- **多识别引擎**：微信 OCR / PP-OCR 极速 / Windows 内置 OCR，设置里选择，缺模型的项置灰
-- **导入模型包**：设置里点一下、选个 zip 就装好引擎或翻译模型，不用自己解压、不用挪目录
-- **界面**：JadeView 2.0 + HTML/CSS/JS（复用系统 WebView2，不打包浏览器内核），软件图标 + 背景图 + 毛玻璃
-- **无托盘**：程序只以任务栏按钮存在，关窗口＝退出
-- **外观可调**：设置里实时调节「透明度」（0–100，默认 30）与「毛玻璃强度」（0–20，默认 3）
-- **结果区**：全透明只留边框，背景图完整透出；文本可直接选中、编辑、`Ctrl+C` 复制
+- **截图识码** `Ctrl+Alt+D`
+- **截图识字** `Ctrl+Alt+X`
+- **截图翻译** `Ctrl+Alt+F`
+- **游戏字幕翻译**：固定多个区域，只保留手动触发；按 `Ctrl+Alt+F` 翻译一次，翻译中再按强制开新一轮
+- **显示/隐藏译文** `Ctrl+Alt+G`，也可点遮罩上的关闭按钮
+- **多 OCR 引擎**：微信 OCR / PP-OCR 极速 / Windows OCR
+- **多翻译档**：标准 HyMT1.5、效率 PLaMo Q4_K_M、极速 PLaMo Q2_K
+- **模型包导入**：设置 → 识别引擎 / 翻译 → 导入模型包
+- **游戏区域悬停预览**：鼠标移到区域行/删除按钮，屏幕上高亮对应区域
 
-## 下载哪个包
+## 下载
 
-本体带完整运行环境，模型按需导入；光下本体不会翻译/识字，导入哪个包就启用对应功能。
+| 文件 | 大小 | 内容 |
+|---|---:|---|
+| `SnapScan-v1.4.1-Body.zip` | 约 70 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
+| `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速 |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-v1.4.1.zip` | 约 923 MB | PLaMo 3 Translate 0.8B：Q4_K_M（效率）+ Q2_K（极速） |
+| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | HyMT1.5 1.8B Q4_K_M（标准） |
 
-| 文件 | 大小 | 作用 |
-|---|---|---|
-| `SnapScan-v1.4.0-Body.zip` | 约 70 MB | 本体 + ONNX Runtime + CPU/GPU llama + VC++ 运行库 + WebView2 引导 |
-| `SnapScan-Model-OCR-v1.4.0.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速，导入后识字可用 |
-| `SnapScan-Model-Lite-Qwen2.5-0.5B-Q2K-v1.4.0.zip` | 约 310 MB | 效率档（Qwen2.5-0.5B，英/日短句） |
-| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.0.zip` | 约 1.06 GB | 标准档（HyMT1.5 1.8B，所有语种） |
+本体不带翻译/OCR 模型；导入哪个包，就启用对应功能。
 
-导入：设置 → 识别引擎 / 翻译 → 导入模型包 → 选 zip（不用解压）。导入 Lite/Pro 会自动切到对应翻译档。
+## 翻译模型选择
 
-系统要求：Windows 10 21H2 / Windows 11 64 位；WebView2 缺失时先运行本体里的 `MicrosoftEdgeWebview2Setup.exe`；建议 .NET Framework 4.8。
+| 档位 | 模型 | 文件大小 | 预计占用 | 优点 | 缺点 |
+|---|---|---:|---:|---|---|
+| 标准 | HyMT1.5 1.8B Q4_K_M | 1080 MB | 约 2.0 GB | 语种覆盖最广，长句和复杂文本最稳 | 体积最大、加载和单句速度最慢 |
+| 效率 | PLaMo 3 Translate 0.8B Q4_K_M | 546 MB | 约 1.0 GB | 翻译专用，53 语言，质量和速度平衡最好 | 比 Q2 略大 |
+| 极速 | PLaMo 3 Translate 0.8B Q2_K | 391 MB | 约 0.8 GB | 体积最小、低配机器更友好 | 量化更低，部分句子质量略低于 Q4 |
 
-## 版本变更
+推荐：
 
-- **v1.3.0**：主界面齿轮**左边**新增一个同款按钮「AI」，点开是 AI 大模型配置面板——默认就是 DeepSeek 官方地址 + 模型名 `deepseek-flash` + **不思考、不联网搜索**，用户只要粘一个自己的 API Key 就能用（Key 只写在本机 ini，不上传，界面只显示末 4 位）。面板下方放三个开关占位：**AI 识字强化 / AI 译文遮罩强化 / AI 翻译强化**——开关状态会保存，功能还没接上，现在打开也不会报错。发布方式同时调整为：**三个翻译模型打成一个包、客户端一次导入即三件套齐全**；识字三个模型仍然分别打包、分别导入；本体单独下载；下载说明里给每个模型补上优缺点与适用场景。
-- **v1.2.0**：翻译侧改成「三档模式 + 三件套模型」。设置 → 翻译里新增「翻译模式」：**标准**（只用多语种大模型，最稳）、**效率**（识别到英文走 en-zh 小模型、日文走 ja-zh 小模型、其他语种仍回大模型）、**游戏**（只用两个小模型，仅英/日 → 中文，大模型完全不参与）。模型不再单选，三个都是必需品——多语种大模型 + en-zh + ja-zh，**缺任意一个翻译功能整体禁用**（设置里三件套逐项标 ✓/✗，主界面翻译按钮跟着置灰）。所有翻译一律「外语 → 中文」，取消目标语言设置，源语言取语种识别置信度最高的那个。新增「拟真」遮罩模式，与「效率」并存，在设置 → 译文遮罩第一项切换。拟真照着 manga-image-translator 的三段式来——先按原文框把原字擦掉（亮度判墨迹 + 多轮邻域扩散补洞 + 软化边缘），再按框宽和空白列重排译文画回去，输出成品图；OCR 与翻译仍走本机链路（微信 OCR / PP-OCR + HyMT1.5），接口只吃「原文框坐标 + 已翻译文本」。配套调整：同一段落内按平均行高统一字号（不再一行一个号）；行内间距超过 1/4 字高就拆成独立遮罩块（导航栏一项一块）；译文一律横排、不再随原文倾斜；拟真字号上限收到 `0.79×行高`、行距按 `0.98×框高`；拟真成品图不带任何调试边框。语言检测由「出现一个汉字就判中文」改为「汉字 ≥4 个且占汉字+拉丁字母的 75% 以上」，英文页面里混进个别汉字不会再被误判成中文而跳过翻译；没出译文时提示条直接写明原因（选区已是中文 / 没识别到文字 / 引擎没出结果）。
-- **v1.1.9**：翻译模块改版，做成与识字 OCR 完全独立的第三个入口（`Ctrl+Alt+F`）。翻译后端换成**混元 Hy-MT1.5-1.8B GGUF + llama.cpp**（一个模型覆盖 33 种语言方向，实测英/日/俄→中 0.2–0.4 s 一行）；译文原位置遮罩（字号自适应、倾斜行同角度、底色只垫文字）；遮罩默认点击穿透，右下角控制条点 × / Esc / 滚轮 / `Ctrl+Alt+G` 都能关；翻译不要启用开关——扫到模型就自动可用，没模型整块置灰；右上角 pill 只显示模型名；主界面去掉引擎说明文字；界面隐藏滚动条；设置页重排得更紧凑；「导入模型包」支持 .gguf 模型包（含 llama.cpp 运行时一起装）；翻译性能四档（后台无感 / 均衡 / 性能 / 全力以赴），默认均衡；翻译模型定为 Q4_K_M（约 1.08 GB）；空闲释放可配（默认 30 秒无翻译就退出翻译服务、立刻还内存，0 = 常驻）；翻译提示词改为「忠实原文、不增不减」，压住模型自行补词；下线 PP-OCR「标准」档，旧配置自动并入极速；遮罩块严格包住原文起笔到收笔（不再随译文长短变化）、译文靠左对齐；设置里新增「译文遮罩不透明度」（0–100%，默认 100%），带彩虹底图实时预览；模型包改为到 GitHub 发布页手动下载（不再内置下载按钮）
-- **v1.1.8**：新增「导入模型包」——设置里选一个 zip，程序自己把模型落进 `OCR Model` 目录并刷新引擎列表；发行方式改成本体 + 纯模型包（模型包不含 exe，只要下过一次，换版本不用重下）；修「识别中」提示不显示——识别移到后台线程、界面线程泵消息，提示条能正常淡入并转圈；提示条按系统 DPI 换算尺寸，150% 缩放下文字不再被裁；提示条上的引擎名改为跟随实际引擎（选 PP-OCR 极速/标准/高精时不再一律写成「Windows 内置 OCR」）
-- **v1.1.7**：修 Esc 取消截屏后主窗口不再出现（取消/失败/异常都会还原窗口，且框选期间把 Esc 注册成系统热键，遮罩没抢到焦点也能取消）；修截屏会拍到上一轮「识别中／识别完成」提示（抓屏前先清提示条并等 DWM 合成）；提示条移到屏幕居中靠下，改成 30 ms 帧的淡入上滑 + 淡出下滑、渐变底加细描边；框选期间重复按热键不再叠出多层遮罩
-- **v1.1.6**：删除托盘图标与「隐藏＝最小化」；关闭主窗口即退出程序；截图期间真正隐藏窗口，结束后按原状态还原（勾选「显示本软件窗口」才强制置顶）；分引擎包去掉用不到的 onnxruntime（微信包 28.8→24.4 MB，Windows 包 6.9→2.5 MB）
-- **v1.1.5**：JadeView 2.0 网页界面重做、微信 OCR 随包离线、按引擎分包
+- 日常游戏字幕：**效率 Q4_K_M**
+- 内存/显存紧张、追求更快：**极速 Q2_K**
+- 多语种、长文本、质量优先：**标准 HyMT1.5**
 
-## 运行要求
+OCR 引擎：
 
-| 项目 | 要求 |
-|------|------|
-| 系统 | Windows 10 / 11 x64 |
-| 运行时 | .NET Framework 4.8（Win10 1903+ / Win11 自带） |
-| 浏览器组件 | Microsoft Edge WebView2 Runtime（Win11 自带；Win10 装了新版 Edge 就已具备） |
-| Python / rapidocr | **不需要**，PP-OCR 由程序自带 onnxruntime 直接推理 |
-
-## 目录结构（发布包）
-
-```
-QRSnap.exe                    主程序（图标、背景图、Web 界面已内嵌）
-QRSnap.exe.config             程序集绑定配置，onnxruntime 依赖必需
-Microsoft.ML.OnnxRuntime.dll  OCR 推理托管层
-onnxruntime.dll               OCR 推理原生库
-System.Memory.dll / System.Buffers.dll / System.Numerics.Vectors.dll
-System.Runtime.CompilerServices.Unsafe.dll
-XuYuan-SnapScan_config.ini    配置（首次运行自动生成）
-OCR Model\                    模型根目录，只认这一处（导入模型包时就落在这里）
-  PP-OCR\tiny\    det.onnx / rec.onnx / keys.txt    PP-OCRv6 Tiny   约 6 MB
-  PP-OCR\medium\  ...                              PP-OCRv6 Medium 约 132 MB
-  WeChat\
-    runtime\Weixin.exe                    微信宿主进程（只承载 OCR 插件，不登录、不联网）
-    runtime\4.1.15.56\mmmojo_64.dll       mojo 通信库
-    plugin\wxocr.dll + text_det / text_rec .xnet + paragraph_det + 字符表
-MT Model\                     翻译模型根目录（三个缺一不可）
-  HY-MT1.5-1.8B-Q4_K_M.gguf   多语种大模型（约 1.08 GB，33 种语言方向，标准模式全用它）
-  en-zh\                      Opus-MT en-zh 量化 ONNX（encoder / decoder / tokenizer.json / config.json，约 119 MB）
-  ja-zh\                      Opus-MT ja-zh 量化 ONNX（同上四件 + vocab.json，约 200 MB）
-llama\                        翻译用的 llama.cpp 运行时（llama-server.exe + dll，约 24 MB）
-```
-
-> 模型不放 exe 里，是因为 medium 一档就 132 MB。程序**只扫描 exe 同级的 `OCR Model` 目录**，
-> 目录里没有的引擎在设置里直接置灰不可选；「导入模型包」就是往这个目录里放东西。
+- 微信 OCR：中文最准，推荐
+- PP-OCR 极速：轻量、快
+- Windows OCR：系统兜底
 
 ## 使用
 
-1. 解压后双击 QRSnap.exe（没有托盘图标；关掉窗口就是退出程序，不留后台）
-2. 按 `Ctrl+Alt+D` 截图识码，`Ctrl+Alt+X` 截图识字，`Ctrl+Alt+F` 截图翻译
-3. 圈选区域后自动识别；翻译会直接把译文盖回原文位置
-4. 译文遮罩默认点击穿透，鼠标照常操作后面的窗口；右下角控制条可以点 × 关掉全部译文，`Esc` / 滚轮 / `Ctrl+Alt+G` 也行；不想看到那条浮动控制条，就在设置 → 翻译 → 译文遮罩里把「显示『✕ 关闭译文』控制条」关掉
-5. 点右上角齿轮进设置：切换识别引擎 / 翻译模式、导入模型包、开关自由圈选、改快捷键、调透明度 / 毛玻璃
-6. 截图时本窗口会先隐藏，截完按原状态还原（原来最小化就仍最小化、原来被挡住就仍被挡住）；设置里勾了「显示本软件窗口」才强制提到最前
+1. 解压本体到任意目录，运行 `QRSnap.exe`。
+2. 设置 → 识别引擎 / 翻译 → 导入模型包，选需要的 zip。
+3. `Ctrl+Alt+D` 识码，`Ctrl+Alt+X` 识字，`Ctrl+Alt+F` 翻译。
+4. 游戏模式：设置 → 游戏专属配置 → 开启游戏模式 → 添加固定字幕区域 → 按 `Ctrl+Alt+F` 手动翻译。
+5. 清除 API Key 会自动关闭所有依赖 Key 的 AI 功能。
 
-## 截图翻译说明
+## 系统要求
 
-| 项目 | 说明 |
-|------|------|
-| 模式 | 设置 → 翻译 → 「翻译模式」三档：**标准**（只走大模型，最稳）、**效率**（英→en-zh / 日→ja-zh / 其他语种→大模型）、**游戏**（只用两个小模型，仅英、日 → 中文） |
-| 大模型 | 腾讯混元 `Hy-MT1.5-1.8B`，GGUF `Q4_K_M`（约 1.08 GB），llama.cpp 本地 CPU 推理 |
-| 小模型 | Opus-MT 量化 ONNX（`en-zh` 约 119 MB / `ja-zh` 约 200 MB），onnxruntime 直接推理，单行 0.15–0.45 s |
-| 语言方向 | 一律 **外语 → 中文**；源语言自动识别，多个候选时取置信度最高的那个。取消目标语言设置 |
-| 三件套 | 大模型 + en-zh + ja-zh **缺一即整体禁用**（设置里逐项 ✓/✗，缺哪件提示里写明） |
-| 中文提示词 | `将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：`（官方模板） |
-| 内存 | 大模型常驻约 0.9–1.0 GB；小模型约 120/200 MB；闲置 30 秒（可配置）自动释放 |
+- Windows 10 21H2 / Windows 11，64 位
+- .NET Framework 4.8
+- WebView2 Runtime（缺时运行本体里的 `MicrosoftEdgeWebview2Setup.exe`）
+- 有 Vulkan 显卡驱动会自动用 GPU，没有则回 CPU
+- 游戏建议无边框窗口；独占全屏可能截黑屏或挡遮罩
 
-## 识别引擎说明
+## 模型与许可
 
-| 引擎 | 依赖 | 说明 |
-|------|------|------|
-| 微信 OCR | `OCR Model\WeChat` | **推荐**。中文最准；引擎与模型随包分发，本地推理、不联网，**不依赖本机是否装了微信** |
-| PP-OCR 极速 | `OCR Model\PP-OCR\tiny` | 轻量最快，约 200 ms |
-| PP-OCR 高精 | `OCR Model\PP-OCR\medium` | 高精度，小字 / 复杂排版更稳，约 700 ms |
-| Windows OCR | 系统 | 系统兜底，任何机器都能跑 |
+- HyMT1.5：使用对应模型许可证，商用前请确认。
+- PLaMo 3 Translate：PLaMo Community License，个人/非商业免费，商业用途需查看官方条款。
+- 模型文件不包含在本体中，按需下载导入。
 
-> 以上引擎全部是本地推理，都不需要联网。设置里只列出 `OCR Model` 目录里真正有的模型。
-
-## 技术栈
-
-- C# / .NET Framework 4.8，单文件 `csc.exe` 编译
-- 界面：JadeView 2.x 原生库 + WebView2（HTML/CSS/JS）
-- OCR：onnxruntime 1.16.3（托管）+ 1.20.1（原生），PP-OCRv6 的检测（DB）与识别（CTC）全部纯 C# 实现，`PpOcr.cs`
-- 微信 OCR：剥离自微信 4.x 的 `wxocr.dll` + `mmmojo_64.dll`，手写 mojo + protobuf 协议，纯 P/Invoke
-- 翻译：llama.cpp `llama-server.exe` 子进程 + `/v1/chat/completions`（本地 127.0.0.1，不开外网端口）
-- 二维码：[ZXing.Net](https://github.com/micjahn/ZXing.Net)
-
-## 自行编译
+## 构建
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
+powershell -ExecutionPolicy Bypass -File build19.ps1
+powershell -ExecutionPolicy Bypass -File pack-release.ps1
 ```
 
-只需要 Windows 自带的 `csc.exe`，不需要 Visual Studio / dotnet SDK。
+`build19.ps1` 用 `csc.exe` 编译；`pack-release.ps1` 生成本体、OCR、PLaMo、HyMT 模型包和 SHA256。
 
-## 致谢
+## 说明
 
-- [PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) — PP-OCRv6 模型
-- [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) — 推理引擎
-- [Tencent-Hunyuan/HY-MT](https://huggingface.co/tencent/HY-MT1.5-1.8B) — 混元翻译 1.8B 模型
-- [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) — 翻译模型推理运行时
-- [ZXing.Net](https://github.com/micjahn/ZXing.Net) — 二维码识别库
-- JadeView 2.x — 网页界面宿主
-
-## 许可与模型版权
-
-本项目代码仅供学习交流使用。
-
-- PP-OCRv6 模型版权归 PaddlePaddle 所有（Apache-2.0）。
-- 混元翻译模型 `HY-MT1.5-1.8B` 版权归腾讯所有，使用时请遵守其随附 License。
-- llama.cpp 运行时为 MIT 许可的预编译版本。
-- `OCR Model\WeChat` 里的 `Weixin.exe`、`mmmojo_64.dll`、`wxocr.dll`、`.xnet` 均为**腾讯微信**的二进制文件，
-  版权归腾讯所有，这里只是把它们放进包里以便离线使用；**公开分发或商用请自行评估授权**。
-  介意的话可以删掉整个 `OCR Model\WeChat` 目录，程序会自动回落到 PP-OCR 或 Windows OCR。
+- 本项目不上传用户 Key、截图或翻译内容。
+- 发布包只包含程序和模型，不包含用户配置。

@@ -5,11 +5,10 @@ $root = 'E:\下载\豆包'
 $src  = Join-Path $root 'build-src'
 $rel  = Join-Path $root 'release'
 $tmp  = Join-Path $root '_pack'
-$ver  = 'v1.4.0'
+$ver  = 'v1.4.1'
 
-if (Test-Path $rel) { Remove-Item $rel -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $rel | Out-Null
 if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+if (!(Test-Path $rel)) { New-Item -ItemType Directory -Force -Path $rel | Out-Null }
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 function Stage($name) {
@@ -27,7 +26,7 @@ function ZipDir($dir, $zip) {
   '{0}  {1:N1} MB' -f $z.Name, ($z.Length / 1MB)
 }
 
-# ---------- 本体：exe + 运行库 + CPU/GPU llama + WebView2 引导 ----------
+# ---------- 本体 ----------
 $body = Stage 'body'
 CopyFile (Join-Path $root 'QRSnap.exe') $body
 CopyFile (Join-Path $root 'QRSnap.exe.config') $body
@@ -57,7 +56,7 @@ $start = @(
 '',
 '模型包（按需导入，光本体不会翻译）',
 '- OCR 包：微信 OCR + PP-OCR 极速，导入后识字可用。',
-'- 效率包：Qwen2.5-0.5B，导入后效率档可用（英/日短句）。',
+'- PLaMo 包：PLaMo 3 Translate 0.8B Q4_K_M（效率）和 Q2_K（极速），导入后两档翻译可用。',
 '- 标准包：HyMT1.5 1.8B，导入后标准档可用（所有语种）。',
 '导入方式：设置 → 识别引擎 / 翻译 → 导入模型包，选择 zip 即可。',
 '',
@@ -78,14 +77,15 @@ Copy-Item (Join-Path $root 'OCR Model\PP-OCR\tiny') (Join-Path $ocrModel 'PP-OCR
 Copy-Item (Join-Path $root 'OCR Model\WeChat') (Join-Path $ocrModel 'WeChat') -Recurse -Force
 ZipDir $ocr (Join-Path $rel "SnapScan-Model-OCR-$ver.zip")
 
-# ---------- 效率小模型包 ----------
-$lite = Stage 'lite'
-$liteMt = Join-Path $lite 'MT Model\Game'
-New-Item -ItemType Directory -Force -Path $liteMt | Out-Null
-CopyFile (Join-Path $root 'MT Model\Game\Qwen2.5-0.5B-Instruct-Q2_K.gguf') $liteMt
-ZipDir $lite (Join-Path $rel "SnapScan-Model-Lite-Qwen2.5-0.5B-Q2K-$ver.zip")
+# ---------- PLaMo 翻译包：Q4_K_M + Q2_K ----------
+$plamo = Stage 'plamo'
+$plamoMt = Join-Path $plamo 'MT Model\Game'
+New-Item -ItemType Directory -Force -Path $plamoMt | Out-Null
+CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q4_K_M.gguf') $plamoMt
+CopyFile (Join-Path $root 'MT Model\Game\plamo-3-translate-0.8b-Q2_K.gguf') $plamoMt
+ZipDir $plamo (Join-Path $rel "SnapScan-Model-PLaMo3-Translate-0.8B-$ver.zip")
 
-# ---------- 高精大模型包 ----------
+# ---------- 标准大模型包 ----------
 $pro = Stage 'pro'
 $proMt = Join-Path $pro 'MT Model'
 New-Item -ItemType Directory -Force -Path $proMt | Out-Null
@@ -93,7 +93,7 @@ CopyFile (Join-Path $root 'MT Model\HY-MT1.5-1.8B-Q4_K_M.gguf') $proMt
 ZipDir $pro (Join-Path $rel "SnapScan-Model-Pro-HyMT1.5-1.8B-$ver.zip")
 
 # ---------- 校验和 ----------
-$sha = Get-ChildItem $rel -File | Sort-Object Name | ForEach-Object {
+$sha = Get-ChildItem $rel -File | Where-Object { $_.Name -notlike 'SHA256-*' } | Sort-Object Name | ForEach-Object {
   $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
   "$h  $($_.Name)"
 }

@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text;
 using System.Threading;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace QRSnap
@@ -39,6 +40,13 @@ namespace QRSnap
                 res.Add(new Rectangle(x, y, w, h));
             }
             return res;
+        }
+
+        public static void HighlightRegion(int index)
+        {
+            List<Rectangle> list = Regions();
+            if (index < 0 || index >= list.Count) { RegionHighlight.Hide(); return; }
+            RegionHighlight.Show(list[index], index + 1);
         }
 
         public static void SaveRegions(List<Rectangle> list)
@@ -96,9 +104,15 @@ namespace QRSnap
                 return false;
             }
             string profile = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
-            if (profile == AppConfig.MtProfileEfficiency && !MtRunner.GameReady)
+            if (profile == AppConfig.MtProfileEfficiency && !MtRunner.GameReadyFor("efficiency"))
             {
-                err = "效率档需要先导入 Qwen2.5-0.5B 模型";
+                err = "效率档需要先放入 PLaMo 3 Translate Q4_K_M";
+                LastError = err;
+                return false;
+            }
+            if (profile == AppConfig.MtProfileTurbo && !MtRunner.GameReadyFor("turbo"))
+            {
+                err = "极速档需要先放入 PLaMo 3 Translate Q2_K";
                 LastError = err;
                 return false;
             }
@@ -108,10 +122,10 @@ namespace QRSnap
                 LastError = err;
                 return false;
             }
-
             _prevProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
             AppConfig.MtProfile = profile;
             AppConfig.GameModel = profile;
+            AppConfig.GameTrigger = 2;   // 只保留手动快捷键翻译
             AppConfig.GameOn = true;
             LastError = "";
             _overlayClosed = false;
@@ -119,7 +133,6 @@ namespace QRSnap
             try { JadeHost.HideWindow(true); } catch (Exception) { }   // 让游戏画面露出来
             _prevSig = null;
             StartTimer();
-            StartWatch();
             WarmModel(profile);
             JadeHost.Log("[game] start regions=" + rs.Count + " profile=" + profile
                 + " trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs);
@@ -152,7 +165,6 @@ namespace QRSnap
             if (!AppConfig.GameOn) return;
             _prevSig = null;
             StartTimer();
-            StartWatch();
             JadeHost.Log("[game] reconfigure trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs);
         }
 
@@ -164,7 +176,7 @@ namespace QRSnap
                 if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
                 if (_watch != null) { try { _watch.Dispose(); } catch (Exception) { } _watch = null; }
             }
-            else if (AppConfig.GameOn) { StartTimer(); StartWatch(); }
+            else if (AppConfig.GameOn) StartTimer();
         }
 
         // 游戏模式下只有「隐藏遮罩」快捷键和遮罩上的关闭按钮能关遮罩
@@ -313,6 +325,7 @@ namespace QRSnap
             if (regions.Count == 0) return;
             Rectangle union = Union(regions);
             if (union.Width < 16 || union.Height < 12) return;
+            JadeHost.GameBusy("识字中", "OCR · " + Ocr.EffectiveName());
 
             // 优先让遮罩从截图里排除，这样不用每帧隐藏：不会闪屏
             bool excluded = TransOverlay.CaptureExcluded;
@@ -361,10 +374,13 @@ namespace QRSnap
                 if (segs.Count == 0)
                 {
                     JadeHost.Log("[game] no dialogue");
+                    JadeHost.GameDone("没有识别到字幕", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel), false);
                     return;
                 }
+                JadeHost.GameBusy("翻译中", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel));
                 int lines = JadeHost.GameTranslate(bmp, union, segs);
                 if (_overlayClosed) { try { TransOverlay.HideOverlay(); } catch (Exception) { } }
+                JadeHost.GameDone(lines > 0 ? "翻译完成" : "没有识别到字幕", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel) + (lines > 0 ? " · " + lines + " 行" : ""), lines > 0);
                 JadeHost.Log("[game] shown=" + lines + " blocks=" + segs.Count
                     + " trigger=" + AppConfig.GameTrigger + " force=" + (force ? 1 : 0));
             }
@@ -546,6 +562,88 @@ namespace QRSnap
             char x = a[a.Length - 1], y = b[0];
             if (x < 128 && y < 128) return a + " " + b;
             return a + b;
+        }
+    }
+    // 游戏设置里悬停「删除」时，在屏幕上高亮对应区域框
+    internal static class RegionHighlight
+    {
+        private static RegionHighlightForm _form;
+
+        public static void Show(Rectangle r, int index)
+        {
+            Hide();
+            if (r.Width < 8 || r.Height < 8) return;
+            try { _form = new RegionHighlightForm(r, index); _form.Show(); NativeShell.Log("[gamehover] show index=" + index + " rect=" + r.X + "," + r.Y + "," + r.Width + "x" + r.Height); }
+            catch (Exception) { _form = null; }
+        }
+
+        public static void Hide()
+        {
+            if (_form == null) return;
+            try { _form.Close(); } catch (Exception) { }
+            try { _form.Dispose(); } catch (Exception) { }
+            _form = null;
+        }
+    }
+
+    internal sealed class RegionHighlightForm : Form
+    {
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+        private readonly Rectangle _r;
+        private readonly int _index;
+        private readonly System.Windows.Forms.Timer _timer;
+
+        public RegionHighlightForm(Rectangle r, int index)
+        {
+            _r = r;
+            _index = index;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            TopMost = true;
+            BackColor = Color.Fuchsia;
+            TransparencyKey = Color.Fuchsia;
+            Bounds = new Rectangle(r.X - 4, r.Y - 4, r.Width + 8, r.Height + 8);
+            _timer = new System.Windows.Forms.Timer();
+            _timer.Interval = 6000;
+            _timer.Tick += delegate { _timer.Stop(); RegionHighlight.Hide(); };
+            _timer.Start();
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            try { SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); } catch (Exception) { }
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x20 | 0x80 | 0x08000000;   // 鼠标穿透 + 工具窗口 + 不抢焦点
+                return cp;
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using (Pen pen = new Pen(Color.FromArgb(255, 210, 70), 2f))
+            {
+                pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                e.Graphics.DrawRectangle(pen, 1, 1, Width - 3, Height - 3);
+            }
+            string label = "区域 " + _index;
+            using (Font f = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold))
+            using (SolidBrush bg = new SolidBrush(Color.FromArgb(235, 40, 44, 54)))
+            using (SolidBrush fg = new SolidBrush(Color.FromArgb(255, 255, 220, 100)))
+            {
+                SizeF sz = e.Graphics.MeasureString(label, f);
+                e.Graphics.FillRectangle(bg, 4, 4, sz.Width + 8, sz.Height + 2);
+                e.Graphics.DrawString(label, f, fg, 8, 5);
+            }
         }
     }
 }

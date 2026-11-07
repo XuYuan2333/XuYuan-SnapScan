@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyFileVersion("1.4.1.0")]
 
 namespace QRSnap
 {
@@ -436,16 +436,12 @@ namespace QRSnap
         public static int MtMaskAlpha = DefaultMtMaskAlpha;
         public const string MtModeEfficiency = "efficiency";   // 效率：遮罩块直接盖住原文
         public const string MtModeRealistic = "realistic";     // 拟真：擦掉原字、按背景补洞、再画译文
-        public const string MtModeTextOnly = "textonly";       // 仅译文：不盖原文，只把译文贴到原文附近
         public static string MtMode = MtModeEfficiency;
-        public static string MtTextStyle = "white";            // 仅译文：white=白底黑字 black=黑底白字
-        public static int MtTextPos;                           // 0左上 1中上 2右上 3左下 4中下 5右下
-        public static bool MtTextAutoSize = true;              // true=自适应字号 false=固定字号
-        public static int MtTextSize = 18;                     // 固定字号（像素）
         // 翻译模式（与上面的「译文遮罩」是两件事）
         public const string MtProfileStandard = "standard";      // 标准：用大模型（HyMT1.5）翻所有方向
         public const string MtProfileEfficiency = "efficiency";  // 效率：英→中 / 日→中 先走小模型，其余回退标准
         public const string MtProfileGame = "game";              // 游戏：只用中日互译，强制停用标准模型
+        public const string MtProfileTurbo = "turbo";            // 极速：PLaMo 0.8B Q2_K
         public static string MtProfile = MtProfileStandard;
 
         // ---------- AI 大模型（只做辅助增强，默认 DeepSeek 官方；不思考、不联网，只求快） ----------
@@ -467,6 +463,7 @@ namespace QRSnap
         public static int GameSensitivity = 2;                           // 0超灵敏 1灵敏 2平衡 3迟钝 4最迟钝
         public static string GameModel = MtProfileEfficiency;            // 游戏模式默认 0.5B，可切标准
         public static string GameMaskMode = MtModeEfficiency;            // 游戏遮罩独立控制；仅效率，游戏页不提供拟真
+        public static bool GameToastOn = true;                           // 游戏模式是否显示右下角识别提示
         public static bool GameMerge = true;                             // 合并被拆开的字幕行
         public static bool Legacy;
 
@@ -568,7 +565,6 @@ namespace QRSnap
             if (v == null) return MtModeEfficiency;
             string s = v.Trim().ToLowerInvariant();
             if (s == MtModeRealistic || s == "real" || s == "拟真") return MtModeRealistic;
-            if (s == MtModeTextOnly || s == "text" || s == "仅译文") return MtModeTextOnly;
             return MtModeEfficiency;
         }
 
@@ -577,6 +573,7 @@ namespace QRSnap
         {
             if (v == null) return MtProfileStandard;
             string s = v.Trim().ToLowerInvariant();
+            if (s == MtProfileTurbo || s == "极速" || s == "fast") return MtProfileTurbo;
             if (s == MtProfileEfficiency || s == "eff" || s == "效率") return MtProfileEfficiency;
             if (s == MtProfileGame || s == "游戏" || s == "game") return MtProfileEfficiency;
             return MtProfileStandard;
@@ -585,6 +582,7 @@ namespace QRSnap
         public static string MtProfileName(string v)
         {
             string s = NormalizeMtProfile(v);
+            if (s == MtProfileTurbo) return "极速";
             if (s == MtProfileEfficiency) return "效率";
             return "标准";
         }
@@ -612,10 +610,6 @@ namespace QRSnap
             MtIdle = DefaultMtIdle;
             MtMaskAlpha = DefaultMtMaskAlpha;
             MtMode = MtModeEfficiency;
-            MtTextStyle = "white";
-            MtTextPos = 0;
-            MtTextAutoSize = true;
-            MtTextSize = 18;
             MtProfile = MtProfileStandard;
             AiProvider = AiProviderDeepSeek;
             AiModel = "deepseek-flash";
@@ -628,11 +622,12 @@ namespace QRSnap
             AiLayout = true;
             GameOn = false;
             GameRegions = "";
-            GameTrigger = 0;
+            GameTrigger = 2;
             GameIntervalMs = 500;
             GameSensitivity = 2;
             GameModel = MtProfileEfficiency;
             GameMaskMode = MtModeEfficiency;
+            GameToastOn = true;
             GameMerge = true;
             Legacy = false;
             try
@@ -692,10 +687,6 @@ namespace QRSnap
                         if (int.TryParse(v, out av)) MtMaskAlpha = NormalizeMtMaskAlpha(av);
                     }
                     else if (k.Equals("mtmode", StringComparison.OrdinalIgnoreCase)) MtMode = NormalizeMtMode(v);
-                    else if (k.Equals("mttextstyle", StringComparison.OrdinalIgnoreCase)) MtTextStyle = v == "black" ? "black" : "white";
-                    else if (k.Equals("mttextpos", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) MtTextPos = Math.Max(0, Math.Min(5, n)); }
-                    else if (k.Equals("mttextautosize", StringComparison.OrdinalIgnoreCase)) MtTextAutoSize = ToBool(v);
-                    else if (k.Equals("mttextsize", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) MtTextSize = Math.Max(8, Math.Min(72, n)); }
                     else if (k.Equals("mtprofile", StringComparison.OrdinalIgnoreCase)) MtProfile = NormalizeMtProfile(v);
                     else if (k.Equals("aiprovider", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiProvider = v;
                     else if (k.Equals("aimodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiModel = v;
@@ -713,10 +704,12 @@ namespace QRSnap
                     else if (k.Equals("gamesens", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameSensitivity = Math.Max(0, Math.Min(4, n)); }
                     else if (k.Equals("gamemodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameModel = NormalizeMtProfile(v);
                     else if (k.Equals("gamemask", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameMaskMode = NormalizeMtMode(v);
+                    else if (k.Equals("gametoaston", StringComparison.OrdinalIgnoreCase)) GameToastOn = ToBool(v);
                     else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 GameOn = false;   // 游戏循环必须在本次启动里手动开启
+                GameTrigger = 2;  // 只保留手动快捷键翻译
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception)
@@ -754,10 +747,6 @@ namespace QRSnap
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
             sb.Append("mtmode=").Append(MtMode).Append("\r\n");
-            sb.Append("mttextstyle=").Append(MtTextStyle).Append("\r\n");
-            sb.Append("mttextpos=").Append(MtTextPos).Append("\r\n");
-            sb.Append("mttextautosize=").Append(MtTextAutoSize ? "1" : "0").Append("\r\n");
-            sb.Append("mttextsize=").Append(MtTextSize).Append("\r\n");
             sb.Append("mtprofile=").Append(MtProfile).Append("\r\n");
             sb.Append("aiprovider=").Append(AiProvider).Append("\r\n");
             sb.Append("aimodel=").Append(AiModel).Append("\r\n");
@@ -775,6 +764,7 @@ namespace QRSnap
             sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
             sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
             sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
+            sb.Append("gametoaston=").Append(GameToastOn ? "1" : "0").Append("\r\n");
             sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();

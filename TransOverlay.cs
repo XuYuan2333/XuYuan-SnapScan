@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -154,7 +154,7 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
-            ExcludeCapture(_inst);
+            CaptureExcluded = false;
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -178,7 +178,7 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
-            ExcludeCapture(_inst);
+            CaptureExcluded = false;
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -365,90 +365,9 @@ namespace QRSnap
             }
             return b;
         }
-
-        // 仅译文：不擦原字，只在原文附近贴一块白底黑字/黑底白字的小标签
-        private static void DrawTextOnly(Graphics g, Item it, int w, int h)
-        {
-            Rectangle box = Clamp(it.Box, w, h);
-            if (box.Width < 4 || box.Height < 4) return;
-
-            int alpha = AppConfig.NormalizeMtMaskAlpha(AppConfig.MtMaskAlpha);
-            bool white = AppConfig.MtTextStyle != "black";
-            int a = (int)Math.Round(255.0 * alpha / 100.0);
-            Color fg = white ? Color.FromArgb(a, 255, 255, 255) : Color.FromArgb(a, 8, 10, 14);
-            Color shadow = white ? Color.FromArgb((int)(a * 0.72), 0, 0, 0)
-                                 : Color.FromArgb((int)(a * 0.72), 255, 255, 255);
-
-            float maxW = Math.Max(40f, Math.Min(w - 8f, Math.Max(box.Width * 1.6f, 140f)));
-            Font font;
-            List<string> lines;
-            if (AppConfig.MtTextAutoSize)
-            {
-                float maxH = Math.Max(20f, Math.Min(h - 8f, box.Height * 2.2f));
-                font = FitFont(g, it.Text, maxW, maxH, out lines);
-            }
-            else
-            {
-                float size = Math.Max(8, Math.Min(72, AppConfig.MtTextSize));
-                font = new Font("Microsoft YaHei UI", size, FontStyle.Regular, GraphicsUnit.Pixel);
-                lines = WrapLines(g, it.Text, font, maxW);
-            }
-            if (font == null || lines == null || lines.Count == 0) { if (font != null) font.Dispose(); return; }
-
-            float lh = font.GetHeight(g);
-            float tw = 0;
-            for (int i = 0; i < lines.Count; i++) tw = Math.Max(tw, g.MeasureString(lines[i], font).Width);
-            int pad = 4;
-            int bw = (int)Math.Ceiling(Math.Min(w - 4, tw + pad * 2));
-            int bh = (int)Math.Ceiling(lines.Count * lh + pad * 2);
-            if (bw < 12) bw = 12;
-            if (bh < 12) bh = 12;
-
-            int x;
-            if (AppConfig.MtTextPos % 3 == 0) x = box.Left;
-            else if (AppConfig.MtTextPos % 3 == 1) x = box.Left + (box.Width - bw) / 2;
-            else x = box.Right - bw;
-            int y;
-            bool top = AppConfig.MtTextPos < 3;
-            if (top)
-            {
-                y = box.Top - bh - 2;
-                if (y < 2) y = box.Bottom + 2;      // 上方放不下就翻到下方
-            }
-            else
-            {
-                y = box.Bottom + 2;
-                if (y + bh > h - 2) y = box.Top - bh - 2;   // 下方放不下就翻到上方
-            }
-            if (y < 2) y = 2;
-            if (y + bh > h - 2) y = Math.Max(2, h - bh - 2);
-            if (x < 2) x = 2;
-            if (x + bw > w - 2) x = Math.Max(2, w - bw - 2);
-
-            using (SolidBrush brush = new SolidBrush(fg))
-            using (SolidBrush sh = new SolidBrush(shadow))
-            using (StringFormat sf = new StringFormat())
-            {
-                sf.Alignment = StringAlignment.Near;
-                sf.LineAlignment = StringAlignment.Near;
-                for (int i = 0; i < lines.Count; i++)
-                {
-                    float ty = y + pad + i * lh;
-                    g.DrawString(lines[i], font, sh, x + pad + 1.2f, ty + 1.2f, sf);
-                    g.DrawString(lines[i], font, brush, x + pad, ty, sf);
-                }
-            }
-            font.Dispose();
-        }
-
         private static void DrawItemCore(Graphics g, Item it, int w, int h)
         {
             if (it == null || string.IsNullOrEmpty(it.Text)) return;
-            if (AppConfig.NormalizeMtMode(AppConfig.MtMode) == AppConfig.MtModeTextOnly)
-            {
-                DrawTextOnly(g, it, w, h);
-                return;
-            }
             Rectangle box = Clamp(it.Box, w, h);
             if (box.Width < 6 || box.Height < 6) return;
 

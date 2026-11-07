@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -754,7 +754,12 @@ namespace QRSnap
 
         public bool GameReady
         {
-            get { return GameGgufPath() != null; }
+            get { return GameGgufPath("efficiency") != null || GameGgufPath("turbo") != null; }
+        }
+
+        public bool GameReadyFor(string profile)
+        {
+            return GameGgufPath(profile) != null;
         }
 
         public static string NameOf(string code)
@@ -789,18 +794,19 @@ namespace QRSnap
 
             string prof = profile == null ? string.Empty : profile.Trim().ToLowerInvariant();
             bool isEff = prof == "efficiency" || prof == "game";
+            bool isTurbo = prof == "turbo";
 
-            // 效率档：固定 Qwen2.5-0.5B 短句模型，GPU 优先、CPU 兜底；只做英/日短句
-            if (isEff)
+            // 效率 / 极速：PLaMo 3 Translate 0.8B（Q4_K_M / Q2_K）
+            if (isEff || isTurbo)
             {
                 if (src != "en" && src != "ja")
                 {
-                    LastPlanError = "效率档只支持英/日短句";
+                    LastPlanError = (isTurbo ? "极速档" : "效率档") + "只支持英/日短句";
                     return new string[0];
                 }
-                string small = GameGgufPath();
+                string small = GameGgufPath(isTurbo ? "turbo" : "efficiency");
                 if (small != null) return new string[] { "gguf", small };
-                LastPlanError = "效率档需要 0.5B 小模型（Qwen2.5-0.5B Q2_K）";
+                LastPlanError = isTurbo ? "极速档需要 PLaMo 3 Translate Q2_K" : "效率档需要 PLaMo 3 Translate Q4_K_M";
                 return new string[0];
             }
 
@@ -827,7 +833,7 @@ namespace QRSnap
                 if (m.Multi && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf)) multi = true;
             }
             if (!multi) miss.Add("多语种模型 Hy-MT1.5（.gguf）");
-            if (!small) miss.Add("效率小模型 Qwen2.5-0.5B Q2_K（.gguf）");
+            if (!small) miss.Add("PLaMo 3 Translate 0.8B Q4_K_M / Q2_K（.gguf）");
             return miss;
         }
 
@@ -837,7 +843,7 @@ namespace QRSnap
             foreach (MtModelInfo m in Models())
             {
                 if (!m.Ready) continue;
-                if (m.Game) { if (!list.Contains("0.5B 效率模型")) list.Add("0.5B 效率模型"); continue; }
+                if (m.Game) { if (!list.Contains("PLaMo 3 Translate")) list.Add("PLaMo 3 Translate"); continue; }
                 if (m.Multi) { if (!list.Contains("多语种")) list.Add("多语种"); continue; }
                 if (!list.Contains(m.Pair)) list.Add(m.Pair);
             }
@@ -853,11 +859,20 @@ namespace QRSnap
             return null;
         }
 
-        private string GameGgufPath()
+        private string GameGgufPath(string profile)
         {
+            bool turbo = profile == "turbo";
             foreach (MtModelInfo m in Models())
-                if (m.Game && m.Ready && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf))
-                    return m.Gguf;
+            {
+                if (!m.Game || !m.Ready || m.Gguf == null || m.Gguf.Length == 0 || !File.Exists(m.Gguf)) continue;
+                string n = Path.GetFileName(m.Gguf).ToLowerInvariant();
+                bool isQ2 = n.IndexOf("q2_k") >= 0 || n.IndexOf("2bit") >= 0;
+                bool isQ4 = n.IndexOf("q4_k_m") >= 0 || n.IndexOf("q4_0") >= 0 || n.IndexOf("q4") >= 0;
+                if (turbo && !isQ2) continue;
+                if (!turbo && isQ2) continue;
+                if (!turbo && !isQ4 && n.IndexOf("plamo") < 0) continue;
+                return m.Gguf;
+            }
             return null;
         }
 

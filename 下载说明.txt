@@ -1,39 +1,60 @@
-# 下载说明 · XuYuan-SnapScan v1.4.0
+# 下载说明 · XuYuan-SnapScan v1.4.1
 
-本体带完整运行环境，模型按需导入。**光下本体不会翻译，也不会识字；导入哪个包，就启用对应功能。**
+本体带完整运行环境，模型按需导入。**只下本体不会翻译，也不会识字。**
 
-## 四个包
+## 下载哪个包
 
 | 文件 | 大小 | 作用 |
-|---|---|---|
-| `SnapScan-v1.4.0-Body.zip` | 约 70 MB | 本体 + ONNX Runtime + CPU/GPU llama + VC++ 运行库 + WebView2 引导 |
-| `SnapScan-Model-OCR-v1.4.0.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速，导入后识字可用 |
-| `SnapScan-Model-Lite-Qwen2.5-0.5B-Q2K-v1.4.0.zip` | 约 310 MB | 效率档（Qwen2.5-0.5B，英/日短句），导入后效率档可用 |
-| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.0.zip` | 约 1.06 GB | 标准档（HyMT1.5 1.8B，所有语种），导入后标准档可用 |
+|---|---:|---|
+| `SnapScan-v1.4.1-Body.zip` | 约 70 MB | 本体 + ONNX Runtime + CPU/Vulkan llama + VC++ 运行库 + WebView2 引导 |
+| `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速，导入后识字可用 |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-v1.4.1.zip` | 约 923 MB | 效率档 Q4_K_M + 极速档 Q2_K |
+| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | 标准档 HyMT1.5 1.8B Q4_K_M |
 
-## 装法
+## 怎么选
 
-1. 解压 `SnapScan-v1.4.0-Body.zip` 到任意目录；
+- **只要识字**：本体 + OCR 包。
+- **日常游戏字幕**：本体 + **PLaMo 包**，选「效率」Q4_K_M。
+- **机器内存/显存小**：PLaMo 包，选「极速」Q2_K。
+- **多语种、长文本、质量优先**：本体 + Pro 包，选「标准」HyMT1.5。
+
+| 档位 | 大小 | 预计占用 | 优点 | 缺点 |
+|---|---:|---:|---|---|
+| 标准 HyMT1.5 | 1080 MB | 约 2.0 GB | 语种最全、长句最稳 | 最大、最慢 |
+| 效率 PLaMo Q4 | 546 MB | 约 1.0 GB | 专用翻译，质量和速度平衡最好 | 比 Q2 略大 |
+| 极速 PLaMo Q2 | 391 MB | 约 0.8 GB | 最小、低配友好 | 量化更低，部分句子略差 |
+
+## 安装
+
+1. 解压本体到任意目录；
 2. 打开 `QRSnap.exe`；
-3. 设置 → 识别引擎 / 翻译 → 导入模型包，选对应 zip（不用解压）；
-4. 只导入其中一个也能用对应功能：
-   - 只导入 OCR：识字可用；
-   - 只导入 Lite：效率档翻译可用；
-   - 只导入 Pro：标准档翻译可用。
+3. 设置 → 识别引擎 / 翻译 → 导入模型包；
+4. 选对应 zip，不用手动解压。
 
-导入 Lite / Pro 会自动切到对应翻译档，不用再手动改。
+## 使用
+
+- `Ctrl+Alt+D`：识码
+- `Ctrl+Alt+X`：识字
+- `Ctrl+Alt+F`：截图翻译
+- `Ctrl+Alt+G`：显示/隐藏译文
+
+游戏模式：
+
+1. 设置 → 游戏专属配置；
+2. 开启游戏模式；
+3. 添加固定字幕区域；
+4. 按 `Ctrl+Alt+F` 手动翻译一次。
 
 ## 系统要求
 
 - Windows 10 21H2 / Windows 11，64 位；
-- 本体已带 ONNX Runtime、CPU llama、Vulkan llama、VC++ 运行库；
-- WebView2 Runtime 是界面必需项：如果启动提示缺少，请先运行本体目录里的 `MicrosoftEdgeWebview2Setup.exe`；
-- 建议 .NET Framework 4.8（Win10 21H2 / Win11 一般自带）；
-- 有 Vulkan 显卡驱动会自动用 GPU，没有则回 CPU。
+- .NET Framework 4.8；
+- WebView2 Runtime 缺失时，运行本体里的 `MicrosoftEdgeWebview2Setup.exe`；
+- 有 Vulkan 显卡会自动用 GPU，没有则回 CPU；
+- 游戏建议无边框窗口。
 
 ## 注意
 
-- 不再支持 `en-zh` / `ja-zh` 目录型模型包，只支持 `.gguf` 单文件；
-- 截图管理员窗口需要以管理员身份运行；
-- 独占全屏游戏可能截到黑屏，建议无边框窗口；
-- 首次运行若被 SmartScreen 拦截，选择“更多信息 → 仍要运行”。
+- PLaMo 使用 PLaMo Community License，个人/非商业免费，商业用途请确认条款；
+- HyMT1.5 商用前也请确认对应模型许可证；
+- 首次运行若被 SmartScreen 拦截，选择「更多信息 → 仍要运行」。

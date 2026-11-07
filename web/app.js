@@ -1,4 +1,4 @@
-/* XuYuan-SnapScan · 前端逻辑
+﻿/* XuYuan-SnapScan · 前端逻辑
    通道：state / config / recheck / pickwx / capture / clipcopy / win / hotkey / importmodel / hidetrans
    后端推送：capture-done / state-refresh
    识码 / 识字 / 翻译是三条独立入口，翻译只在 mode=mt 时叠译文 */
@@ -30,41 +30,25 @@
   // 译文模式：效率走遮罩块，拟真走擦除+回填成品图；不透明度只对效率有意义
   function applyMtMode(mode) {
     const real = mode === "realistic";
-    const text = mode === "textonly";
     const pv = $("maskPreview");
     const row = $("rowMtAlpha");
     const n1 = $("noteMtAlpha");
-    if (pv) pv.style.display = (real || text) ? "none" : "";
+    if (pv) pv.style.display = real ? "none" : "";
     if (row) row.style.display = real ? "none" : "";
     if (n1) n1.style.display = real ? "none" : "";
-    if ($("textOnlyOpts")) { $("textOnlyOpts").hidden = !text; $("textOnlyOpts").style.display = text ? "block" : "none"; }
-    if ($("textOnlyPreview")) { $("textOnlyPreview").hidden = !text; $("textOnlyPreview").style.display = text ? "block" : "none"; }
-    if ($("gameTextOnlyOpts")) { $("gameTextOnlyOpts").hidden = !text; $("gameTextOnlyOpts").style.display = text ? "block" : "none"; }
     if ($("gameMaskPreview")) $("gameMaskPreview").style.display = real ? "none" : "block";
   }
 
   function normMaskMode(v) {
-    return v === "realistic" ? "realistic" : (v === "textonly" ? "textonly" : "efficiency");
+    return v === "realistic" ? "realistic" : "efficiency";
   }
 
   function applyMaskAll(c) {
     const mode = normMaskMode(c.mtmode);
     const alpha = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
-    const style = c.mttextstyle === "black" ? "black" : "white";
-    const pos = c.mttextpos == null ? 0 : c.mttextpos;
-    const autoSize = c.mttextautosize !== false;
-    const fixedSize = c.mttextsize == null ? 18 : c.mttextsize;
 
     if ($("selMtMode")) $("selMtMode").value = mode;
     if ($("gameMask")) $("gameMask").value = mode;
-    if ($("selMtTextStyle")) $("selMtTextStyle").value = style;
-    if ($("gameTextStyle")) $("gameTextStyle").value = style;
-    if ($("selMtTextPos")) $("selMtTextPos").value = String(pos);
-    if ($("gameTextPos")) $("gameTextPos").value = String(pos);
-    if ($("selMtTextAuto")) $("selMtTextAuto").value = autoSize ? "1" : "0";
-    if ($("gameTextAuto")) $("gameTextAuto").value = autoSize ? "1" : "0";
-    if ($("numMtTextSize")) $("numMtTextSize").value = fixedSize;
-    if ($("gameTextSize")) $("gameTextSize").value = fixedSize;
 
     if ($("rngMtAlpha")) $("rngMtAlpha").value = alpha;
     if ($("gameRngMtAlpha")) $("gameRngMtAlpha").value = alpha;
@@ -73,54 +57,33 @@
 
     const paintDemo = (demo) => {
       if (!demo) return;
-      if (mode === "textonly") {
-        demo.style.background = "transparent";
-        demo.style.border = "none";
-        demo.style.padding = "0";
-        demo.style.color = style === "white" ? "#ffffff" : "#111317";
-        demo.style.textShadow = style === "white" ? "0 1px 2px rgba(0,0,0,.95)" : "0 1px 2px rgba(255,255,255,.9)";
-      } else {
-        demo.style.background = "rgba(14,18,26," + (alpha / 100).toFixed(2) + ")";
-        demo.style.border = "";
-        demo.style.padding = "";
-        demo.style.color = "#f6f9ff";
-        demo.style.textShadow = "none";
-      }
+      demo.style.background = "rgba(14,18,26," + (alpha / 100).toFixed(2) + ")";
+      demo.style.border = "";
+      demo.style.padding = "";
+      demo.style.color = "#f6f9ff";
+      demo.style.textShadow = "none";
     };
     paintDemo($("maskDemo"));
     paintDemo($("gameMaskDemo"));
-    paintDemo($("textOnlyDemo"));
     applyMtMode(mode);
 
     const gamePv = $("gameMaskPreview");
     if (gamePv) gamePv.style.display = mode === "realistic" ? "none" : "";
-    if ($("gameTextOnlyOpts")) { $("gameTextOnlyOpts").hidden = mode !== "textonly"; $("gameTextOnlyOpts").style.display = mode === "textonly" ? "block" : "none"; }
     if ($("gameRowAlpha")) $("gameRowAlpha").style.display = mode === "realistic" ? "none" : "block";
   }
 
   function paintMaskPreviewAlpha(p) {
     p = Math.max(0, Math.min(100, p || 0));
-    const mode = normMaskMode($("selMtMode") ? $("selMtMode").value : "efficiency");
-    const style = ($("selMtTextStyle") && $("selMtTextStyle").value === "black") ? "black" : "white";
     const paint = (demo) => {
       if (!demo) return;
-      if (mode === "textonly") {
-        demo.style.background = "transparent";
-        demo.style.border = "none";
-        demo.style.padding = "0";
-        demo.style.color = style === "white" ? "#ffffff" : "#111317";
-        demo.style.textShadow = style === "white" ? "0 1px 2px rgba(0,0,0,.95)" : "0 1px 2px rgba(255,255,255,.9)";
-      } else {
-        demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
-        demo.style.border = "";
-        demo.style.padding = "";
-        demo.style.color = "#f6f9ff";
-        demo.style.textShadow = "none";
-      }
+      demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
+      demo.style.border = "";
+      demo.style.padding = "";
+      demo.style.color = "#f6f9ff";
+      demo.style.textShadow = "none";
     };
     paint($("maskDemo"));
     paint($("gameMaskDemo"));
-    paint($("textOnlyDemo"));
     if ($("lblMtAlpha")) $("lblMtAlpha").textContent = p + "%";
     if ($("gameLblMtAlpha")) $("gameLblMtAlpha").textContent = p + "%";
   }
@@ -201,11 +164,12 @@
   }
 
   function applyMtProfile(v) {
-    const p = v === "efficiency" ? "efficiency" : "standard";
-    const name = { standard: "标准", efficiency: "效率" }[p];
+    const p = ["efficiency", "turbo", "standard"].includes(v) ? v : "standard";
+    const name = { standard: "标准", efficiency: "效率", turbo: "极速" }[p];
     const hint = {
       standard: "HyMT1.5全语种模型",
-      efficiency: "0.5B 效率模型",
+      efficiency: "PLaMo Q4_K_M",
+      turbo: "PLaMo Q2_K 极速",
     }[p];
     if ($("mtProfileHint")) $("mtProfileHint").textContent = hint;
     if ($("mtProfileBadge")) {
@@ -218,15 +182,10 @@
   function applyGameState(g) {
     if (!g) return;
     if ($("gameOn")) $("gameOn").checked = !!g.on;
-    if ($("gameTrigger")) $("gameTrigger").value = String(g.trigger || 0);
-    if ($("gameInterval")) {
-      $("gameInterval").value = String(g.interval || 500);
-      $("gameInterval").disabled = Number(g.trigger || 0) !== 1;
-    }
-    if ($("gameSens")) $("gameSens").value = String(g.sens == null ? 2 : g.sens);
-    if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
+    if ($("gameModel")) $("gameModel").value = ["efficiency", "turbo", "standard"].includes(g.profile) ? g.profile : "efficiency";
     if ($("gameMask")) $("gameMask").value = normMaskMode(g.mask);
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
+    if ($("gameToastOn")) $("gameToastOn").checked = g.toastOn !== false;
 
     const badge = $("gameBadge");
     if (badge) {
@@ -255,6 +214,11 @@
       del.type = "button";
       del.textContent = "删除";
       del.dataset.index = String(i);
+      del.title = "悬停查看区域位置";
+      del.addEventListener("mouseenter", () => { api("gamehover", { index: i }); });
+      del.addEventListener("mouseleave", () => { api("gamehover", { index: -1 }); });
+      row.addEventListener("mouseenter", () => { api("gamehover", { index: i }); });
+      row.addEventListener("mouseleave", () => { api("gamehover", { index: -1 }); });
       row.appendChild(label);
       row.appendChild(del);
       box.appendChild(row);
@@ -266,8 +230,9 @@
     const box = $("mtProfList");
     if (!box) return;
     const rows = [
-      { key: "standard", title: "标准", note: "HyMT1.5全语种模型，所有语种，按需加载" },
-      { key: "efficiency", title: "效率", note: "0.5B 短句/游戏字幕，常驻" },
+      { key: "standard", title: "标准", note: "HyMT1.5 · 1080 MB · 占用约 2 GB" },
+      { key: "efficiency", title: "效率", note: "PLaMo Q4_K_M · 546 MB · 占用约 1 GB" },
+      { key: "turbo", title: "极速", note: "PLaMo Q2_K · 391 MB · 占用约 0.8 GB" },
     ];
     box.innerHTML = "";
     rows.forEach((r) => {
@@ -338,11 +303,11 @@
 
     buildMtList(mt);
 
-    const profText = prof === "efficiency" ? "效率（0.5B 短句模型）" : "标准（HyMT1.5全语种模型）";
+    const profText = prof === "efficiency" ? "效率（PLaMo Q4_K_M）" : (prof === "turbo" ? "极速（PLaMo Q2_K）" : "标准（HyMT1.5全语种模型）");
     let note = ready
       ? ("当前档位：" + profText + "。"
-        + (prof === "efficiency"
-          ? "0.5B 模型常驻，约 0.4–0.6 GB 显存/内存；切档或退出软件时释放。"
+        + ((prof === "efficiency" || prof === "turbo")
+          ? "PLaMo 模型常驻，切档或退出软件时释放。"
           : "按需加载，空闲 60 秒释放。"))
       : ("当前档位缺模型：" + (missing.length ? missing.join("、") : "翻译模型") + "。可以切换档位，或导入对应的模型包。");
     if (mt.root) note += "\n目录：" + mt.root;
@@ -371,9 +336,10 @@
       const tick = document.createElement("span"); tick.className = "tick";
       tick.textContent = k.ready ? "✓" : "×";
       const name = document.createElement("span"); name.className = "e-name";
-      name.textContent = k.title + (k.ready ? "" : "（缺）");
+      const extra = (k.size ? " · " + k.size : "") + (k.mem ? " · " + k.mem : "");
+      name.textContent = k.title + extra + (k.ready ? "" : "（缺）");
       const note = document.createElement("span"); note.className = "e-note";
-      note.textContent = "（" + k.sub + "）";
+      note.textContent = k.sub ? "（" + k.sub + "）" : "";
       row.appendChild(tick); row.appendChild(name); row.appendChild(note);
       box.appendChild(row);
     });
@@ -715,7 +681,7 @@
     if ($("btnClearKey")) $("btnClearKey").addEventListener("click", async () => {
       await setConfig({ aikey: "" });
       if ($("txtAiKey")) $("txtAiKey").value = "";
-      toast("已清除 Key，AI 功能不可用");
+      toast("已清除 Key，AI 功能已全部关闭");
     });
 
     // 快捷区「AI 大模型」行：点一下直接开 AI 面板
@@ -799,19 +765,11 @@
       applyMtMode(e.target.value);
       setConfig({ mtmode: e.target.value });
     });
-    if ($("selMtTextStyle")) $("selMtTextStyle").addEventListener("change", (e) => setConfig({ mttextstyle: e.target.value }));
-    if ($("selMtTextPos")) $("selMtTextPos").addEventListener("change", (e) => setConfig({ mttextpos: Number(e.target.value) }));
-    if ($("selMtTextAuto")) $("selMtTextAuto").addEventListener("change", (e) => setConfig({ mttextautosize: e.target.value === "1" }));
-    if ($("numMtTextSize")) $("numMtTextSize").addEventListener("change", (e) => setConfig({ mttextsize: Number(e.target.value) }));
 
     if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
       applyMtMode(e.target.value);
       setConfig({ gamemask: e.target.value });
     });
-    if ($("gameTextStyle")) $("gameTextStyle").addEventListener("change", (e) => setConfig({ mttextstyle: e.target.value }));
-    if ($("gameTextPos")) $("gameTextPos").addEventListener("change", (e) => setConfig({ mttextpos: Number(e.target.value) }));
-    if ($("gameTextAuto")) $("gameTextAuto").addEventListener("change", (e) => setConfig({ mttextautosize: e.target.value === "1" }));
-    if ($("gameTextSize")) $("gameTextSize").addEventListener("change", (e) => setConfig({ mttextsize: Number(e.target.value) }));
 
     $("numMtIdle").addEventListener("change", (e) => {
       let v = parseInt(e.target.value, 10);
@@ -859,8 +817,8 @@
 
     // 快捷区的「游戏专属配置」：打开独立设置页
     if ($("quickGame")) $("quickGame").addEventListener("click", () => openGame(true));
-    if ($("btnCloseGame")) $("btnCloseGame").addEventListener("click", () => openGame(false));
-    if ($("gameMask")) $("gameMask").addEventListener("click", () => openGame(false));
+    if ($("btnCloseGame")) $("btnCloseGame").addEventListener("click", () => { api("gamehover", { index: -1 }); openGame(false); });
+    if ($("gameMask")) $("gameMask").addEventListener("click", () => { api("gamehover", { index: -1 }); openGame(false); });
 
     if ($("gameOn")) $("gameOn").addEventListener("change", async (e) => {
       const want = e.target.checked;
@@ -874,17 +832,11 @@
       if (want && s && s.game && !s.game.on) toast(s.game.msg || "游戏模式启动失败");
     });
 
-    if ($("gameTrigger")) $("gameTrigger").addEventListener("change", (e) => {
-      setConfig({ gametrigger: Number(e.target.value) });
-    });
-    if ($("gameInterval")) $("gameInterval").addEventListener("change", (e) => {
-      setConfig({ gameinterval: Number(e.target.value) });
-    });
-    if ($("gameSens")) $("gameSens").addEventListener("change", (e) => {
-      setConfig({ gamesens: Number(e.target.value) });
-    });
     if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
       setConfig({ gamemerge: e.target.checked });
+    });
+    if ($("gameToastOn")) $("gameToastOn").addEventListener("change", (e) => {
+      setConfig({ gametoaston: e.target.checked });
     });
     if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
       setConfig({ gamemask: e.target.value });
@@ -914,6 +866,7 @@
     if ($("gameRegions")) $("gameRegions").addEventListener("click", async (e) => {
       const btn = e.target.closest("button[data-index]");
       if (!btn) return;
+      api("gamehover", { index: -1 });
       const r = await api("gamedel", { index: Number(btn.dataset.index) });
       if (r && r.state) applyState(r.state);
     });
