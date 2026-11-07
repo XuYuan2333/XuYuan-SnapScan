@@ -2197,18 +2197,18 @@ namespace QRSnap
             sb.Append(",\"missing\":[");
             for (int i = 0; i < miss.Count; i++) { if (i > 0) sb.Append(','); sb.Append(J.S(miss[i])); }
             sb.Append("],\"kit\":[");
-            sb.Append("{\"key\":\"gguf\",\"title\":\"HyMT1.5全语种模型\",\"sub\":")
-              .Append(J.S(multiFile.Length > 0 ? multiFile : "未装"))
+            sb.Append("{\"key\":\"gguf\",\"title\":\"HyMT1.5-1.8B-Q4_K_M\",\"sub\":")
+              .Append(J.S(multiFile.Length > 0 ? "标准档" : "未装"))
               .Append(",\"size\":").Append(J.S(multiFile.Length > 0 ? ((multiSize / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(multiFile.Length > 0 ? "占用约 2.0 GB" : ""))
               .Append(",\"ready\":").Append(J.B(multiName.Length > 0)).Append("}");
-            sb.Append(",{\"key\":\"plamo-q4\",\"title\":\"效率 · PLaMo Q4_K_M\",\"sub\":")
-              .Append(J.S(q4File.Length > 0 ? q4File : "未装"))
+            sb.Append(",{\"key\":\"plamo-q4\",\"title\":\"PLaMo-3-Translate-0.8B-Q4_K_M\",\"sub\":")
+              .Append(J.S(q4File.Length > 0 ? "效率档" : "未装"))
               .Append(",\"size\":").Append(J.S(q4File.Length > 0 ? ((q4Size / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(q4File.Length > 0 ? "占用约 1.0 GB" : ""))
               .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("efficiency"))).Append("}");
-            sb.Append(",{\"key\":\"plamo-q2\",\"title\":\"极速 · PLaMo Q2_K\",\"sub\":")
-              .Append(J.S(q2File.Length > 0 ? q2File : "未装"))
+            sb.Append(",{\"key\":\"plamo-q2\",\"title\":\"PLaMo-3-Translate-0.8B-Q2_K\",\"sub\":")
+              .Append(J.S(q2File.Length > 0 ? "极速档" : "未装"))
               .Append(",\"size\":").Append(J.S(q2File.Length > 0 ? ((q2Size / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(q2File.Length > 0 ? "占用约 0.8 GB" : ""))
               .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("turbo"))).Append("}");

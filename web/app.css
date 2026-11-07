@@ -1,4 +1,4 @@
-/* XuYuan-SnapScan · Web UI
+﻿/* XuYuan-SnapScan · Web UI
    浅色毛玻璃 + 蓝色主色，全部可读性优先 */
 
 :root {
@@ -405,7 +405,7 @@ html, body {
   width: 14px; height: 14px; flex: none; border-radius: 50%;
   border: 1px solid rgba(168, 190, 220, .95); background: #fff;
 }
-.engine-opt .e-name { font-weight: 600; white-space: nowrap; }
+.engine-opt .e-name { font-weight: 400; color: inherit; white-space: nowrap; }
 .engine-opt .e-note { font-size: 11.5px; color: #98a4b8; font-weight: 400; white-space: nowrap; }
 .engine-opt.pick { cursor: pointer; }
 .engine-opt.pick:hover { border-color: #b6cbf0; background: #f7fafe; }

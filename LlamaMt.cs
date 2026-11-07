@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -237,14 +237,10 @@ internal static class LlamaMt
             lock (Gate)
             {
                 if (_proc == null) return;
-                // 游戏模式期间不释放任何模型；退出游戏模式时由 GameRuntime 统一释放
+                // 游戏模式内常驻；关闭游戏模式或切换模型由 GameRuntime/设置统一释放
                 if (AppConfig.GameOn) return;
-                // 效率 / 极速档的 PLaMo 常驻；标准档仍按空闲释放
-                string idleProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
-                if ((idleProfile == AppConfig.MtProfileEfficiency || idleProfile == AppConfig.MtProfileTurbo)
-                    && MtRouter.IsGameModelPath(_model)) return;
                 int idle = IdleSeconds;
-                if (idle <= 0) return;                                   // 0 = 常驻，不释放
+                if (idle <= 0) return;                                   // 0 = 常驻，不自动释放
                 if ((DateTime.UtcNow - _lastUse).TotalSeconds < idle) return;
                 Kill();
             }

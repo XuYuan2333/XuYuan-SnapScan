@@ -1,4 +1,4 @@
-﻿/* XuYuan-SnapScan · 前端逻辑
+/* XuYuan-SnapScan · 前端逻辑
    通道：state / config / recheck / pickwx / capture / clipcopy / win / hotkey / importmodel / hidetrans
    后端推送：capture-done / state-refresh
    识码 / 识字 / 翻译是三条独立入口，翻译只在 mode=mt 时叠译文 */
@@ -303,12 +303,11 @@
 
     buildMtList(mt);
 
-    const profText = prof === "efficiency" ? "效率（PLaMo Q4_K_M）" : (prof === "turbo" ? "极速（PLaMo Q2_K）" : "标准（HyMT1.5全语种模型）");
+    const profText = prof === "efficiency" ? "效率（PLaMo Q4_K_M）" : (prof === "turbo" ? "极速（PLaMo Q2_K）" : "标准（HyMT1.5 1.8B）");
+    const idleSec = (S && S.config && S.config.mtidle != null) ? Number(S.config.mtidle) : 60;
+    const idleText = idleSec > 0 ? ("空闲 " + idleSec + " 秒后自动释放") : "不自动释放";
     let note = ready
-      ? ("当前档位：" + profText + "。"
-        + ((prof === "efficiency" || prof === "turbo")
-          ? "PLaMo 模型常驻，切档或退出软件时释放。"
-          : "按需加载，空闲 60 秒释放。"))
+      ? ("当前档位：" + profText + "。普通翻译" + idleText + "；游戏模式内常驻，关闭游戏模式或切换模型时释放。")
       : ("当前档位缺模型：" + (missing.length ? missing.join("、") : "翻译模型") + "。可以切换档位，或导入对应的模型包。");
     if (mt.root) note += "\n目录：" + mt.root;
     $("mtNote").textContent = note;

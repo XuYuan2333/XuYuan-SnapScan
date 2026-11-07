@@ -1,4 +1,4 @@
-# XuYuan-SnapScan v1.4.1
+﻿# XuYuan-SnapScan v1.4.2
 
 Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻译、手动游戏字幕翻译。
 界面为 JadeView 2 + WebView2，模型按需导入，本体不内置大模型。
@@ -19,7 +19,7 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.1-Body.zip` | 约 70 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
+| `SnapScan-v1.4.2-Body.zip` | 约 70 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
 | `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-v1.4.1.zip` | 约 923 MB | PLaMo 3 Translate 0.8B：Q4_K_M（效率）+ Q2_K（极速） |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | HyMT1.5 1.8B Q4_K_M（标准） |
@@ -33,6 +33,8 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 | 标准 | HyMT1.5 1.8B Q4_K_M | 1080 MB | 约 2.0 GB | 语种覆盖最广，长句和复杂文本最稳 | 体积最大、加载和单句速度最慢 |
 | 效率 | PLaMo 3 Translate 0.8B Q4_K_M | 546 MB | 约 1.0 GB | 翻译专用，53 语言，质量和速度平衡最好 | 比 Q2 略大 |
 | 极速 | PLaMo 3 Translate 0.8B Q2_K | 391 MB | 约 0.8 GB | 体积最小、低配机器更友好 | 量化更低，部分句子质量略低于 Q4 |
+
+> 普通翻译：超过设置的空闲时间自动释放模型；游戏模式：模型常驻，关闭游戏模式或切换模型时释放。`0` 表示普通翻译也不自动释放。
 
 推荐：
 

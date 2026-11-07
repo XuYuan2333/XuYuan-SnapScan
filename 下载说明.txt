@@ -1,4 +1,4 @@
-# 下载说明 · XuYuan-SnapScan v1.4.1
+﻿# 下载说明 · XuYuan-SnapScan v1.4.2
 
 本体带完整运行环境，模型按需导入。**只下本体不会翻译，也不会识字。**
 
@@ -6,7 +6,7 @@
 
 | 文件 | 大小 | 作用 |
 |---|---:|---|
-| `SnapScan-v1.4.1-Body.zip` | 约 70 MB | 本体 + ONNX Runtime + CPU/Vulkan llama + VC++ 运行库 + WebView2 引导 |
+| `SnapScan-v1.4.2-Body.zip` | 约 70 MB | 本体 + ONNX Runtime + CPU/Vulkan llama + VC++ 运行库 + WebView2 引导 |
 | `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速，导入后识字可用 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-v1.4.1.zip` | 约 923 MB | 效率档 Q4_K_M + 极速档 Q2_K |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | 标准档 HyMT1.5 1.8B Q4_K_M |
@@ -23,6 +23,11 @@
 | 标准 HyMT1.5 | 1080 MB | 约 2.0 GB | 语种最全、长句最稳 | 最大、最慢 |
 | 效率 PLaMo Q4 | 546 MB | 约 1.0 GB | 专用翻译，质量和速度平衡最好 | 比 Q2 略大 |
 | 极速 PLaMo Q2 | 391 MB | 约 0.8 GB | 最小、低配友好 | 量化更低，部分句子略差 |
+
+## 模型释放
+
+- 普通翻译：超过设置的空闲时间自动释放；填 0 表示不自动释放。
+- 游戏模式：模型常驻，关闭游戏模式或切换模型时释放。
 
 ## 安装
 

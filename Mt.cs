@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -887,8 +887,7 @@ namespace QRSnap
             string p = path.Replace('/', '\\').ToLowerInvariant();
             if (p.IndexOf("\\game\\") >= 0 || p.EndsWith("\\game")) return true;
             string n = Path.GetFileName(p);
-            return n.IndexOf("qwen2.5-0.5b") >= 0 || n.IndexOf("qwen2.5_0.5b") >= 0
-                || n.IndexOf("game") >= 0 && n.EndsWith(".gguf");
+            return n.IndexOf("plamo") >= 0 || (n.IndexOf("game") >= 0 && n.EndsWith(".gguf"));
         }
 
         private string DirForPair(string pair, string preferred)
