@@ -14,7 +14,7 @@ namespace QRSnap
         private static System.Threading.Timer _timer;
         private static bool _busy;
         private static int _gen;
-        private static ulong _lastHash;
+        private static byte[] _prevSig;
         private static bool _paused;
         private static bool _overlayClosed;
         private static string _prevProfile;
@@ -120,7 +120,7 @@ namespace QRSnap
             _overlayClosed = false;
             try { AppConfig.Save(); } catch (Exception) { }
             try { JadeHost.HideWindow(true); } catch (Exception) { }   // 让游戏画面露出来
-            _lastHash = 0;
+            _prevSig = null;
             StartTimer();
             WarmModel(profile);
             JadeHost.Log("[game] start regions=" + rs.Count + " profile=" + profile
@@ -153,7 +153,7 @@ namespace QRSnap
         public static void Reconfigure()
         {
             if (!AppConfig.GameOn) return;
-            _lastHash = 0;
+            _prevSig = null;
             StartTimer();
             JadeHost.Log("[game] reconfigure trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs);
         }
@@ -174,7 +174,7 @@ namespace QRSnap
             if (_overlayClosed)
             {
                 _overlayClosed = false;
-                _lastHash = 0;
+                _prevSig = null;
                 Trigger(true);
             }
             else
@@ -270,16 +270,25 @@ namespace QRSnap
             try { TransOverlay.HideOverlay(); } catch (Exception) { }
             Thread.Sleep(24);
             Bitmap bmp = Capture(union);
-            if (bmp == null) return;
-            ulong hash = ShotCache.Hash(bmp);
-            bool changed = _lastHash == 0 || hash != _lastHash;
-            _lastHash = hash;
+            if (bmp == null)
+            {
+                try { TransOverlay.Restore(); } catch (Exception) { }
+                return;
+            }
+            byte[] sig = Signature(bmp, union, regions);
+            double diff = _prevSig == null ? 1.0 : SignatureDiff(_prevSig, sig);
+            bool changed = _prevSig == null || diff >= 0.015;
+            _prevSig = sig;
+            JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " changed=" + (changed ? 1 : 0));
             if (!force && AppConfig.GameTrigger == 0 && !changed)
             {
                 bmp.Dispose();
                 try { TransOverlay.Restore(); } catch (Exception) { }
                 return;
             }
+
+            // 关键：旧遮罩立刻恢复，OCR/模型处理期间画面不会空着；新遮罩出来时再替换
+            try { TransOverlay.Restore(); } catch (Exception) { }
 
             try
             {
@@ -309,6 +318,44 @@ namespace QRSnap
             {
                 bmp.Dispose();
             }
+        }
+
+        private static byte[] Signature(Bitmap bmp, Rectangle union, List<Rectangle> regions)
+        {
+            List<byte> data = new List<byte>();
+            for (int i = 0; i < regions.Count; i++)
+            {
+                Rectangle r = regions[i];
+                int sx = r.Left - union.X, sy = r.Top - union.Y;
+                int sw = Math.Min(r.Width, bmp.Width - sx);
+                int sh = Math.Min(r.Height, bmp.Height - sy);
+                if (sw < 4 || sh < 4) continue;
+                using (Bitmap small = new Bitmap(128, 48, PixelFormat.Format32bppArgb))
+                {
+                    using (Graphics g = Graphics.FromImage(small))
+                    {
+                        g.Clear(Color.Black);
+                        g.DrawImage(bmp, new Rectangle(0, 0, 128, 48),
+                            new Rectangle(sx, sy, sw, sh), GraphicsUnit.Pixel);
+                    }
+                    for (int y = 0; y < 48; y++)
+                        for (int x = 0; x < 128; x++)
+                        {
+                            Color c = small.GetPixel(x, y);
+                            data.Add((byte)((c.R * 77 + c.G * 151 + c.B * 28) >> 8));
+                        }
+                }
+            }
+            return data.ToArray();
+        }
+
+        private static double SignatureDiff(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length == 0 || b.Length != a.Length) return 1.0;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++)
+                if (Math.Abs(a[i] - b[i]) > 16) diff++;
+            return (double)diff / a.Length;
         }
 
         private static Bitmap Capture(Rectangle r)
