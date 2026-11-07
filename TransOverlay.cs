@@ -180,6 +180,11 @@ namespace QRSnap
             Show(_lastRect, _lastItems);
         }
 
+        public static void Restore()
+        {
+            try { if (!IsShowing) Toggle(); } catch (Exception) { }
+        }
+
         public static void HideOverlay()
         {
             if (_inst != null)

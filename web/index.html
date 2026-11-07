@@ -120,7 +120,44 @@
           <span class="q-badge">重点</span>
         </div>
         <div class="game-detail" id="gameDetail" hidden>
-          <div class="group-note">游戏翻译专用：固定字幕区域 / 低延迟 / 小模型常驻 / 游戏术语。具体选项下一轮按你的清单补。</div>
+          <div class="game-line">
+            <label class="game-check"><input type="checkbox" id="gameOn"> 启用游戏模式</label>
+            <span class="q-badge" id="gameBadge">未启用</span>
+          </div>
+          <div class="group-note" id="gameMsg">先添加固定字幕区域</div>
+
+          <div class="sub-title">固定字幕区域</div>
+          <div class="game-regions" id="gameRegions"></div>
+          <div class="row-btns">
+            <button class="btn" id="btnGameAdd" type="button">添加区域</button>
+            <button class="btn" id="btnGameClear" type="button">全部清空</button>
+          </div>
+
+          <div class="sub-title">触发方式</div>
+          <select class="game-select" id="gameTrigger">
+            <option value="0">变化时立即翻译（上一轮没结束不排下一轮）</option>
+            <option value="1">固定时间间隔翻译</option>
+            <option value="2">手动快捷键翻译（Ctrl+Alt+F）</option>
+          </select>
+          <div class="game-line">
+            <span>固定间隔</span>
+            <select class="game-select" id="gameInterval">
+              <option value="500">0.5 秒</option>
+              <option value="1000">1.0 秒</option>
+              <option value="1500">1.5 秒</option>
+              <option value="2000">2.0 秒</option>
+            </select>
+          </div>
+          <div class="game-line">
+            <span>游戏模型</span>
+            <select class="game-select" id="gameModel">
+              <option value="efficiency">0.5B 效率（推荐，延迟低）</option>
+              <option value="standard">HyMT1.5 标准（高质量，较慢）</option>
+            </select>
+          </div>
+          <label class="game-check"><input type="checkbox" id="gameFilter"> 只翻字幕，过滤 HUD / HP/MP / 按键 / 数字 / 版本号</label>
+          <label class="game-check"><input type="checkbox" id="gameMerge"> 合并被拆成两行的字幕</label>
+          <div class="group-note">建议游戏使用「无边框窗口」；独占全屏可能截到黑屏。启动游戏模式会自动加载 0.5B，关闭时释放所有本地模型。</div>
         </div>
       </div>
 

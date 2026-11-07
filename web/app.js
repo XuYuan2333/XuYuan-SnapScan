@@ -114,6 +114,7 @@
 
     buildEngineList(e, c.engine);
     applyMtState(s.mt);
+    applyGameState(s.game);
 
     $("verText2").textContent = s.version || "—";
     const rt = (s.runtime && s.runtime.win11) ? "WebView2 · Windows 11" : "WebView2 · Windows 10";
@@ -133,6 +134,48 @@
       $("mtProfileBadge").className = "q-badge" + (p === "standard" ? "" : " ok");
     }
     buildMtProfList(p);
+  }
+
+  function applyGameState(g) {
+    if (!g) return;
+    if ($("gameOn")) $("gameOn").checked = !!g.on;
+    if ($("gameTrigger")) $("gameTrigger").value = String(g.trigger || 0);
+    if ($("gameInterval")) $("gameInterval").value = String(g.interval || 500);
+    if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
+    if ($("gameFilter")) $("gameFilter").checked = g.filter !== false;
+    if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
+
+    const badge = $("gameBadge");
+    if (badge) {
+      badge.textContent = g.on ? "运行中" : (g.ready ? "未启用" : "未就绪");
+      badge.className = "q-badge" + (g.on ? " ok" : (g.ready ? "" : " warn"));
+    }
+    if ($("gameMsg")) $("gameMsg").textContent = g.msg || "";
+
+    const box = $("gameRegions");
+    if (!box) return;
+    box.innerHTML = "";
+    const list = g.regions || [];
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "game-region";
+      empty.textContent = "还没有区域；点「添加区域」在屏幕上框选字幕位置。";
+      box.appendChild(empty);
+      return;
+    }
+    list.forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "game-region";
+      const label = document.createElement("span");
+      label.textContent = "区域 " + (i + 1) + " · " + r.x + "," + r.y + " · " + r.w + "×" + r.h;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "删除";
+      del.dataset.index = String(i);
+      row.appendChild(label);
+      row.appendChild(del);
+      box.appendChild(row);
+    });
   }
 
   // 设置抽屉里的两档模式：标准 / 效率
@@ -503,7 +546,8 @@
     try {
       const s = await api("config", patch);
       applyState(s);
-    } catch (e) { toast("保存失败：" + e); }
+      return s;
+    } catch (e) { toast("保存失败：" + e); return null; }
   }
 
   /* ---------------- 快捷键录制 ---------------- */
@@ -703,6 +747,59 @@
     if ($("quickGame")) $("quickGame").addEventListener("click", () => {
       const d = $("gameDetail");
       if (d) d.hidden = !d.hidden;
+    });
+
+    if ($("gameOn")) $("gameOn").addEventListener("change", async (e) => {
+      const want = e.target.checked;
+      const g = (S && S.game) || {};
+      if (want && !(g.regions || []).length) {
+        toast("先点「添加区域」，在屏幕上框出字幕位置");
+        e.target.checked = false;
+        return;
+      }
+      const s = await setConfig({ gameon: want });
+      if (want && s && s.game && !s.game.on) toast(s.game.msg || "游戏模式启动失败");
+    });
+
+    if ($("gameTrigger")) $("gameTrigger").addEventListener("change", (e) => {
+      setConfig({ gametrigger: Number(e.target.value) });
+    });
+    if ($("gameInterval")) $("gameInterval").addEventListener("change", (e) => {
+      setConfig({ gameinterval: Number(e.target.value) });
+    });
+    if ($("gameFilter")) $("gameFilter").addEventListener("change", (e) => {
+      setConfig({ gamefilter: e.target.checked });
+    });
+    if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
+      setConfig({ gamemerge: e.target.checked });
+    });
+    if ($("gameModel")) $("gameModel").addEventListener("change", async (e) => {
+      const v = e.target.value;
+      if (v === "standard") {
+        const ok = confirm("标准模型 HyMT1.5 更慢、更占显存，但质量更高。\n游戏模式仍会常驻，不会自动释放。确定切到标准？");
+        if (!ok) { applyGameState(S.game); return; }
+      }
+      const s = await setConfig({ gamemodel: v });
+      if (s && s.game && s.game.on && s.game.msg) toast(s.game.msg);
+    });
+
+    if ($("btnGameAdd")) $("btnGameAdd").addEventListener("click", async () => {
+      const r = await api("gamepick", {});
+      if (r && r.state) applyState(r.state);
+      if (r && r.ok) toast(r.added ? "已添加字幕区域" : "区域重复或太小");
+      else if (r && !r.cancelled) toast("添加区域失败：" + (r.msg || ""));
+    });
+    if ($("btnGameClear")) $("btnGameClear").addEventListener("click", async () => {
+      if (!confirm("清空所有游戏字幕区域？")) return;
+      const r = await api("gameclear", {});
+      if (r && r.state) applyState(r.state);
+      toast("已清空游戏区域");
+    });
+    if ($("gameRegions")) $("gameRegions").addEventListener("click", async (e) => {
+      const btn = e.target.closest("button[data-index]");
+      if (!btn) return;
+      const r = await api("gamedel", { index: Number(btn.dataset.index) });
+      if (r && r.state) applyState(r.state);
     });
 
     // 快捷区的「翻译模式」行：切换入口在设置里，点这一行直接跳到对应分组并展开

@@ -269,6 +269,12 @@ namespace QRSnap
             {
                 int id = (int)m.WParam;
                 Log("WM_HOTKEY id=" + id);
+                // 游戏模式：Ctrl+Alt+F 作为手动翻译键；翻译中再按会强制开新一轮
+                if (id == ID_MT && AppConfig.GameOn)
+                {
+                    GameRuntime.Trigger(true);
+                    return;
+                }
                 // 识别期间 UI 线程在泵消息，这时再按热键会叠出一轮新截屏，直接忽略
                 if (_pumping) { Log("WM_HOTKEY ignored while busy id=" + id); return; }
                 if (id == ID_QR) HotkeyCapture("qr");
@@ -786,7 +792,7 @@ namespace QRSnap
         }
 
         // 逐行翻译并原地铺译文；返回画出来的行数
-        private int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp, bool layoutPre = false)
+        internal int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp, bool layoutPre = false)
         {
             if (segs == null || segs.Count == 0) return 0;
             if (bmp != null && Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
@@ -1457,6 +1463,9 @@ namespace QRSnap
             Bind("pickwx", OnPickWx);
             Bind("importmodel", OnImportModel);
             Bind("cacheclear", OnCacheClear);
+            Bind("gamepick", OnGamePick);
+            Bind("gamedel", OnGameDel);
+            Bind("gameclear", OnGameClear);
             Bind("capture", OnCapture);
             Bind("clipcopy", OnCopy);
             Bind("win", OnWin);
@@ -1923,6 +1932,13 @@ namespace QRSnap
             return (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
+        internal static int GameTranslate(Bitmap bmp, Rectangle rect, List<OcrSegment> segs)
+        {
+            NativeShell shell = _shell;
+            if (shell == null) return 0;
+            return shell.TranslateAndShow(segs, rect, bmp, true);
+        }
+
         internal static string BuildState()
         {
             EngineProbe p = Ocr.Probe();
@@ -2009,6 +2025,31 @@ namespace QRSnap
             sb.Append(",\"checkedAt\":").Append(J.S(aiAt));
             sb.Append("}");
             sb.Append("}");
+            sb.Append(",\"game\":{");
+            List<Rectangle> gregions = GameRuntime.Regions();
+            sb.Append("\"on\":").Append(J.B(AppConfig.GameOn));
+            sb.Append(",\"trigger\":").Append(AppConfig.GameTrigger);
+            sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
+            sb.Append(",\"filter\":").Append(J.B(AppConfig.GameFilter));
+            sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
+            sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
+            string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
+            bool gready = gp == AppConfig.MtProfileEfficiency ? MtRunner.GameReady : MtRunner.Ready;
+            string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
+                : (!gready ? "缺少对应翻译模型" : (AppConfig.GameTrigger == 2 ? "手动快捷键：Ctrl+Alt+F" : "就绪"));
+            if (!string.IsNullOrEmpty(GameRuntime.LastError)) gmsg = GameRuntime.LastError;
+            sb.Append(",\"ready\":").Append(J.B(gready));
+            sb.Append(",\"msg\":").Append(J.S(gmsg));
+            sb.Append(",\"regions\":[");
+            for (int gi = 0; gi < gregions.Count; gi++)
+            {
+                if (gi > 0) sb.Append(',');
+                sb.Append("{\"x\":").Append(gregions[gi].X)
+                  .Append(",\"y\":").Append(gregions[gi].Y)
+                  .Append(",\"w\":").Append(gregions[gi].Width)
+                  .Append(",\"h\":").Append(gregions[gi].Height).Append('}');
+            }
+            sb.Append("]}");
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
             sb.Append(",\"ocr\":").Append(J.S(HotkeyOcrText()));
             sb.Append(",\"mt\":").Append(J.S(AppConfig.HotkeyMt));
@@ -2190,6 +2231,47 @@ namespace QRSnap
                     else if (k == "aicheck") { AppConfig.AiCheck = v == "true" || v == "1"; }
                     else if (k == "aimerge") { AppConfig.AiMerge = v == "true" || v == "1"; }
                     else if (k == "aimt") { AppConfig.AiMt = v == "true" || v == "1"; }
+                    else if (k == "gameon")
+                    {
+                        bool on = v == "true" || v == "1";
+                        if (on)
+                        {
+                            string gerr;
+                            if (!GameRuntime.Start(out gerr)) NativeShell.Log("[game] start fail " + gerr);
+                        }
+                        else GameRuntime.Stop();
+                    }
+                    else if (k == "gametrigger")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameTrigger = Math.Max(0, Math.Min(2, gv));
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gameinterval")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameIntervalMs = Math.Max(250, Math.Min(5000, gv));
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gamemodel")
+                    {
+                        AppConfig.GameModel = AppConfig.NormalizeMtProfile(v);
+                        if (AppConfig.GameOn)
+                        {
+                            AppConfig.MtProfile = AppConfig.GameModel;
+                            MtRunner.Invalidate();
+                            try { LlamaMt.Shutdown(); } catch (Exception) { }
+                            GameRuntime.Reconfigure();
+                        }
+                    }
+                    else if (k == "gamefilter")
+                    {
+                        AppConfig.GameFilter = v == "true" || v == "1";
+                    }
+                    else if (k == "gamemerge")
+                    {
+                        AppConfig.GameMerge = v == "true" || v == "1";
+                    }
                     else if (k == "opacity")
                     {
                         int ov;
@@ -2577,6 +2659,51 @@ namespace QRSnap
             AiBoost.ClearCache();
             NativeShell.Log("[cache] cleared -> " + ShotCache.Info());
             return Reply("{\"ok\":true,\"info\":" + J.S(ShotCache.Info()) + "}");
+        }
+
+        private static IntPtr OnGamePick(uint win, IntPtr msg)
+        {
+            try
+            {
+                GameRuntime.Pause(true);
+                HideWindow(true);
+                Thread.Sleep(150);
+                CaptureSession s = new CaptureSession();
+                s.Freehand = false;
+                s.Run();
+                bool ok = s.Confirmed && s.Selection.Width >= 16 && s.Selection.Height >= 12;
+                bool added = false;
+                if (ok) added = GameRuntime.AddRegion(s.Selection);
+                try { if (s.Crop != null) s.Crop.Dispose(); } catch (Exception) { }
+                return Reply("{\"ok\":" + J.B(ok) + ",\"added\":" + J.B(added)
+                    + ",\"cancelled\":" + J.B(!ok) + ",\"state\":" + BuildState() + "}");
+            }
+            catch (Exception ex)
+            {
+                NativeShell.Log("[game] pick fail " + ex.Message);
+                return Reply("{\"ok\":false,\"msg\":" + J.S(ex.Message) + "}");
+            }
+            finally
+            {
+                try { ShowWindow(true); } catch (Exception) { }
+                GameRuntime.Pause(false);
+            }
+        }
+
+        private static IntPtr OnGameDel(uint win, IntPtr msg)
+        {
+            int index = 0;
+            try { int.TryParse(MiniJson.GetString(ReadUtf8(msg), "index"), out index); } catch (Exception) { }
+            GameRuntime.RemoveRegion(index);
+            if (GameRuntime.Regions().Count == 0 && AppConfig.GameOn) GameRuntime.Stop();
+            return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");
+        }
+
+        private static IntPtr OnGameClear(uint win, IntPtr msg)
+        {
+            GameRuntime.ClearRegions();
+            if (AppConfig.GameOn) GameRuntime.Stop();
+            return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");
         }
 
         private static IntPtr OnCopy(uint win, IntPtr msg)

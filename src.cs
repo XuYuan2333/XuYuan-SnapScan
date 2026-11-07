@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -454,6 +454,14 @@ namespace QRSnap
         public static bool AiMerge;                                      // AI 短句合并：窄栏续行先合并再翻
         public static bool AiMt;                                         // AI 翻译接管：只用大模型翻，不走本地模型
         public static bool AiLayout = true;                              // AI 版面强化：分栏/徽章/段落切分后再翻译、回填
+        // 游戏专属模式
+        public static bool GameOn;                                       // 游戏模式是否运行
+        public static string GameRegions = "";                           // 多个固定区域：x,y,w,h;x,y,w,h
+        public static int GameTrigger;                                   // 0=变化即翻 1=固定间隔 2=手动快捷键
+        public static int GameIntervalMs = 500;                          // 固定间隔，默认 0.5s
+        public static string GameModel = MtProfileEfficiency;            // 游戏模式默认 0.5B，可切标准
+        public static bool GameFilter = true;                            // 只翻字幕，过滤 HUD/数字/版本
+        public static bool GameMerge = true;                             // 合并被拆开的字幕行
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -607,6 +615,13 @@ namespace QRSnap
             AiMerge = false;
             AiMt = false;
             AiLayout = true;
+            GameOn = false;
+            GameRegions = "";
+            GameTrigger = 0;
+            GameIntervalMs = 500;
+            GameModel = MtProfileEfficiency;
+            GameFilter = true;
+            GameMerge = true;
             Legacy = false;
             try
             {
@@ -675,8 +690,16 @@ namespace QRSnap
                     else if (k.Equals("aimerge", StringComparison.OrdinalIgnoreCase)) AiMerge = ToBool(v);
                     else if (k.Equals("aimt", StringComparison.OrdinalIgnoreCase)) AiMt = ToBool(v);
                     else if (k.Equals("ailayout", StringComparison.OrdinalIgnoreCase)) AiLayout = ToBool(v);
+                    else if (k.Equals("gameon", StringComparison.OrdinalIgnoreCase)) GameOn = ToBool(v);
+                    else if (k.Equals("gameregions", StringComparison.OrdinalIgnoreCase)) GameRegions = v;
+                    else if (k.Equals("gametrigger", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameTrigger = Math.Max(0, Math.Min(2, n)); }
+                    else if (k.Equals("gameinterval", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameIntervalMs = Math.Max(250, Math.Min(5000, n)); }
+                    else if (k.Equals("gamemodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameModel = NormalizeMtProfile(v);
+                    else if (k.Equals("gamefilter", StringComparison.OrdinalIgnoreCase)) GameFilter = ToBool(v);
+                    else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
+                GameOn = false;   // 游戏循环必须在本次启动里手动开启
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception)
@@ -724,6 +747,13 @@ namespace QRSnap
             sb.Append("aimerge=").Append(AiMerge ? "1" : "0").Append("\r\n");
             sb.Append("aimt=").Append(AiMt ? "1" : "0").Append("\r\n");
             sb.Append("ailayout=").Append(AiLayout ? "1" : "0").Append("\r\n");
+            sb.Append("gameon=").Append(GameOn ? "1" : "0").Append("\r\n");
+            sb.Append("gameregions=").Append(GameRegions ?? "").Append("\r\n");
+            sb.Append("gametrigger=").Append(GameTrigger).Append("\r\n");
+            sb.Append("gameinterval=").Append(GameIntervalMs).Append("\r\n");
+            sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
+            sb.Append("gamefilter=").Append(GameFilter ? "1" : "0").Append("\r\n");
+            sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;

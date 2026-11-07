@@ -236,6 +236,8 @@ internal static class LlamaMt
             lock (Gate)
             {
                 if (_proc == null) return;
+                // 游戏模式期间不释放任何模型；退出游戏模式时由 GameRuntime 统一释放
+                if (AppConfig.GameOn) return;
                 // 效率档的 0.5B 短句模型常驻；标准档仍按空闲释放
                 if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency
                     && MtRouter.IsGameModelPath(_model)) return;
