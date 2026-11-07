@@ -190,9 +190,21 @@
           <select id="selMtMode">
             <option value="efficiency">效率 · 遮罩块盖住原文</option>
             <option value="realistic">拟真 · 擦掉原字再重绘</option>
+            <option value="textonly">仅译文 · 不盖原文</option>
           </select>
         </label>
-        <div class="group-note" id="noteMtMode">效率：秒出结果，原文被半透明遮罩块盖住，放大看得到块边。<br>拟真：把原文笔画擦掉、按周围背景补洞，再把译文按原框大小画回去，简单到中等背景下放大基本看不出替换痕迹；背景很花时会露痕，那就切回效率。</div>
+        <div class="group-note" id="noteMtMode">效率：秒出结果，原文被半透明遮罩块盖住，放大看得到块边。<br>拟真：把原文笔画擦掉、按周围背景补洞，再把译文按原框大小画回去。<br>仅译文：原文完全不动，只把白底黑字/黑底白字的译文贴在原文附近。</div>
+        <div id="textOnlyOpts" hidden>
+          <div class="field-grid">
+            <label class="field"><span>底色</span><select id="selMtTextStyle"><option value="white">白底黑字</option><option value="black">黑底白字</option></select></label>
+            <label class="field"><span>位置</span><select id="selMtTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
+            <label class="field"><span>字号</span><select id="selMtTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
+            <label class="field"><span>固定大小</span><input type="number" id="numMtTextSize" min="8" max="72" step="1" value="18"></label>
+          </div>
+          <div class="mask-preview" id="textOnlyPreview">
+            <div class="mask-demo textonly-demo" id="textOnlyDemo">我喜欢尼娅，还有大家！</div>
+          </div>
+        </div>
         <div class="mask-preview" id="maskPreview">
           <div class="mask-demo" id="maskDemo">我喜欢尼娅，还有大家！</div>
         </div>
@@ -378,9 +390,28 @@
       <label class="field">
         <span>遮罩模式</span>
         <select id="gameMask">
-          <option value="efficiency">效率遮罩（固定）</option>
+          <option value="efficiency">效率 · 遮罩块盖住原文</option>
+          <option value="realistic">拟真 · 擦掉原字再重绘</option>
+          <option value="textonly">仅译文 · 不盖原文</option>
         </select>
       </label>
+    </div>
+
+    <div class="mask-preview" id="gameMaskPreview">
+      <div class="mask-demo" id="gameMaskDemo">我喜欢尼娅，还有大家！</div>
+    </div>
+    <label class="field slider" id="gameRowAlpha">
+      <span>不透明度</span>
+      <input type="range" id="gameRngMtAlpha" min="0" max="100" step="1" value="100">
+      <span class="val" id="gameLblMtAlpha" style="width:44px;">100%</span>
+    </label>
+    <div id="gameTextOnlyOpts" hidden>
+      <div class="field-grid">
+        <label class="field"><span>底色</span><select id="gameTextStyle"><option value="white">白底黑字</option><option value="black">黑底白字</option></select></label>
+        <label class="field"><span>位置</span><select id="gameTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
+        <label class="field"><span>字号</span><select id="gameTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
+        <label class="field"><span>固定大小</span><input type="number" id="gameTextSize" min="8" max="72" step="1" value="18"></label>
+      </div>
     </div>
 
     <label class="switch-row">

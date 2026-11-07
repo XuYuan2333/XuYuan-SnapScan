@@ -436,7 +436,12 @@ namespace QRSnap
         public static int MtMaskAlpha = DefaultMtMaskAlpha;
         public const string MtModeEfficiency = "efficiency";   // 效率：遮罩块直接盖住原文
         public const string MtModeRealistic = "realistic";     // 拟真：擦掉原字、按背景补洞、再画译文
+        public const string MtModeTextOnly = "textonly";       // 仅译文：不盖原文，只把译文贴到原文附近
         public static string MtMode = MtModeEfficiency;
+        public static string MtTextStyle = "white";            // 仅译文：white=白底黑字 black=黑底白字
+        public static int MtTextPos;                           // 0左上 1中上 2右上 3左下 4中下 5右下
+        public static bool MtTextAutoSize = true;              // true=自适应字号 false=固定字号
+        public static int MtTextSize = 18;                     // 固定字号（像素）
         // 翻译模式（与上面的「译文遮罩」是两件事）
         public const string MtProfileStandard = "standard";      // 标准：用大模型（HyMT1.5）翻所有方向
         public const string MtProfileEfficiency = "efficiency";  // 效率：英→中 / 日→中 先走小模型，其余回退标准
@@ -563,6 +568,7 @@ namespace QRSnap
             if (v == null) return MtModeEfficiency;
             string s = v.Trim().ToLowerInvariant();
             if (s == MtModeRealistic || s == "real" || s == "拟真") return MtModeRealistic;
+            if (s == MtModeTextOnly || s == "text" || s == "仅译文") return MtModeTextOnly;
             return MtModeEfficiency;
         }
 
@@ -606,6 +612,10 @@ namespace QRSnap
             MtIdle = DefaultMtIdle;
             MtMaskAlpha = DefaultMtMaskAlpha;
             MtMode = MtModeEfficiency;
+            MtTextStyle = "white";
+            MtTextPos = 0;
+            MtTextAutoSize = true;
+            MtTextSize = 18;
             MtProfile = MtProfileStandard;
             AiProvider = AiProviderDeepSeek;
             AiModel = "deepseek-flash";
@@ -682,6 +692,10 @@ namespace QRSnap
                         if (int.TryParse(v, out av)) MtMaskAlpha = NormalizeMtMaskAlpha(av);
                     }
                     else if (k.Equals("mtmode", StringComparison.OrdinalIgnoreCase)) MtMode = NormalizeMtMode(v);
+                    else if (k.Equals("mttextstyle", StringComparison.OrdinalIgnoreCase)) MtTextStyle = v == "black" ? "black" : "white";
+                    else if (k.Equals("mttextpos", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) MtTextPos = Math.Max(0, Math.Min(5, n)); }
+                    else if (k.Equals("mttextautosize", StringComparison.OrdinalIgnoreCase)) MtTextAutoSize = ToBool(v);
+                    else if (k.Equals("mttextsize", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) MtTextSize = Math.Max(8, Math.Min(72, n)); }
                     else if (k.Equals("mtprofile", StringComparison.OrdinalIgnoreCase)) MtProfile = NormalizeMtProfile(v);
                     else if (k.Equals("aiprovider", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiProvider = v;
                     else if (k.Equals("aimodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiModel = v;
@@ -740,6 +754,10 @@ namespace QRSnap
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
             sb.Append("mtmode=").Append(MtMode).Append("\r\n");
+            sb.Append("mttextstyle=").Append(MtTextStyle).Append("\r\n");
+            sb.Append("mttextpos=").Append(MtTextPos).Append("\r\n");
+            sb.Append("mttextautosize=").Append(MtTextAutoSize ? "1" : "0").Append("\r\n");
+            sb.Append("mttextsize=").Append(MtTextSize).Append("\r\n");
             sb.Append("mtprofile=").Append(MtProfile).Append("\r\n");
             sb.Append("aiprovider=").Append(AiProvider).Append("\r\n");
             sb.Append("aimodel=").Append(AiModel).Append("\r\n");

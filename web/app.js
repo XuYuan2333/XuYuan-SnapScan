@@ -30,12 +30,91 @@
   // 译文模式：效率走遮罩块，拟真走擦除+回填成品图；不透明度只对效率有意义
   function applyMtMode(mode) {
     const real = mode === "realistic";
+    const text = mode === "textonly";
     const pv = $("maskPreview");
     const row = $("rowMtAlpha");
     const n1 = $("noteMtAlpha");
-    if (pv) pv.style.display = real ? "none" : "";
+    if (pv) pv.style.display = (real || text) ? "none" : "";
     if (row) row.style.display = real ? "none" : "";
     if (n1) n1.style.display = real ? "none" : "";
+    if ($("textOnlyOpts")) $("textOnlyOpts").style.display = text ? "" : "none";
+    if ($("textOnlyPreview")) $("textOnlyPreview").style.display = text ? "" : "none";
+    if ($("gameTextOnlyOpts")) $("gameTextOnlyOpts").style.display = text ? "" : "none";
+    if ($("gameMaskPreview")) $("gameMaskPreview").style.display = real ? "none" : "";
+  }
+
+  function normMaskMode(v) {
+    return v === "realistic" ? "realistic" : (v === "textonly" ? "textonly" : "efficiency");
+  }
+
+  function applyMaskAll(c) {
+    const mode = normMaskMode(c.mtmode);
+    const alpha = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
+    const style = c.mttextstyle === "black" ? "black" : "white";
+    const pos = c.mttextpos == null ? 0 : c.mttextpos;
+    const autoSize = c.mttextautosize !== false;
+    const fixedSize = c.mttextsize == null ? 18 : c.mttextsize;
+
+    if ($("selMtMode")) $("selMtMode").value = mode;
+    if ($("gameMask")) $("gameMask").value = mode;
+    if ($("selMtTextStyle")) $("selMtTextStyle").value = style;
+    if ($("gameTextStyle")) $("gameTextStyle").value = style;
+    if ($("selMtTextPos")) $("selMtTextPos").value = String(pos);
+    if ($("gameTextPos")) $("gameTextPos").value = String(pos);
+    if ($("selMtTextAuto")) $("selMtTextAuto").value = autoSize ? "1" : "0";
+    if ($("gameTextAuto")) $("gameTextAuto").value = autoSize ? "1" : "0";
+    if ($("numMtTextSize")) $("numMtTextSize").value = fixedSize;
+    if ($("gameTextSize")) $("gameTextSize").value = fixedSize;
+
+    if ($("rngMtAlpha")) $("rngMtAlpha").value = alpha;
+    if ($("gameRngMtAlpha")) $("gameRngMtAlpha").value = alpha;
+    if ($("lblMtAlpha")) $("lblMtAlpha").textContent = alpha + "%";
+    if ($("gameLblMtAlpha")) $("gameLblMtAlpha").textContent = alpha + "%";
+
+    const paintDemo = (demo) => {
+      if (!demo) return;
+      if (mode === "textonly") {
+        demo.style.background = style === "white"
+          ? "rgba(250,250,250," + (alpha / 100).toFixed(2) + ")"
+          : "rgba(16,18,22," + (alpha / 100).toFixed(2) + ")";
+        demo.style.color = style === "white" ? "#15181d" : "#f7faff";
+      } else {
+        demo.style.background = "rgba(14,18,26," + (alpha / 100).toFixed(2) + ")";
+        demo.style.color = "#f6f9ff";
+      }
+    };
+    paintDemo($("maskDemo"));
+    paintDemo($("gameMaskDemo"));
+    paintDemo($("textOnlyDemo"));
+    applyMtMode(mode);
+
+    const gamePv = $("gameMaskPreview");
+    if (gamePv) gamePv.style.display = mode === "realistic" ? "none" : "";
+    if ($("gameTextOnlyOpts")) $("gameTextOnlyOpts").style.display = mode === "textonly" ? "" : "none";
+    if ($("gameRowAlpha")) $("gameRowAlpha").style.display = mode === "realistic" ? "none" : "";
+  }
+
+  function paintMaskPreviewAlpha(p) {
+    p = Math.max(0, Math.min(100, p || 0));
+    const mode = normMaskMode($("selMtMode") ? $("selMtMode").value : "efficiency");
+    const style = ($("selMtTextStyle") && $("selMtTextStyle").value === "black") ? "black" : "white";
+    const paint = (demo) => {
+      if (!demo) return;
+      if (mode === "textonly") {
+        demo.style.background = style === "white"
+          ? "rgba(250,250,250," + (p / 100).toFixed(2) + ")"
+          : "rgba(16,18,22," + (p / 100).toFixed(2) + ")";
+        demo.style.color = style === "white" ? "#15181d" : "#f7faff";
+      } else {
+        demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
+        demo.style.color = "#f6f9ff";
+      }
+    };
+    paint($("maskDemo"));
+    paint($("gameMaskDemo"));
+    paint($("textOnlyDemo"));
+    if ($("lblMtAlpha")) $("lblMtAlpha").textContent = p + "%";
+    if ($("gameLblMtAlpha")) $("gameLblMtAlpha").textContent = p + "%";
   }
 
   function applyState(s) {
@@ -74,8 +153,7 @@
     if ($("selMtGpu")) $("selMtGpu").value = c.mtgpu || "auto";
     if ($("shotCacheInfo")) $("shotCacheInfo").textContent = c.cacheinfo || "—";
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
-    if ($("selMtMode")) $("selMtMode").value = c.mtmode === "realistic" ? "realistic" : "efficiency";
-    applyMtMode(c.mtmode === "realistic" ? "realistic" : "efficiency");
+    applyMaskAll(c);
     applyMtProfile(c.mtprofile || "standard");
 
     // AI 大模型：只回填参数，不把 key 回显到输入框（只显示末 4 位）
@@ -89,13 +167,6 @@
     if ($("swAiMt")) $("swAiMt").checked = !!ai.mt;
     if ($("txtAiKey")) $("txtAiKey").placeholder = ai.hasKey ? ((ai.keyTail || "Key") + " 已保存，留空则不改") : "粘贴你自己的 Key，留空则不改";
     applyAi(ai);
-    if ($("rngMtAlpha")) {
-      const a = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
-      $("rngMtAlpha").value = a;
-      const demo = $("maskDemo");
-      if (demo) demo.style.background = "rgba(14,18,26," + (a / 100).toFixed(2) + ")";
-      if ($("lblMtAlpha")) $("lblMtAlpha").textContent = a + "%";
-    }
 
     if (document.activeElement !== $("rgOpacity")) $("rgOpacity").value = c.opacity != null ? c.opacity : 30;
     if (document.activeElement !== $("rgFrost")) $("rgFrost").value = c.frost != null ? c.frost : 3;
@@ -146,7 +217,7 @@
     }
     if ($("gameSens")) $("gameSens").value = String(g.sens == null ? 2 : g.sens);
     if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
-    if ($("gameMask")) $("gameMask").value = "efficiency";
+    if ($("gameMask")) $("gameMask").value = normMaskMode(g.mask);
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
 
     const badge = $("gameBadge");
@@ -720,6 +791,19 @@
       applyMtMode(e.target.value);
       setConfig({ mtmode: e.target.value });
     });
+    if ($("selMtTextStyle")) $("selMtTextStyle").addEventListener("change", (e) => setConfig({ mttextstyle: e.target.value }));
+    if ($("selMtTextPos")) $("selMtTextPos").addEventListener("change", (e) => setConfig({ mttextpos: Number(e.target.value) }));
+    if ($("selMtTextAuto")) $("selMtTextAuto").addEventListener("change", (e) => setConfig({ mttextautosize: e.target.value === "1" }));
+    if ($("numMtTextSize")) $("numMtTextSize").addEventListener("change", (e) => setConfig({ mttextsize: Number(e.target.value) }));
+
+    if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
+      applyMtMode(e.target.value);
+      setConfig({ gamemask: e.target.value });
+    });
+    if ($("gameTextStyle")) $("gameTextStyle").addEventListener("change", (e) => setConfig({ mttextstyle: e.target.value }));
+    if ($("gameTextPos")) $("gameTextPos").addEventListener("change", (e) => setConfig({ mttextpos: Number(e.target.value) }));
+    if ($("gameTextAuto")) $("gameTextAuto").addEventListener("change", (e) => setConfig({ mttextautosize: e.target.value === "1" }));
+    if ($("gameTextSize")) $("gameTextSize").addEventListener("change", (e) => setConfig({ mttextsize: Number(e.target.value) }));
 
     $("numMtIdle").addEventListener("change", (e) => {
       let v = parseInt(e.target.value, 10);
@@ -731,16 +815,26 @@
 
     const rngA = $("rngMtAlpha");
     if (rngA) {
-      const paint = (p) => {
-        const demo = $("maskDemo");
-        if (demo) demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
-        const lbl = $("lblMtAlpha");
-        if (lbl) lbl.textContent = p + "%";
-      };
+      const paint = (p) => paintMaskPreviewAlpha(p);
       rngA.addEventListener("input", (e) => paint(parseInt(e.target.value, 10) || 0));
       rngA.addEventListener("change", (e) => {
         const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
         paint(v);
+        if ($("gameRngMtAlpha")) $("gameRngMtAlpha").value = v;
+        setConfig({ mtalpha: v });
+      });
+    }
+    const rngGA = $("gameRngMtAlpha");
+    if (rngGA) {
+      rngGA.addEventListener("input", (e) => {
+        const p = parseInt(e.target.value, 10) || 0;
+        paintMaskPreviewAlpha(p);
+        if ($("rngMtAlpha")) $("rngMtAlpha").value = p;
+      });
+      rngGA.addEventListener("change", (e) => {
+        const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+        paintMaskPreviewAlpha(v);
+        if ($("rngMtAlpha")) $("rngMtAlpha").value = v;
         setConfig({ mtalpha: v });
       });
     }

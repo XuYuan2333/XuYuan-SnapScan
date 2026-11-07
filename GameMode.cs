@@ -19,7 +19,6 @@ namespace QRSnap
         private static bool _paused;
         private static bool _overlayClosed;
         private static string _prevProfile;
-        private static string _prevMask;
 
         public static bool Running { get { return AppConfig.GameOn; } }
         public static string LastError = "";
@@ -111,11 +110,8 @@ namespace QRSnap
             }
 
             _prevProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
-            _prevMask = AppConfig.NormalizeMtMode(AppConfig.MtMode);
             AppConfig.MtProfile = profile;
             AppConfig.GameModel = profile;
-            AppConfig.MtMode = AppConfig.MtModeEfficiency;   // 游戏页固定效率遮罩，不提供拟真
-            AppConfig.GameMaskMode = AppConfig.MtModeEfficiency;
             AppConfig.GameOn = true;
             LastError = "";
             _overlayClosed = false;
@@ -141,9 +137,7 @@ namespace QRSnap
             AppConfig.GameOn = false;
             LastError = "";
             if (!string.IsNullOrEmpty(_prevProfile)) AppConfig.MtProfile = _prevProfile;
-            if (!string.IsNullOrEmpty(_prevMask)) AppConfig.MtMode = _prevMask;
             _prevProfile = null;
-            _prevMask = null;
             try { AppConfig.Save(); } catch (Exception) { }
             try { TransOverlay.HideOverlay(); } catch (Exception) { }
             try { JadeHost.ShowWindow(true); } catch (Exception) { }

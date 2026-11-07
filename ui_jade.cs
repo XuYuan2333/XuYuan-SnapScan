@@ -2022,6 +2022,10 @@ namespace QRSnap
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
             sb.Append(",\"mtmode\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
+            sb.Append(",\"mttextstyle\":").Append(J.S(AppConfig.MtTextStyle));
+            sb.Append(",\"mttextpos\":").Append(AppConfig.MtTextPos);
+            sb.Append(",\"mttextautosize\":").Append(J.B(AppConfig.MtTextAutoSize));
+            sb.Append(",\"mttextsize\":").Append(AppConfig.MtTextSize);
             sb.Append(",\"mtprofile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.MtProfile)));
             sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
             sb.Append(",\"ai\":{");
@@ -2049,7 +2053,7 @@ namespace QRSnap
             sb.Append(",\"sens\":").Append(AppConfig.GameSensitivity);
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
-            sb.Append(",\"mask\":").Append(J.S(AppConfig.MtModeEfficiency));
+            sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
             bool gready = gp == AppConfig.MtProfileEfficiency ? MtRunner.GameReady : MtRunner.Ready;
             string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
@@ -2230,6 +2234,27 @@ namespace QRSnap
                     else if (k == "mtmode")
                     {
                         AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
+                    }
+                    else if (k == "mttextstyle")
+                    {
+                        AppConfig.MtTextStyle = v == "black" ? "black" : "white";
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
+                    }
+                    else if (k == "mttextpos")
+                    {
+                        int gv; if (int.TryParse(v, out gv)) AppConfig.MtTextPos = Math.Max(0, Math.Min(5, gv));
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
+                    }
+                    else if (k == "mttextautosize")
+                    {
+                        AppConfig.MtTextAutoSize = v == "true" || v == "1";
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
+                    }
+                    else if (k == "mttextsize")
+                    {
+                        int gv; if (int.TryParse(v, out gv)) AppConfig.MtTextSize = Math.Max(8, Math.Min(72, gv));
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
                     }
                     else if (k == "mtprofile")
                     {
@@ -2289,12 +2314,8 @@ namespace QRSnap
                     }
                     else if (k == "gamemask")
                     {
-                        AppConfig.GameMaskMode = AppConfig.MtModeEfficiency;   // 游戏页不接受拟真
-                        if (AppConfig.GameOn)
-                        {
-                            AppConfig.MtMode = AppConfig.MtModeEfficiency;
-                            try { TransOverlay.Repaint(); } catch (Exception) { }
-                        }
+                        AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
+                        try { TransOverlay.Repaint(); } catch (Exception) { }
                     }
                     else if (k == "gamemerge")
                     {
