@@ -459,14 +459,6 @@
   }
 
   /* AI 抽屉：和设置抽屉互斥，同一时刻只开一个 */
-  function openGame(open) {
-    const d = $("gameDrawer");
-    if (!d) return;
-    if (open) openDrawer(false);
-    d.classList.toggle("open", open);
-    if ($("gameMask")) $("gameMask").classList.toggle("show", open);
-  }
-
   function openAI(open) {
     const d = $("aiDrawer");
     if (!d) return;
@@ -580,9 +572,6 @@
     $("btnSettings").addEventListener("click", () => openDrawer(true));
     $("btnCloseDrawer").addEventListener("click", () => openDrawer(false));
     $("mask").addEventListener("click", () => openDrawer(false));
-    if ($("btnGameOpen")) $("btnGameOpen").addEventListener("click", () => openGame(true));
-    if ($("btnCloseGame")) $("btnCloseGame").addEventListener("click", () => openGame(false));
-    if ($("gameMask")) $("gameMask").addEventListener("click", () => openGame(false));
     if ($("btnAI")) $("btnAI").addEventListener("click", () => openAI(true));
     if ($("btnCloseAI")) $("btnCloseAI").addEventListener("click", () => openAI(false));
     if ($("aiMask")) $("aiMask").addEventListener("click", () => openAI(false));
@@ -623,7 +612,7 @@
     if ($("swAiCheck")) $("swAiCheck").addEventListener("change", (e) => setConfig({ aicheck: e.target.checked }));
     if ($("swAiMerge")) $("swAiMerge").addEventListener("change", (e) => setConfig({ aimerge: e.target.checked }));
     if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); openGame(false); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); } });
 
     // 折叠分组：同一个抽屉里一次只开一组，省地方
     document.querySelectorAll(".acc-head").forEach((head) => {
