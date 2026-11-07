@@ -57,6 +57,15 @@ namespace QRSnap
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
+
+        [DllImport("user32.dll")]
         private static extern bool IsIconic(IntPtr hWnd);
 
         // 找自己进程里的 JadeView 主窗口（不靠标题，标题里带中文/中点容易匹配不上）
@@ -189,6 +198,19 @@ namespace QRSnap
             if (h == IntPtr.Zero) return false;
             ShowWindow(h, SW_MINIMIZE);
             return true;
+        }
+
+        // 不隐藏，压到所有普通窗口的最底层：截屏时不会挡住目标，截完也还在原处，
+        // 用户切回来就能看到（隐藏之后窗口既不在任务栏、也点不到，很难找）。
+        public static bool SendToBottom(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                return SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            catch (Exception) { return false; }
         }
 
         public static bool IsMinimizedHandle(IntPtr h)
@@ -382,6 +404,8 @@ namespace QRSnap
         public static string WeChatDir = string.Empty;   // 手动指定的微信安装目录（自动探测失败时用）
         public static int BackOpacity = DefaultBackOpacity;
         public static int Frost = DefaultFrost;
+        // 右下角「识别中 / 识别完成」悬浮提示；关掉后完全静默
+        public static bool ShowToast = true;
         public static bool RestoreWin = false;           // 识别后恢复本软件窗口
         public static bool RestoreAfterQr = false;       // 扫码后显示本软件窗口
         public static bool Freehand = false;             // 自由圈选（不规则选区）
@@ -396,6 +420,14 @@ namespace QRSnap
         public const string MtPerfPerformance = "performance";
         public const string MtPerfFull = "full";
         public static string MtPerf = MtPerfBalanced;
+        // GPU 加速：auto = 有 Vulkan 运行时就用，失败回 CPU；on = 强制尝试；off = 纯 CPU
+        public static string MtGpu = "auto";
+        // ONNX（PP-OCR / Opus-MT）的 DirectML：实测 PP-OCR 框质量下降且不快，默认关闭
+        public static bool OcrGpu;
+        // PP 检测 + 微信识字融合：默认关（纯识字保持微信极速）；翻译链路可开
+        public static bool OcrFusion;
+        // 重复截图缓存：同一屏（允许轻微差异）直接贴上次成品，不再 OCR/翻译
+        public static bool ShotCacheEnabled = true;
         public const int DefaultMtIdle = 30;             // 闲置多少秒没翻译就卸载翻译服务（0 = 不自动卸载）
         public static int MtIdle = DefaultMtIdle;
         public const int DefaultMtMaskAlpha = 100;       // 译文遮罩不透明度（0-100，100=完全不透明）
@@ -412,12 +444,14 @@ namespace QRSnap
         // ---------- AI 大模型（只做辅助增强，默认 DeepSeek 官方；不思考、不联网，只求快） ----------
         public const string AiProviderDeepSeek = "deepseek";
         public static string AiProvider = AiProviderDeepSeek;
-        public static string AiModel = "4.1flash";                       // 模型名称，用户可改
-        public static string AiBase = "https://api.deepseek.com/v1";     // 官方地址
+        public static string AiModel = "deepseek-flash";                       // 模型名称，用户可改
+        public static string AiBase = "https://api.deepseek.com";     // 官方地址
         public static string AiKey = "";                                 // 用户自己填 key
-        public static bool AiOcr;                                        // AI 识字强化（占位开关，功能待做）
-        public static bool AiMask;                                       // AI 译文遮罩强化（占位）
-        public static bool AiMt;                                         // AI 翻译强化（占位）
+        public static bool AiOcr;                                        // AI 识字强化：只修 OCR 认错的符号
+        public static bool AiCheck;                                      // AI 译文质检：只重翻低质量行
+        public static bool AiMerge;                                      // AI 短句合并：窄栏续行先合并再翻
+        public static bool AiMt;                                         // AI 翻译接管：只用大模型翻，不走本地模型
+        public static bool AiLayout = true;                              // AI 版面强化：分栏/徽章/段落切分后再翻译、回填
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -457,7 +491,7 @@ namespace QRSnap
             if (v == EngineSystem || v == "win" || v == "windows") return EngineSystem;
             if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
             if (v == EnginePpSmall || v == "small" || v == "standard") return EnginePpTiny;
-            if (v == EnginePpMedium || v == "medium" || v == "med") return EnginePpMedium;
+            if (v == EnginePpMedium || v == "medium" || v == "med" || v == "高精") return EnginePpTiny;
             return EngineWeChat;
         }
 
@@ -486,6 +520,15 @@ namespace QRSnap
             return MtPerfBalanced;
         }
 
+        public static string NormalizeMtGpu(string v)
+        {
+            if (v == null) return "auto";
+            string s = v.Trim().ToLowerInvariant();
+            if (s == "on" || s == "1" || s == "true" || s == "开启") return "on";
+            if (s == "off" || s == "0" || s == "false" || s == "关闭") return "off";
+            return "auto";
+        }
+
         // 空闲释放秒数：0 或负数=不自动释放；其余夹在 5–86400 之间
         public static int NormalizeMtIdle(int v)
         {
@@ -512,13 +555,13 @@ namespace QRSnap
             return MtModeEfficiency;
         }
 
-        // 翻译模式：标准 / 效率 / 游戏，其余一律按标准
+        // 翻译模式：标准 / 效率；旧的 game 一律并到效率（0.5B 短句模型）
         public static string NormalizeMtProfile(string v)
         {
             if (v == null) return MtProfileStandard;
             string s = v.Trim().ToLowerInvariant();
             if (s == MtProfileEfficiency || s == "eff" || s == "效率") return MtProfileEfficiency;
-            if (s == MtProfileGame || s == "游戏") return MtProfileGame;
+            if (s == MtProfileGame || s == "游戏" || s == "game") return MtProfileEfficiency;
             return MtProfileStandard;
         }
 
@@ -526,7 +569,6 @@ namespace QRSnap
         {
             string s = NormalizeMtProfile(v);
             if (s == MtProfileEfficiency) return "效率";
-            if (s == MtProfileGame) return "游戏";
             return "标准";
         }
 
@@ -555,12 +597,14 @@ namespace QRSnap
             MtMode = MtModeEfficiency;
             MtProfile = MtProfileStandard;
             AiProvider = AiProviderDeepSeek;
-            AiModel = "4.1flash";
-            AiBase = "https://api.deepseek.com/v1";
+            AiModel = "deepseek-flash";
+            AiBase = "https://api.deepseek.com";
             AiKey = "";
             AiOcr = false;
-            AiMask = false;
+            AiCheck = false;
+            AiMerge = false;
             AiMt = false;
+            AiLayout = true;
             Legacy = false;
             try
             {
@@ -593,6 +637,7 @@ namespace QRSnap
                         int iv;
                         if (int.TryParse(v, out iv) && iv >= 0 && iv <= 20) Frost = iv;
                     }
+                    else if (k.Equals("toast", StringComparison.OrdinalIgnoreCase)) ShowToast = ToBool(v);
                     else if (k.Equals("restorewin", StringComparison.OrdinalIgnoreCase)) RestoreWin = ToBool(v);
                     else if (k.Equals("restoreqr", StringComparison.OrdinalIgnoreCase)) RestoreAfterQr = ToBool(v);
                     else if (k.Equals("freehand", StringComparison.OrdinalIgnoreCase)) Freehand = ToBool(v);
@@ -603,6 +648,10 @@ namespace QRSnap
                     else if (k.Equals("mtdir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) MtDir = v;
                     else if (k.Equals("mtbar", StringComparison.OrdinalIgnoreCase)) MtBar = ToBool(v);
                     else if (k.Equals("mtperf", StringComparison.OrdinalIgnoreCase)) MtPerf = NormalizeMtPerf(v);
+                    else if (k.Equals("mtgpu", StringComparison.OrdinalIgnoreCase)) MtGpu = NormalizeMtGpu(v);
+                    else if (k.Equals("ocrgpu", StringComparison.OrdinalIgnoreCase)) OcrGpu = ToBool(v);
+                    else if (k.Equals("ocrfusion", StringComparison.OrdinalIgnoreCase)) OcrFusion = ToBool(v);
+                    else if (k.Equals("shotcache", StringComparison.OrdinalIgnoreCase)) ShotCacheEnabled = ToBool(v);
                     else if (k.Equals("mtidle", StringComparison.OrdinalIgnoreCase))
                     {
                         int iv;
@@ -620,8 +669,10 @@ namespace QRSnap
                     else if (k.Equals("aibase", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiBase = v;
                     else if (k.Equals("aikey", StringComparison.OrdinalIgnoreCase)) AiKey = v;
                     else if (k.Equals("aiocr", StringComparison.OrdinalIgnoreCase)) AiOcr = ToBool(v);
-                    else if (k.Equals("aimask", StringComparison.OrdinalIgnoreCase)) AiMask = ToBool(v);
+                    else if (k.Equals("aicheck", StringComparison.OrdinalIgnoreCase)) AiCheck = ToBool(v);
+                    else if (k.Equals("aimerge", StringComparison.OrdinalIgnoreCase)) AiMerge = ToBool(v);
                     else if (k.Equals("aimt", StringComparison.OrdinalIgnoreCase)) AiMt = ToBool(v);
+                    else if (k.Equals("ailayout", StringComparison.OrdinalIgnoreCase)) AiLayout = ToBool(v);
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
@@ -644,6 +695,7 @@ namespace QRSnap
             if (ModelDir != null && ModelDir.Length > 0) sb.Append("modeldir=").Append(ModelDir).Append("\r\n");
             sb.Append("bgopacity=").Append(BackOpacity).Append("\r\n");
             sb.Append("frost=").Append(Frost).Append("\r\n");
+            sb.Append("toast=").Append(ShowToast ? "1" : "0").Append("\r\n");
             sb.Append("restorewin=").Append(RestoreWin ? "1" : "0").Append("\r\n");
             sb.Append("restoreqr=").Append(RestoreAfterQr ? "1" : "0").Append("\r\n");
             sb.Append("freehand=").Append(Freehand ? "1" : "0").Append("\r\n");
@@ -653,6 +705,10 @@ namespace QRSnap
             if (MtDir != null && MtDir.Length > 0) sb.Append("mtdir=").Append(MtDir).Append("\r\n");
             sb.Append("mtbar=").Append(MtBar ? "1" : "0").Append("\r\n");
             sb.Append("mtperf=").Append(MtPerf).Append("\r\n");
+            sb.Append("mtgpu=").Append(MtGpu).Append("\r\n");
+            sb.Append("ocrgpu=").Append(OcrGpu ? "1" : "0").Append("\r\n");
+            sb.Append("ocrfusion=").Append(OcrFusion ? "1" : "0").Append("\r\n");
+            sb.Append("shotcache=").Append(ShotCacheEnabled ? "1" : "0").Append("\r\n");
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
             sb.Append("mtmode=").Append(MtMode).Append("\r\n");
@@ -662,8 +718,10 @@ namespace QRSnap
             sb.Append("aibase=").Append(AiBase).Append("\r\n");
             sb.Append("aikey=").Append(AiKey).Append("\r\n");
             sb.Append("aiocr=").Append(AiOcr ? "1" : "0").Append("\r\n");
-            sb.Append("aimask=").Append(AiMask ? "1" : "0").Append("\r\n");
+            sb.Append("aicheck=").Append(AiCheck ? "1" : "0").Append("\r\n");
+            sb.Append("aimerge=").Append(AiMerge ? "1" : "0").Append("\r\n");
             sb.Append("aimt=").Append(AiMt ? "1" : "0").Append("\r\n");
+            sb.Append("ailayout=").Append(AiLayout ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -1312,6 +1370,7 @@ namespace QRSnap
         private static FnSendWrite _sendWrite;
 
         private static readonly Dictionary<ulong, string> _texts = new Dictionary<ulong, string>();
+        private static readonly Dictionary<ulong, List<Rectangle>> _boxes = new Dictionary<ulong, List<Rectangle>>();
         private static readonly Dictionary<ulong, int> _codes = new Dictionary<ulong, int>();
         private static readonly Dictionary<ulong, int[]> _sizes = new Dictionary<ulong, int[]>();
 
@@ -1371,12 +1430,13 @@ namespace QRSnap
             ulong taskId = 0;
             int errCode = 0;
             List<string> lines = new List<string>();
+            List<Rectangle> boxes = new List<Rectangle>();
             int[] size = new int[2];
             PB.ForEachField(data, delegate(int field, int wire, byte[] payload, long varint)
             {
                 if (field == 1 && wire == 0) taskId = (ulong)varint;
                 else if (field == 2 && wire == 0) errCode = (int)varint;
-                else if (field == 3 && wire == 2) ParseResultInfo(payload, lines, size);
+                else if (field == 3 && wire == 2) ParseResultInfo(payload, lines, size, boxes);
             });
 
             StringBuilder sb = new StringBuilder();
@@ -1389,28 +1449,241 @@ namespace QRSnap
             lock (Sync)
             {
                 _texts[taskId] = sb.ToString();
+                _boxes[taskId] = boxes;
                 _codes[taskId] = errCode;
                 _sizes[taskId] = size;
                 Monitor.PulseAll(Sync);
             }
         }
 
-        private static void ParseResultInfo(byte[] data, List<string> lines, int[] size)
+        private static void ParseResultInfo(byte[] data, List<string> lines, int[] size, List<Rectangle> boxes)
         {
+            if (Environment.GetEnvironmentVariable("QRSNAP_DUMP_OCR") == "1")
+            {
+                try
+                {
+                    StringBuilder dump = new StringBuilder();
+                    DumpPb(data, 0, dump);
+                    File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ocr-pb.txt"),
+                        dump.ToString(), new UTF8Encoding(false));
+                }
+                catch (Exception) { }
+            }
             PB.ForEachField(data, delegate(int field, int wire, byte[] payload, long varint)
             {
                 if (field == 3 && wire == 2)
                 {
                     string text = string.Empty;
+                    Toks.Clear();
                     PB.ForEachField(payload, delegate(int f2, int w2, byte[] p2, long v2)
                     {
                         if (f2 == 2 && w2 == 2) text = Encoding.UTF8.GetString(p2);
+                        else if (f2 == 4 && w2 == 2)
+                        {
+                            WxTok t = ParseTok(p2);
+                            // 纯空格也是一个 token，丢了会把整行字粘成一串，必须留着
+                            if (t != null && t.Text.Length > 0) Toks.Add(t);
+                        }
                     });
+                    // 微信 OCR 每个词都带四角坐标，用它自己重组行：
+                    // 同一水平带上左右两栏的文字，中间隔着大片空白，直接断行。
+                    // 否则「Level 24」和右边正文首行会被拼成一行，AI 会把 Level 24 误改成 Level 2.4。
+                    if (Toks.Count >= 2 && RebuildFromTokens(lines, boxes)) { }
                     // 空行（纯噪点）丢掉，避免结果里出现一串空行
-                    if (text.Trim().Length > 0) lines.Add(text);
+                    else if (text.Trim().Length > 0)
+                    {
+                        lines.Add(text);
+                        boxes.Add(Rectangle.Empty);
+                    }
                 }
                 else if (field == 4 && wire == 0) size[0] = (int)varint;
                 else if (field == 5 && wire == 0) size[1] = (int)varint;
+            });
+        }
+
+        private sealed class WxTok
+        {
+            public string Text;
+            public float X0, Y0, X1, Y1;
+            public float H { get { return Y1 - Y0; } }
+            public float CY { get { return (Y0 + Y1) * 0.5f; } }
+        }
+
+        [ThreadStatic]
+        private static List<WxTok> _toks;
+
+        private static List<WxTok> Toks
+        {
+            get
+            {
+                if (_toks == null) _toks = new List<WxTok>();
+                return _toks;
+            }
+        }
+
+        private static WxTok ParseTok(byte[] payload)
+        {
+            string text = null;
+            float[] acc = new float[] { float.MaxValue, float.MaxValue, float.MinValue, float.MinValue };
+            PB.ForEachField(payload, delegate(int f, int w, byte[] p, long v)
+            {
+                if (f == 2 && w == 2) text = Encoding.UTF8.GetString(p);
+                else if (f == 1 && w == 2) ParseCorners(p, acc);
+            });
+            if (text == null || acc[0] == float.MaxValue) return null;
+            WxTok t = new WxTok();
+            t.Text = text;
+            t.X0 = acc[0];
+            t.Y0 = acc[1];
+            t.X1 = acc[2];
+            t.Y1 = acc[3];
+            return t;
+        }
+
+        private static void ParseCorners(byte[] payload, float[] acc)
+        {
+            PB.ForEachField(payload, delegate(int f, int w, byte[] p, long v)
+            {
+                if (w != 2 || p == null) return;
+                float cx = float.NaN, cy = float.NaN;
+                PB.ForEachField(p, delegate(int f2, int w2, byte[] p2, long v2)
+                {
+                    if (w2 == 5 && p2 != null && p2.Length == 4)
+                    {
+                        float val = BitConverter.ToSingle(p2, 0);
+                        if (f2 == 1) cx = val;
+                        else if (f2 == 2) cy = val;
+                    }
+                });
+                if (float.IsNaN(cx) || float.IsNaN(cy)) return;
+                if (cx < acc[0]) acc[0] = cx;
+                if (cy < acc[1]) acc[1] = cy;
+                if (cx > acc[2]) acc[2] = cx;
+                if (cy > acc[3]) acc[3] = cy;
+            });
+        }
+
+        // 按坐标重排：先按纵坐标聚成行，行内按横向排；
+        // 两个词之间的横向空隙超过约两个字高，就认为跨了栏，从这里断开。
+        // 每行同时交出自己的包围盒，供遮罩精确落位（不再靠别的引擎按序号均分）。
+        private static bool RebuildFromTokens(List<string> lines, List<Rectangle> boxes)
+        {
+            List<WxTok> all = new List<WxTok>();
+            for (int i = 0; i < Toks.Count; i++) all.Add(Toks[i]);
+            if (all.Count < 2) return false;
+
+            float sumH = 0f;
+            int cnt = 0;
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].H > 0f) { sumH += all[i].H; cnt++; }
+            }
+            if (cnt == 0) return false;
+            float lineH = sumH / cnt;
+            float sameRow = lineH * 0.6f;
+            float cutGap = Math.Max(lineH * 1.6f, 20f);
+
+            all.Sort(delegate(WxTok a, WxTok b) { return a.CY.CompareTo(b.CY); });
+
+            List<List<WxTok>> rows = new List<List<WxTok>>();
+            List<WxTok> row = null;
+            float rowCy = 0f;
+            for (int i = 0; i < all.Count; i++)
+            {
+                WxTok t = all[i];
+                if (row != null && Math.Abs(t.CY - rowCy) <= sameRow)
+                {
+                    row.Add(t);
+                    // 行基准慢慢往中间挪，避免一行字高低不齐时越漂越远
+                    rowCy = (rowCy * (row.Count - 1) + t.CY) / row.Count;
+                    continue;
+                }
+                row = new List<WxTok>();
+                row.Add(t);
+                rowCy = t.CY;
+                rows.Add(row);
+            }
+
+            int produced = 0;
+            for (int r = 0; r < rows.Count; r++)
+            {
+                List<WxTok> one = rows[r];
+                one.Sort(delegate(WxTok a, WxTok b) { return a.X0.CompareTo(b.X0); });
+                StringBuilder sb = new StringBuilder();
+                float prevX1 = 0f;
+                bool has = false;
+                float bx0 = 0f, by0 = 0f, bx1 = 0f, by1 = 0f;
+                for (int i = 0; i < one.Count; i++)
+                {
+                    WxTok t = one[i];
+                    if (has && t.X0 - prevX1 > cutGap && sb.ToString().Trim().Length > 0)
+                    {
+                        AddLine(lines, boxes, sb.ToString().TrimEnd(), bx0, by0, bx1, by1);
+                        produced++;
+                        sb.Length = 0;
+                        has = false;
+                    }
+                    sb.Append(t.Text);
+                    if (!has)
+                    {
+                        bx0 = t.X0; by0 = t.Y0; bx1 = t.X1; by1 = t.Y1;
+                    }
+                    else
+                    {
+                        if (t.X0 < bx0) bx0 = t.X0;
+                        if (t.Y0 < by0) by0 = t.Y0;
+                        if (t.X1 > bx1) bx1 = t.X1;
+                        if (t.Y1 > by1) by1 = t.Y1;
+                    }
+                    prevX1 = t.X1;
+                    has = true;
+                }
+                if (sb.ToString().Trim().Length > 0)
+                {
+                    AddLine(lines, boxes, sb.ToString().TrimEnd(), bx0, by0, bx1, by1);
+                    produced++;
+                }
+            }
+            return produced > 0;
+        }
+
+        private static void AddLine(List<string> lines, List<Rectangle> boxes, string text,
+            float x0, float y0, float x1, float y1)
+        {
+            lines.Add(text);
+            int ix = (int)Math.Floor(x0);
+            int iy = (int)Math.Floor(y0);
+            int iw = (int)Math.Ceiling(x1) - ix;
+            int ih = (int)Math.Ceiling(y1) - iy;
+            if (iw < 1) iw = 1;
+            if (ih < 1) ih = 1;
+            boxes.Add(new Rectangle(ix, iy, iw, ih));
+        }
+
+        // 排查用：把微信 OCR 回包的字段结构摊开，确认每个识别单元到底带不带坐标
+        private static void DumpPb(byte[] data, int depth, StringBuilder sb)
+        {
+            if (data == null || depth > 4) return;
+            PB.ForEachField(data, delegate(int f, int w, byte[] p, long v)
+            {
+                sb.Append(' ', depth * 2).Append("f").Append(f).Append(" w").Append(w);
+                if (w == 0) sb.Append(" v=").Append(v);
+                if (w == 5 && p != null && p.Length == 4)
+                    sb.Append(" f=").Append(BitConverter.ToSingle(p, 0).ToString("0.##"));
+                if (w == 2)
+                {
+                    sb.Append(" len=").Append(p == null ? 0 : p.Length);
+                    if (p != null && p.Length > 0 && p.Length <= 120)
+                    {
+                        string s = Encoding.UTF8.GetString(p);
+                        bool ascii = s.Length > 0;
+                        for (int i = 0; i < s.Length; i++)
+                            if (s[i] < 32 || s[i] > 126) { ascii = false; break; }
+                        if (ascii) sb.Append(" txt=\"").Append(s).Append('"');
+                    }
+                }
+                sb.Append('\n');
+                if (w == 2 && p != null && depth < 3) DumpPb(p, depth + 1, sb);
             });
         }
 
@@ -1450,6 +1723,7 @@ namespace QRSnap
                 _faulted = false;
                 _fault = string.Empty;
                 _texts.Clear();
+                _boxes.Clear();
                 _codes.Clear();
                 _sizes.Clear();
 
@@ -1604,6 +1878,11 @@ namespace QRSnap
 
         public static string Recognize(string pngPath, int timeoutMs, out string note)
         {
+            return Recognize(pngPath, timeoutMs, out note, null);
+        }
+
+        public static string Recognize(string pngPath, int timeoutMs, out string note, List<Rectangle> outBoxes)
+        {
             note = string.Empty;
             if (_env == IntPtr.Zero) { note = "微信 OCR 未启动"; return null; }
 
@@ -1639,6 +1918,13 @@ namespace QRSnap
                     return null;
                 }
                 if (size[0] > 0) note = size[0].ToString() + "×" + size[1].ToString();
+                if (outBoxes != null)
+                {
+                    outBoxes.Clear();
+                    List<Rectangle> got = _boxes[taskId];
+                    if (got != null)
+                        for (int i = 0; i < got.Count; i++) outBoxes.Add(got[i]);
+                }
                 return _texts[taskId];
             }
         }
@@ -1801,6 +2087,10 @@ namespace QRSnap
         public Rectangle Box;
         public float Angle;
         public int Order;
+        public bool LowConfidence;   // 融合不一致/可疑行，AI 识字只修这些
+        // 多行被聚成一段时，这里保留每一行原来的框：擦除只擦这些行，
+        // 不会把行间的徽章/头像/空白一起抹掉（Box 此时是排版用的整段区域）
+        public List<Rectangle> SourceBoxes;
     }
 
     internal static class Ocr
@@ -1931,6 +2221,118 @@ namespace QRSnap
             }
         }
 
+        // 版面强化：用 PP-OCR 做检测 + 逐块识字，再交给 LayoutBoost 做分栏/徽章/段落切分。
+        // 单独缓存一个检测器，避免把用户当前选的识字引擎（可能是高精）顶掉。
+        private static PpOcr _layoutPp;
+        private static string _layoutPpDir = string.Empty;
+
+        // 启动时后台预热版面检测器：第一次翻译不再等模型加载（约 1~2 秒）
+        public static void WarmLayout()
+        {
+            try
+            {
+                string tier = AppConfig.EnginePpTiny;
+                string dir = AppConfig.ModelTierDir(tier);
+                if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
+                if (!PpOcr.FolderReady(dir)) return;
+                lock (LocalLock)
+                {
+                    if (_layoutPp != null && _layoutPpDir == dir) return;
+                    try { if (_layoutPp != null) _layoutPp.Dispose(); } catch (Exception) { }
+                    _layoutPp = new PpOcr(dir, LocalName(tier));
+                    _layoutPpDir = dir;
+                }
+            }
+            catch (Exception) { }
+        }
+
+        public static List<OcrSegment> LayoutSegments(Bitmap bmp, out List<Rectangle> obstacles, out string log)        {
+            obstacles = null;
+            log = null;
+            if (bmp == null) return null;
+            string tier = AppConfig.EnginePpTiny;
+            string dir = AppConfig.ModelTierDir(tier);
+            if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
+            if (!PpOcr.FolderReady(dir)) { log = "PP-OCR 模型缺失，版面强化跳过"; return null; }
+
+            lock (LocalLock)
+            {
+                if (_layoutPp == null || _layoutPpDir != dir)
+                {
+                    try { if (_layoutPp != null) _layoutPp.Dispose(); } catch (Exception) { }
+                    _layoutPp = null;
+                    _layoutPp = new PpOcr(dir, LocalName(tier));
+                    _layoutPpDir = dir;
+                }
+            }
+            return LayoutBoost.Recognize(bmp, _layoutPp, out log, out obstacles);
+        }
+
+        // 融合：PP 出框/版面，微信出字。两边并行，翻译链路里 PP 本来就要跑，总时间基本不变。
+        public static List<OcrSegment> LayoutSegmentsFused(Bitmap bmp, out List<Rectangle> obstacles, out string log)
+        {
+            obstacles = null;
+            log = null;
+            if (bmp == null) return null;
+            if (!Probe().WeChatUsable)
+            {
+                log = "微信 OCR 不可用，融合跳过";
+                return LayoutSegments(bmp, out obstacles, out log);
+            }
+
+            List<OcrSegment> pp = null;
+            List<Rectangle> obs = null;
+            string plog = null;
+            List<OcrSegment> wx = new List<OcrSegment>();
+            Bitmap wbmp = (Bitmap)bmp.Clone();
+            System.Threading.Tasks.Task t2 = System.Threading.Tasks.Task.Run(delegate()
+            {
+                using (wbmp)
+                {
+                    string we, wd;
+                    long wms;
+                    Recognize(wbmp, out we, out wms, out wd, wx, "wechat");
+                }
+            });
+            // PP 必须在调用线程跑（后台线程上 GDI/版面链路会抛异常）；微信并行跑。
+            pp = LayoutSegments(bmp, out obs, out plog);
+            try { t2.Wait(); } catch (Exception ex2) { plog = (plog == null ? "" : plog + " | ") + "wx task " + (ex2.InnerException != null ? ex2.InnerException.Message : ex2.Message); }
+            obstacles = obs;
+            if (pp == null) { log = plog; return null; }
+
+            int changed = 0;
+            for (int i = 0; i < pp.Count; i++)
+            {
+                OcrSegment p = pp[i];
+                if (p.Box.Width < 4 || p.Box.Height < 4) continue;
+                int best = -1;
+                double bestRatio = 0;
+                for (int j = 0; j < wx.Count; j++)
+                {
+                    Rectangle inter = Rectangle.Intersect(p.Box, wx[j].Box);
+                    if (inter.Width <= 0 || inter.Height <= 0) continue;
+                    double ratio = inter.Width * (double)inter.Height
+                        / Math.Max(1.0, Math.Min(p.Box.Width * (double)p.Box.Height, wx[j].Box.Width * (double)wx[j].Box.Height));
+                    if (ratio > bestRatio) { bestRatio = ratio; best = j; }
+                }
+                if (best < 0 || bestRatio < 0.45) continue;
+                OcrSegment w = wx[best];
+                if (string.IsNullOrEmpty(w.Text)) continue;
+                // 微信框明显跨了多个 PP 框时不要整体替换
+                if (w.Box.Width > p.Box.Width * 1.45) continue;
+                if (w.Text.Length < (p.Text == null ? 0 : p.Text.Length) * 0.55) continue;
+                if (!string.Equals(w.Text, p.Text, StringComparison.Ordinal))
+                {
+                    p.Text = w.Text;
+                    p.LowConfidence = true;
+                    changed++;
+                }
+            }
+            log = "fusion pp=" + pp.Count + " wx=" + wx.Count + " changed=" + changed
+                + (plog == null ? "" : " | " + plog);
+            return pp;
+        }
+
         // 实际可用的首选引擎
         public static string EffectiveEngine()
         {
@@ -1957,7 +2359,7 @@ namespace QRSnap
         }
 
         // segs 非空时顺便把每行的位置填进去（原地显示译文要用）
-        public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail, List<OcrSegment> segs)
+        public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail, List<OcrSegment> segs, string forceEngine = null)
         {
             engine = SystemEngineName;
             ms = 0;
@@ -1972,7 +2374,7 @@ namespace QRSnap
                 png = Path.Combine(tmpDir, "ocr" + DateTime.Now.Ticks.ToString() + ".png");
                 bitmap.Save(png, ImageFormat.Png);
 
-                string want = AppConfig.NormalizeEngine(AppConfig.Engine);
+                string want = AppConfig.NormalizeEngine(string.IsNullOrEmpty(forceEngine) ? AppConfig.Engine : forceEngine);
                 if (AppConfig.IsLocalEngine(want))
                 {
                     PpOcr pp = LocalFor(want);
@@ -2012,7 +2414,8 @@ namespace QRSnap
                             engine = LocalName(want);
                             detail = AppConfig.ModelTierDir(want);
                             if (text == null) return null;
-                            return NormalizeSystemText(text);
+                            string fixedPp = AiTextFix.Polish(segs);
+                            return fixedPp ?? NormalizeSystemText(text);
                         }
                         catch (Exception exLocal)
                         {
@@ -2037,15 +2440,24 @@ namespace QRSnap
                         }
                         else
                         {
-                            string text = WxOcr.Recognize(png, 20000, out note);
+                            List<Rectangle> wxBoxes = new List<Rectangle>();
+                            string text = WxOcr.Recognize(png, 20000, out note, wxBoxes);
                             if (text != null)
                             {
                                 ms = sw.ElapsedMilliseconds;
                                 engine = "微信 OCR";
                                 detail = note;
                                 probe.WeChatVerified = true;
-                                if (segs != null) BuildSegmentsByDetect(segs, bitmap, text);
-                                return NormalizeWeChatText(text);
+                                string wxText = NormalizeWeChatText(text);
+                                if (segs != null)
+                                {
+                                    // 微信自己就给了每行的包围盒，直接拿来落遮罩；
+                                    // 只有拿不到坐标时才退回用 PP-OCR 检测框按序号均分。
+                                    if (!FillSegmentsFromWx(segs, text, wxBoxes))
+                                        BuildSegmentsByDetect(segs, bitmap, text);
+                                }
+                                if (segs != null) AiTextFix.PolishText(segs, ref wxText);
+                                return wxText;
                             }
                             detail = note + "，已改用 " + SystemEngineName;
                         }
@@ -2060,7 +2472,9 @@ namespace QRSnap
                 }
                 engine = SystemEngineName;
                 if (segs != null) BuildSegmentsByDetect(segs, bitmap, sys);
-                return NormalizeSystemText(sys);
+                string sysText = NormalizeSystemText(sys);
+                if (segs != null) AiTextFix.PolishText(segs, ref sysText);
+                return sysText;
             }
             catch (Exception ex)
             {
@@ -2097,6 +2511,39 @@ namespace QRSnap
         }
 
         // 微信 OCR / 系统 OCR 只给文字，没有坐标：借已经加载的 PP-OCR 检测框按行对齐
+        // 微信 OCR 的行自带包围盒（由词级坐标按行合并而来），直接建成 segs。
+        // 行数与框数对不上就返回 false，让调用方退回检测框均分。
+        private static bool FillSegmentsFromWx(List<OcrSegment> segs, string text, List<Rectangle> boxes)
+        {
+            if (boxes == null || boxes.Count == 0) return false;
+            string[] ls = (text ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+            List<string> okText = new List<string>();
+            List<Rectangle> okBox = new List<Rectangle>();
+            for (int i = 0; i < ls.Length; i++)
+            {
+                string t = ls[i].TrimEnd();
+                if (t.Length == 0) continue;
+                if (i >= boxes.Count) return false;
+                Rectangle b = boxes[i];
+                if (b.Width <= 0 || b.Height <= 0) return false;
+                okText.Add(t);
+                okBox.Add(b);
+            }
+            if (okText.Count == 0 || okText.Count != boxes.Count) return false;
+
+            segs.Clear();
+            for (int i = 0; i < okText.Count; i++)
+            {
+                OcrSegment s = new OcrSegment();
+                s.Text = okText[i];
+                s.Box = okBox[i];
+                s.Angle = 0f;
+                s.Order = i;
+                segs.Add(s);
+            }
+            return true;
+        }
+
         private static void BuildSegmentsByDetect(List<OcrSegment> segs, Bitmap bmp, string text)
         {
             if (segs == null || bmp == null) return;
@@ -3094,6 +3541,7 @@ namespace QRSnap
     // 全屏置顶悬浮提示：不在主界面里，而是浮在桌面右下角，不抢焦点、不进 Alt+Tab
     internal sealed class ToastForm : Form
     {
+        internal static ToastForm Current;   // 供设置里关掉提示时立刻收起
         private const int STATE_IDLE = 0;
         private const int STATE_BUSY = 1;
         private const int STATE_DONE = 2;
@@ -3102,23 +3550,30 @@ namespace QRSnap
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_EX_TRANSPARENT = 0x00000020;   // 提示条只用于看，不让它挡住鼠标点击
 
-        private const int PAD_X = 16;
-        private const int ICON_SIZE = 18;
-        private const int GAP = 10;
-        private const int BOX_H = 46;
+        private const int PAD_X = 18;
+        private const int ICON_SIZE = 20;
+        private const int GAP = 12;
+        private const int BOX_H = 54;
+        private const int SUB_H = 18;        // 有明细行时额外的高度（96 dpi 逻辑值）
 
         private const int TICK_MS = 30;      // 30ms 一帧，比原来的 60ms 顺滑
-        private const int SLIDE_PX = 14;     // 进场时从下方 14px 滑上来
+        private const int SLIDE_PX = 10;     // 进场时从下方 10px 滑上来
+        private const float TOAST_OPACITY = 0.85f;   // 整体再透一点
 
         private readonly System.Windows.Forms.Timer _timer;
         private float _angle;
         private int _state;
         private string _text = string.Empty;
+        private int _textW;                  // 文字区最大宽度，绘制时用来居中
+        private string _sub;                 // 第二行明细（AI 过程 / 战果），null 表示只有一行
+        private Font _title;                 // 主行字体，稍粗一点
+        private Font _small;                 // 明细行字体，缓存起来别每帧 new
         private bool _ok = true;
         private int _holdMs;
         private int _anim;                   // 0 静止 / 1 进场 / 2 出场
         private float _animT;
         private int _restTop;                // 静止时的最终 Top
+        private Bitmap _blurBg;              // 截屏后做的高斯/盒式模糊背景
 
         // 布局常量都是按 96 dpi 写的，而字体会按系统缩放渲染（150% 下 9.5pt 会画成 1.5 倍高）。
         // 不换算的话，框子还是 96 dpi 的尺寸，字却变大了，尾巴就被裁掉。统一按 DPI 比例缩放。
@@ -3137,12 +3592,14 @@ namespace QRSnap
             StartPosition = FormStartPosition.Manual;
             BackColor = Color.FromArgb(30, 36, 48);
             DoubleBuffered = true;
-            Opacity = 0.95;
+            Opacity = TOAST_OPACITY;
             Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            _title = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point);
 
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = TICK_MS;
             _timer.Tick += OnTick;
+            Current = this;
         }
 
         protected override bool ShowWithoutActivation
@@ -3162,19 +3619,39 @@ namespace QRSnap
 
         public void ShowBusy(string text)
         {
-            Present(text, STATE_BUSY, true, 0);
+            Present(text, null, STATE_BUSY, true, 0);
+        }
+
+        // 带第二行明细：主行说正在干什么，明细行说 AI 这一步在做什么
+        public void ShowBusy(string text, string sub)
+        {
+            Present(text, sub, STATE_BUSY, true, 0);
         }
 
         public void ShowDone(string text, bool ok)
         {
-            Present(text, STATE_DONE, ok, 1700);
+            Present(text, null, STATE_DONE, ok, 1700);
+        }
+
+        public void ShowDone(string text, string sub, bool ok)
+        {
+            Present(text, sub, STATE_DONE, ok, 1700);
+        }
+
+        private Font SmallFont()
+        {
+            if (_small == null)
+                _small = new Font(_title.FontFamily, Math.Max(7.5f, _title.SizeInPoints - 1.5f),
+                    FontStyle.Regular, GraphicsUnit.Point);
+            return _small;
         }
 
         // 统一入口：第一次出现走「淡入 + 上滑」；已经在屏幕上（比如 识别中 → 识别完成）就地换内容，不重播动画
-        private void Present(string text, int state, bool ok, int holdMs)
+        private void Present(string text, string sub, int state, bool ok, int holdMs)
         {
+            if (!AppConfig.ShowToast) { HideToast(); return; }
             bool wasVisible = Visible;
-            SetText(text);
+            SetText(text, sub);
             _state = state;
             _ok = ok;
             _holdMs = holdMs;
@@ -3183,6 +3660,7 @@ namespace QRSnap
 
             if (!wasVisible)
             {
+                CaptureBackdrop();
                 Opacity = 0.0;
                 Top = _restTop + SLIDE_PX;
                 Show();
@@ -3191,7 +3669,7 @@ namespace QRSnap
             }
             else
             {
-                Opacity = 0.95;
+                Opacity = TOAST_OPACITY;
                 Top = _restTop;
                 _anim = 0;
                 _animT = 0f;
@@ -3202,6 +3680,16 @@ namespace QRSnap
             Invalidate();
         }
 
+        // 把自己画进 PNG：自检时不受别的窗口遮挡影响
+        public void SaveShot(string path)
+        {
+            using (Bitmap b = new Bitmap(Width, Height))
+            {
+                DrawToBitmap(b, new Rectangle(0, 0, Width, Height));
+                b.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
+
         public void HideToast()
         {
             _state = STATE_IDLE;
@@ -3209,13 +3697,15 @@ namespace QRSnap
             _animT = 0f;
             _holdMs = 0;
             _timer.Stop();
-            Opacity = 0.95;                  // 复位，下次 Present 再从 0 淡入
+            Opacity = TOAST_OPACITY;                  // 复位，下次 Present 再从 0 淡入
+            if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
             if (Visible) Hide();
         }
 
-        private void SetText(string text)
+        private void SetText(string text, string sub)
         {
             _text = text;
+            _sub = string.IsNullOrEmpty(sub) ? null : sub;
             // 以前用 TextRenderer（GDI）量宽度、用 Graphics.DrawString（GDI+）画字，
             // 两种度量对同一条字符串给出不同宽度，GDI+ 更宽，尾巴就被裁掉了
             // （“正在识字…  Windows 内置 OCR” 的 OCR 看不到）。这里统一按 GDI+ 量。
@@ -3225,17 +3715,27 @@ namespace QRSnap
                 if (g != null)
                 {
                     _scale = g.DpiX / 96f;
-                    textW = (int)Math.Ceiling(g.MeasureString(text, Font).Width);
+                    textW = (int)Math.Ceiling(g.MeasureString(text, _title).Width);
+                    if (_sub != null)
+                    {
+                        int sw = (int)Math.Ceiling(g.MeasureString(_sub, SmallFont()).Width);
+                        if (sw > textW) textW = sw;
+                    }
                 }
                 else
                 {
                     _scale = 1f;
-                    textW = TextRenderer.MeasureText(text, Font).Width;
+                    textW = TextRenderer.MeasureText(text, _title).Width;
                 }
             }
-            int w = S(PAD_X) * 2 + S(ICON_SIZE) + S(GAP) + textW + S(8);
-            if (w < S(150)) w = S(150);
-            Size = new Size(w, S(BOX_H));
+            _textW = textW;
+            int w = S(PAD_X) * 2 + S(28) + S(GAP) + textW;
+            if (w < S(170)) w = S(170);
+            int padY = S(15);
+            int contentH = _title.Height + (_sub != null ? S(3) + SmallFont().Height : 0);
+            int h = contentH + padY * 2;
+            if (h < S(52)) h = S(52);
+            Size = new Size(w, h);
         }
 
         // 居中靠下：在鼠标所在那块屏上水平居中，离工作区底边留一点距离
@@ -3246,6 +3746,78 @@ namespace QRSnap
             if (Left < wa.Left + S(8)) Left = wa.Left + S(8);
             _restTop = wa.Bottom - Height - S(56);
             Top = _restTop;
+        }
+
+        private void CaptureBackdrop()
+        {
+            try
+            {
+                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
+                Rectangle r = new Rectangle(Left, Top, Width, Height);
+                if (r.Width <= 0 || r.Height <= 0) return;
+
+                using (Bitmap full = new Bitmap(r.Width, r.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(full))
+                        g.CopyFromScreen(r.Left, r.Top, 0, 0, r.Size);
+
+                    // 先缩小再模糊，效果接近高斯，速度也快
+                    int sw = Math.Max(1, r.Width / 4);
+                    int sh = Math.Max(1, r.Height / 4);
+                    Bitmap small = new Bitmap(sw, sh);
+                    using (Graphics g = Graphics.FromImage(small))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                        g.DrawImage(full, new Rectangle(0, 0, sw, sh));
+                    }
+                    BoxBlur(small, 2, 3);
+                    _blurBg = small;
+                }
+            }
+            catch (Exception)
+            {
+                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
+            }
+        }
+
+        // 盒式模糊跑 3 遍，足够接近高斯；只处理缩小后的小图
+        private static void BoxBlur(Bitmap bmp, int radius, int passes)
+        {
+            int w = bmp.Width, h = bmp.Height;
+            if (w < 2 || h < 2) return;
+            Color[] cur = new Color[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    cur[y * w + x] = bmp.GetPixel(x, y);
+
+            Color[] tmp = new Color[w * h];
+            for (int p = 0; p < passes; p++)
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int r = 0, g = 0, b = 0, n = 0;
+                        for (int dy = -radius; dy <= radius; dy++)
+                        {
+                            int yy = y + dy;
+                            if (yy < 0 || yy >= h) continue;
+                            for (int dx = -radius; dx <= radius; dx++)
+                            {
+                                int xx = x + dx;
+                                if (xx < 0 || xx >= w) continue;
+                                Color c = cur[yy * w + xx];
+                                r += c.R; g += c.G; b += c.B; n++;
+                            }
+                        }
+                        tmp[y * w + x] = Color.FromArgb(255, r / n, g / n, b / n);
+                    }
+                }
+                Color[] swap = cur; cur = tmp; tmp = swap;
+            }
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    bmp.SetPixel(x, y, cur[y * w + x]);
         }
 
         private static float EaseOut(float t)
@@ -3261,14 +3833,14 @@ namespace QRSnap
                 _animT += 0.12f;
                 if (_animT >= 1f) { _animT = 1f; _anim = 0; }
                 float t = EaseOut(_animT);
-                Opacity = 0.95f * t;
+                Opacity = TOAST_OPACITY * t;
                 Top = _restTop + (int)(S(SLIDE_PX) * (1f - t));
             }
             else if (_anim == 2)
             {
                 _animT += 0.10f;
                 if (_animT >= 1f) { HideToast(); return; }
-                Opacity = 0.95f * (1f - _animT);
+                Opacity = TOAST_OPACITY * (1f - _animT);
                 Top = _restTop + (int)(S(8) * _animT);
             }
 
@@ -3289,7 +3861,7 @@ namespace QRSnap
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            int r = S(10);
+            int r = S(18);
             using (GraphicsPath path = Rounded(0, 0, Width, Height, r))
             {
                 Region = new Region(path);
@@ -3314,35 +3886,56 @@ namespace QRSnap
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-            // 竖向渐变 + 一圈细内描边，比纯色块更有质感
-            using (LinearGradientBrush bg = new LinearGradientBrush(
-                new Rectangle(0, 0, Width, Height + 1),
-                Color.FromArgb(40, 46, 60), Color.FromArgb(20, 24, 32), 90f))
+            Color accent = _state == STATE_BUSY ? Color.FromArgb(96, 165, 250)
+                : (_ok ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113));
+
+            // 圆角裁剪：背景模糊 + 一层轻微黑遮罩，不加边框
+            using (GraphicsPath clip = Rounded(0, 0, Width, Height, S(18)))
             {
-                g.FillRectangle(bg, ClientRectangle);
-            }
-            using (GraphicsPath edge = Rounded(0, 0, Width - 1, Height - 1, S(9)))
-            using (Pen pen = new Pen(Color.FromArgb(72, 86, 106), 1F))
-            {
-                g.DrawPath(pen, edge);
+                GraphicsState cs = g.Save();
+                g.SetClip(clip);
+                if (_blurBg != null)
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(_blurBg, new Rectangle(0, 0, Width, Height));
+                }
+                else
+                {
+                    using (SolidBrush fallback = new SolidBrush(Color.FromArgb(24, 28, 36)))
+                        g.FillRectangle(fallback, ClientRectangle);
+                }
+                using (SolidBrush shade = new SolidBrush(Color.FromArgb(62, 5, 8, 12)))
+                    g.FillRectangle(shade, ClientRectangle);
+                g.Restore(cs);
             }
 
+            // 内容整体水平居中：徽章 + 文字块；文字在自己的块里再水平居中
+            int badge = S(28);
             int box = S(ICON_SIZE);
-            int cy = (Height - box) / 2;
-            int cx = S(PAD_X);
+            int gapY = S(3);
+            int subH = _sub != null ? SmallFont().Height : 0;
+            int contentH = _title.Height + (_sub != null ? gapY + subH : 0);
+            int contentW = badge + S(GAP) + _textW;
+            int bx = (Width - contentW) / 2;
+            if (bx < S(8)) bx = S(8);
+            int by = (Height - badge) / 2;
+            // 图标直接画，不加圆底/描边
+
+            int ix = bx + (badge - box) / 2;
+            int iy = by + (badge - box) / 2;
 
             // 图标按 96 dpi 的逻辑尺寸画，再整体缩放到当前 DPI，免得 150% 缩放时图标歪掉
             GraphicsState gs = g.Save();
-            g.TranslateTransform((float)cx, (float)cy);
+            g.TranslateTransform((float)ix, (float)iy);
             g.ScaleTransform(_scale, _scale);
 
             if (_state == STATE_BUSY)
             {
-                using (Pen track = new Pen(Color.FromArgb(74, 82, 100), 2F))
+                using (Pen track = new Pen(Color.FromArgb(64, 78, 96), 2F))
                 {
                     g.DrawEllipse(track, 0f, 0f, ICON_SIZE - 2, ICON_SIZE - 2);
                 }
-                using (Pen arc = new Pen(Color.FromArgb(96, 165, 250), 2F))
+                using (Pen arc = new Pen(accent, 2.2F))
                 {
                     arc.StartCap = LineCap.Round;
                     arc.EndCap = LineCap.Round;
@@ -3351,8 +3944,7 @@ namespace QRSnap
             }
             else
             {
-                Color c = _ok ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113);
-                using (Pen pen = new Pen(c, 2.2F))
+                using (Pen pen = new Pen(accent, 2.2F))
                 {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
@@ -3382,9 +3974,26 @@ namespace QRSnap
             }
             g.Restore(gs);
 
-            using (SolidBrush fg = new SolidBrush(Color.FromArgb(240, 243, 248)))
+            int tx = bx + badge + S(GAP);
+            int ty = (Height - contentH) / 2;
+            using (StringFormat sf = new StringFormat())
             {
-                g.DrawString(_text, Font, fg, (float)(cx + box + S(GAP)), (float)((Height - Font.Height) / 2));
+                sf.Alignment = StringAlignment.Center;
+                sf.LineAlignment = StringAlignment.Near;
+                sf.FormatFlags = StringFormatFlags.NoWrap;
+                using (SolidBrush fg = new SolidBrush(Color.FromArgb(244, 247, 252)))
+                {
+                    g.DrawString(_text, _title, fg,
+                        new RectangleF(tx, ty, _textW, _title.Height + 1), sf);
+                }
+                if (_sub != null)
+                {
+                    using (SolidBrush dim = new SolidBrush(Color.FromArgb(158, 169, 188)))
+                    {
+                        g.DrawString(_sub, SmallFont(), dim,
+                            new RectangleF(tx, ty + _title.Height + gapY, _textW, subH + 1), sf);
+                    }
+                }
             }
         }
 
@@ -3395,6 +4004,10 @@ namespace QRSnap
                 _timer.Stop();
                 _timer.Dispose();
                 Font.Dispose();
+                if (_title != null) { _title.Dispose(); _title = null; }
+                if (_small != null) { _small.Dispose(); _small = null; }
+                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
+                if (Current == this) Current = null;
             }
             base.Dispose(disposing);
         }
@@ -5408,9 +6021,12 @@ namespace QRSnap
             // 正式界面：JadeView 2.0 + Web UI（新增 --classic 可退回旧的 WinForms 界面）
             bool legacyUi = args.Length >= 1 && args[0] == "--classic";
             bool selfTestArgs = args.Length >= 1 && (args[0] == "--selftest" || args[0] == "--ocrselftest"
-                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate" || args[0] == "--import");
+                || args[0] == "--probe" || args[0] == "--toasttest" || args[0] == "--dumpstate" || args[0] == "--import"
+                || args[0] == "--aiocrselftest" || args[0] == "--aimttest" || args[0] == "--repltest"
+                || args[0] == "--layouttest" || args[0] == "--segtest" || args[0] == "--cacheclear");
             if (!legacyUi && !selfTestArgs)
             {
+                if (!RuntimeCheck.Verify()) return;
                 JadeHost.Run();
                 return;
             }
@@ -5429,6 +6045,45 @@ namespace QRSnap
                 return;
             }
 
+            // AI 识字强化自检：QRSnap.exe --aiocrselftest 图片路径 [结果输出路径]
+            // 同一张图先关 AI 跑一遍拿原文，再开 AI 跑一遍，输出逐行对照
+            if (args.Length >= 2 && args[0] == "--aiocrselftest")
+            {
+                AiOcrSelfTest(args[1], args.Length >= 3 ? args[2] : null);
+                return;
+            }
+
+            // AI 翻译接管 / 遮罩分组自检：QRSnap.exe --aimttest 图片路径 [结果输出路径]
+            if (args.Length >= 2 && args[0] == "--aimttest")
+            {
+                AiMtSelfTest(args[1], args.Length >= 3 ? args[2] : null);
+                return;
+            }
+
+            // 字号 / 遮罩自检：QRSnap.exe --repltest 图片路径 输出png
+            if (args.Length >= 3 && args[0] == "--repltest")
+            {
+                ReplaceSelfTest(args[1], args[2]);
+                return;
+            }
+
+            // 版面感知链路自检：QRSnap.exe --layouttest 图片 输出png [ai|local] [ppmed|pptiny]
+            if (args.Length >= 3 && args[0] == "--layouttest")
+            {
+                LayoutSelfTest(args[1], args[2],
+                    args.Length >= 4 ? args[3] : "ai",
+                    args.Length >= 5 ? args[4] : "ppmed",
+                    args.Length >= 6 ? args[5] : null);
+                return;
+            }
+
+            // 识别框自检：QRSnap.exe --segtest 图片 输出txt [wechat|pptiny|ppmed|system]
+            if (args.Length >= 3 && args[0] == "--segtest")
+            {
+                SegSelfTest(args[1], args[2], args.Length >= 4 ? args[3] : "wechat");
+                return;
+            }
+
             // 导入模型包自检：QRSnap.exe --import 包路径 [结果输出路径]
             if (args.Length >= 2 && args[0] == "--import")
             {
@@ -5439,6 +6094,20 @@ namespace QRSnap
                 {
                     try { File.WriteAllText(args[2], res, new UTF8Encoding(false)); } catch (Exception) { }
                 }
+                return;
+            }
+
+            // 清理缓存（截图缓存 + 本地译文缓存）：QRSnap.exe --cacheclear
+            if (args.Length >= 1 && args[0] == "--cacheclear")
+            {
+                try
+                {
+                    AppConfig.Load();
+                    ShotCache.Clear();
+                    try { MtRunner.Router.ClearCache(); } catch (Exception) { }
+                    AiBoost.ClearCache();
+                }
+                catch (Exception) { }
                 return;
             }
 
@@ -5492,9 +6161,12 @@ namespace QRSnap
                 seq.Tick += delegate
                 {
                     step++;
-                    if (step == 1) toast.ShowBusy("识别中…  文字（微信 OCR）");
-                    if (step == 6) toast.ShowDone("识别完成", true);
-                    if (step == 10)
+                    if (step == 1) toast.ShowBusy("正在识字…  微信 OCR", "AI 识字强化已开：认错的符号交给大模型修，每张图多几秒");
+                    if (step == 5) toast.ShowBusy("正在翻译…", "AI 接管：整段交给大模型翻，不用本地模型");
+                    if (step == 8) toast.SaveShot(@"E:\下载\豆包\_mt\toast-busy.png");
+                    if (step == 9) toast.ShowDone("翻译完成", "AI 修字 2/12 行 · AI 分段 2 段 · AI 接管 19 行 3.9s", true);
+                    if (step == 12) toast.SaveShot(@"E:\下载\豆包\_mt\toast-done.png");
+                    if (step == 16)
                     {
                         seq.Stop();
                         toast.Close();
@@ -5595,8 +6267,391 @@ namespace QRSnap
             }
         }
 
-        private static void OcrSelfTest(string imagePath, string outputPath, string mode)
+        // AI 识字强化自检：同一张图，先关 AI 拿原文，再开 AI 拿校正版，输出逐行对照
+        private static void AiOcrSelfTest(string imagePath, string outputPath)
         {
+            if (outputPath == null)
+                outputPath = Path.Combine(Path.GetDirectoryName(imagePath), "aiocrselftest-result.txt");
+            string report;
+            try
+            {
+                AppConfig.Load();
+                bool want = AppConfig.AiOcr;
+                bool ready = JadeHost.AiVerifySync(12000);
+                Bitmap bmp = LoadBitmap(imagePath);
+
+                List<OcrSegment> raw = new List<OcrSegment>();
+                AppConfig.AiOcr = false;
+                string e1; long ms1; string d1;
+                string t1 = Ocr.Recognize(bmp, out e1, out ms1, out d1, raw);
+
+                List<OcrSegment> fin = new List<OcrSegment>();
+                AppConfig.AiOcr = true;
+                string e2; long ms2; string d2;
+                // ms2 只是引擎自己报的识别耗时，AI 纠错在 Recognize 内部追加，
+                // 所以这里单独掐表，报告里给出的才是"这一轮真实花了多久"
+                System.Diagnostics.Stopwatch swAi = System.Diagnostics.Stopwatch.StartNew();
+                string t2 = Ocr.Recognize(bmp, out e2, out ms2, out d2, fin);
+                swAi.Stop();
+
+                AppConfig.AiOcr = want;
+                bmp.Dispose();
+
+                StringBuilder sb = new StringBuilder();
+                sb.Append("engine=").Append(e1).Append("\r\n");
+                sb.Append("aiReady=").Append(ready ? "1" : "0").Append("\r\n");
+                sb.Append("aiOcrSwitch=").Append(want ? "1" : "0").Append("\r\n");
+                sb.Append("rawMs=").Append(ms1).Append(" aiMs=").Append(swAi.ElapsedMilliseconds)
+                    .Append(" engineMs=").Append(ms2).Append("\r\n");
+                sb.Append("linesRaw=").Append(raw.Count).Append(" linesAi=").Append(fin.Count).Append("\r\n");
+
+                int n = Math.Min(raw.Count, fin.Count);
+                int diff = 0;
+                sb.Append("DIFF_BEGIN\r\n");
+                for (int i = 0; i < n; i++)
+                {
+                    string a = raw[i].Text ?? "";
+                    string b = fin[i].Text ?? "";
+                    if (!string.Equals(a, b))
+                    {
+                        diff++;
+                        sb.Append("[").Append(i).Append("] - ").Append(a).Append("\r\n     + ").Append(b).Append("\r\n");
+                    }
+                }
+                sb.Append("diff=").Append(diff).Append("\r\nDIFF_END\r\n");
+                // 遮罩落位是否跟文本行一致，就看这段：每行文本配它自己的包围盒
+                sb.Append("SEG_BEGIN\r\n");
+                for (int i = 0; i < fin.Count; i++)
+                {
+                    Rectangle b = fin[i].Box;
+                    sb.Append(i).Append(" @").Append(b.X).Append(",").Append(b.Y)
+                      .Append(" ").Append(b.Width).Append("x").Append(b.Height)
+                      .Append(" | ").Append(fin[i].Text ?? "").Append("\r\n");
+                }
+                sb.Append("SEG_END\r\n");
+                sb.Append("RAW_BEGIN\r\n").Append(t1 ?? "(null)").Append("\r\nRAW_END\r\n");
+                sb.Append("AI_BEGIN\r\n").Append(t2 ?? "(null)").Append("\r\nAI_END\r\n");
+                report = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                report = "ERROR: " + ex.ToString();
+            }
+            try { File.WriteAllText(outputPath, report, new UTF8Encoding(false)); } catch (Exception) { }
+        }
+
+        // 自检：OCR 一遍 → 遮罩分组 → AI 接管翻译，把两件事的结果都摊开看
+        private static void AiMtSelfTest(string imagePath, string outputPath)
+        {
+            if (outputPath == null)
+                outputPath = Path.Combine(Path.GetDirectoryName(imagePath), "aimttest-result.txt");
+            string report;
+            try
+            {
+                AppConfig.Load();
+                bool ready = JadeHost.AiVerifySync(12000);
+                Bitmap bmp = LoadBitmap(imagePath);
+                List<OcrSegment> segs = new List<OcrSegment>();
+                string eng; long ms; string det;
+                string text = Ocr.Recognize(bmp, out eng, out ms, out det, segs);
+                bmp.Dispose();
+
+                StringBuilder sb = new StringBuilder();
+                sb.Append("engine=").Append(eng).Append("\r\n");
+                sb.Append("aiReady=").Append(ready ? "1" : "0").Append("\r\n");
+                sb.Append("model=").Append(AppConfig.AiModel).Append(" @ ").Append(AppConfig.AiBase).Append("\r\n");
+                sb.Append("lines=").Append(segs.Count).Append("\r\n");
+
+                StringBuilder all = new StringBuilder();
+                for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
+                string src = LangDetect.Detect(all.ToString());
+                sb.Append("src=").Append(src).Append("\r\n");
+
+                int t0 = Environment.TickCount;
+                List<List<int>> groups = AiBoost.PlanMask(segs);
+                sb.Append("maskMs=").Append(Environment.TickCount - t0).Append("\r\n");
+                sb.Append("GROUP_BEGIN\r\n");
+                if (groups == null) sb.Append("(null，没介入或校验没过)\r\n");
+                else
+                    for (int g = 0; g < groups.Count; g++)
+                    {
+                        sb.Append('[').Append(g).Append("] ");
+                        for (int k = 0; k < groups[g].Count; k++) sb.Append(groups[g][k]).Append(' ');
+                        sb.Append("\r\n");
+                    }
+                sb.Append("GROUP_END\r\n");
+
+                t0 = Environment.TickCount;
+                string err;
+                Dictionary<int, string> trs = AiBoost.TranslateAll(segs, src, out err);
+                sb.Append("mtMs=").Append(Environment.TickCount - t0).Append("\r\n");
+                sb.Append("TR_BEGIN\r\n");
+                if (trs == null) sb.Append("FAIL: ").Append(err).Append("\r\n");
+                else
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        sb.Append('[').Append(i).Append("] ").Append(segs[i].Text ?? "").Append("\r\n     → ")
+                          .Append(trs.ContainsKey(i) ? trs[i] : "(缺)").Append("\r\n");
+                    }
+                sb.Append("TR_END\r\n");
+                report = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                report = "ERROR: " + ex.ToString();
+            }
+            try { File.WriteAllText(outputPath, report, new UTF8Encoding(false)); } catch (Exception) { }
+        }
+
+        // 字号/遮罩自检：把「原文」当译文原样回填一遍，字号贴不贴原文一看就知道。
+        //   QRSnap.exe --repltest <图> <输出.png>
+        private static void ReplaceSelfTest(string imagePath, string outputPng)
+        {
+            string report;
+            try
+            {
+                AppConfig.Load();
+                Bitmap bmp = LoadBitmap(imagePath);
+                List<OcrSegment> segs = new List<OcrSegment>();
+                string eng; long ms; string det;
+                Ocr.Recognize(bmp, out eng, out ms, out det, segs);
+
+                List<MtRealistic.Block> blocks = new List<MtRealistic.Block>();
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    MtRealistic.Block b = new MtRealistic.Block();
+                    b.Box = segs[i].Box;
+                    b.Text = segs[i].Text ?? "";
+                    b.Group = -1;
+                    blocks.Add(b);
+                }
+
+                MtRealistic.Stats st;
+                Bitmap outImg = MtRealistic.Render(bmp, blocks, out st);
+                if (outImg != null) outImg.Save(outputPng, System.Drawing.Imaging.ImageFormat.Png);
+                bmp.Dispose();
+
+                StringBuilder sb = new StringBuilder();
+                sb.Append("engine=").Append(eng).Append("\r\n");
+                sb.Append("lines=").Append(segs.Count).Append("\r\n");
+                sb.Append("hard=").Append(st.Hard).Append(" wrap=").Append(st.Wrapped)
+                  .Append(" skip=").Append(st.Skipped).Append("\r\n");
+                sb.Append("BLOCK_BEGIN\r\n");
+                for (int i = 0; i < blocks.Count; i++)
+                {
+                    sb.Append(i).Append(" h=").Append(blocks[i].Box.Height)
+                      .Append(" cap=").Append(blocks[i].SizeCap.ToString("0.0"))
+                      .Append(" ratio=").Append((blocks[i].SizeCap / Math.Max(1, blocks[i].Box.Height)).ToString("0.00"))
+                      .Append(" | ").Append(blocks[i].Text).Append("\r\n");
+                }
+                sb.Append("BLOCK_END\r\n");
+                report = sb.ToString();
+            }
+            catch (Exception ex) { report = "ERROR: " + ex.ToString(); }
+            try
+            {
+                File.WriteAllText(Path.ChangeExtension(outputPng, ".txt"), report, new UTF8Encoding(false));
+            }
+            catch (Exception) { }
+        }
+
+        // 版面感知链路自检：分栏 OCR → 词表/日期本地化 → AI 翻译 → 拟真回填
+        //   QRSnap.exe --layouttest <图> <输出.png> [ai|local] [ppmed|pptiny]
+        private static void LayoutSelfTest(string imagePath, string outputPng, string mode, string tier, string profileOverride)
+        {
+            string report;
+            try
+            {
+                AppConfig.Load();
+                bool aiReady = JadeHost.AiVerifySync(12000);
+                string ppTier = string.Equals(tier, "pptiny", StringComparison.OrdinalIgnoreCase)
+                    ? AppConfig.EnginePpTiny : AppConfig.EnginePpMedium;
+                PpOcr pp = Ocr.LocalFor(ppTier);
+                if (pp == null) { File.WriteAllText(Path.ChangeExtension(outputPng, ".txt"), "ERROR: PP-OCR 模型缺失"); return; }
+
+                Bitmap bmp = LoadBitmap(imagePath);
+                Stopwatch sw = Stopwatch.StartNew();
+                string log;
+                List<Rectangle> obstacles;
+                List<OcrSegment> segs = LayoutBoost.Recognize(bmp, pp, out log, out obstacles);
+                long ocrMs = sw.ElapsedMilliseconds;
+
+                StringBuilder all = new StringBuilder();
+                for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
+                string src = LangDetect.Detect(all.ToString());
+
+                string err = null;
+                Dictionary<int, string> trs = null;
+                long mtMs = 0;
+                string usedProfile = profileOverride;
+                if (string.Equals(mode, "ai", StringComparison.OrdinalIgnoreCase) && aiReady)
+                {
+                    sw.Restart();
+                    trs = AiBoost.TranslateAll(segs, src, out err);
+                    mtMs = sw.ElapsedMilliseconds;
+                }
+                else if (string.Equals(mode, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 纯离线：本地 MT（efficiency = Opus-MT 小模型，standard = GGUF 大模型）
+                    string prof = AppConfig.NormalizeMtProfile(
+                        string.IsNullOrEmpty(profileOverride) ? AppConfig.MtProfile : profileOverride);
+                    usedProfile = prof;
+                    sw.Restart();
+                    try
+                    {
+                        MtRouter router = MtRunner.Router;
+                        string[] plan = router.PlanFor(src, "zh", AppConfig.MtPair, prof);
+                        if (plan.Length == 0)
+                        {
+                            List<string> miss = router.MissingKit();
+                            err = miss.Count > 0 ? "缺少 " + string.Join("、", miss.ToArray()) : "没有可用的 " + src + "→zh 模型";
+                        }
+                        else
+                        {
+                            trs = new Dictionary<int, string>();
+                            List<int> need = new List<int>();
+                            for (int i = 0; i < segs.Count; i++)
+                            {
+                                string text = segs[i].Text ?? "";
+                                string pre = LayoutBoost.PreTranslate(text);
+                                if (pre != null) { trs[i] = pre; continue; }
+                                if (text.Trim().Length == 0) continue;
+                                need.Add(i);
+                            }
+                            if (plan[0] == "gguf")
+                            {
+                                // 大模型：一次送多行，少几十次往返；对不上行数就回退逐行
+                                int k = 0;
+                                while (k < need.Count)
+                                {
+                                    List<int> ids = new List<int>();
+                                    List<string> texts = new List<string>();
+                                    int chars = 0;
+                                    while (k < need.Count && ids.Count < 8 && chars < 650)
+                                    {
+                                        string t = segs[need[k]].Text ?? "";
+                                        ids.Add(need[k]);
+                                        texts.Add(t);
+                                        chars += t.Length;
+                                        k++;
+                                    }
+                                    List<string> got = null;
+                                    try { got = LlamaMt.TranslateBatch(plan[1], texts, "zh"); }
+                                    catch (Exception) { got = null; }
+                                    if (got != null && got.Count == ids.Count)
+                                    {
+                                        for (int i = 0; i < ids.Count; i++) trs[ids[i]] = got[i];
+                                    }
+                                    else
+                                    {
+                                        for (int i = 0; i < ids.Count; i++)
+                                        {
+                                            string route;
+                                            string tr = router.Translate(texts[i], src, "zh", AppConfig.MtPair, prof, out route);
+                                            if (!string.IsNullOrEmpty(tr)) trs[ids[i]] = tr;
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                for (int i = 0; i < need.Count; i++)
+                                {
+                                    string route;
+                                    string tr = router.Translate(segs[need[i]].Text, src, "zh", AppConfig.MtPair, prof, out route);
+                                    if (!string.IsNullOrEmpty(tr)) trs[need[i]] = tr;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception exLoc) { err = exLoc.Message; }
+                    mtMs = sw.ElapsedMilliseconds;
+                }
+
+                List<MtRealistic.Block> blocks = new List<MtRealistic.Block>();
+                StringBuilder sb = new StringBuilder();
+                sb.Append("engine=").Append(pp.Label).Append("\r\n");
+                sb.Append("aiReady=").Append(aiReady ? "1" : "0").Append("\r\n");
+                sb.Append("src=").Append(src).Append("\r\n");
+                sb.Append("ocrMs=").Append(ocrMs).Append(" mtMs=").Append(mtMs).Append("\r\n");
+                sb.Append("lines=").Append(segs.Count).Append("\r\n");
+                if (err != null) sb.Append("mtErr=").Append(err).Append("\r\n");
+                sb.Append("GUTTER_BEGIN\r\n").Append(log).Append("GUTTER_END\r\n");
+                sb.Append("TR_BEGIN\r\n");
+
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    string tr = trs != null && trs.ContainsKey(i) ? trs[i] : null;
+                    string pre = LayoutBoost.PreTranslate(segs[i].Text);
+                    if (pre != null) tr = pre;
+                    if (tr != null) tr = LayoutBoost.PostFix(tr);
+                    if (string.IsNullOrEmpty(tr)) tr = segs[i].Text;
+
+                    sb.Append(i).Append(" @").Append(segs[i].Box.X).Append(',').Append(segs[i].Box.Y)
+                      .Append(' ').Append(segs[i].Box.Width).Append('x').Append(segs[i].Box.Height)
+                      .Append(" | ").Append(segs[i].Text).Append("\r\n     -> ").Append(tr).Append("\r\n");
+
+                    MtRealistic.Block b = new MtRealistic.Block();
+                    b.Box = segs[i].Box;
+                    b.Text = tr;
+                    b.Angle = segs[i].Angle;
+                    b.Group = -1;
+                    b.SourceBoxes = segs[i].SourceBoxes;
+                    b.PreGrouped = true;
+                    b.Obstacles = obstacles;
+                    blocks.Add(b);
+                }
+                sb.Append("TR_END\r\n");
+
+                MtRealistic.Stats st;
+                Bitmap outImg = MtRealistic.Render(bmp, blocks, out st);
+                if (outImg != null) outImg.Save(outputPng, System.Drawing.Imaging.ImageFormat.Png);
+                sb.Append("hard=").Append(st.Hard).Append(" wrap=").Append(st.Wrapped).Append(" skip=").Append(st.Skipped).Append("\r\n");
+                bmp.Dispose();
+                report = sb.ToString();
+            }
+            catch (Exception ex) { report = "ERROR: " + ex.ToString(); }
+            try { File.WriteAllText(Path.ChangeExtension(outputPng, ".txt"), report, new UTF8Encoding(false)); } catch (Exception) { }
+        }
+
+        // 识别框自检：把「文字 + 每行框」原样摊开，用来分别调微信 / PP-OCR 两种引擎
+        private static void SegSelfTest(string imagePath, string outputPath, string mode)
+        {
+            string report;
+            try
+            {
+                AppConfig.Load();
+                if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
+                else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
+                else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
+                else if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
+
+                Bitmap bmp = LoadBitmap(imagePath);
+                List<OcrSegment> segs = new List<OcrSegment>();
+                string eng; long ms; string det;
+                string text = Ocr.Recognize(bmp, out eng, out ms, out det, segs);
+                bmp.Dispose();
+
+                StringBuilder sb = new StringBuilder();
+                sb.Append("engine=").Append(eng).Append("\r\n");
+                sb.Append("ms=").Append(ms).Append("\r\n");
+                sb.Append("lines=").Append(segs.Count).Append("\r\n");
+                sb.Append("SEG_BEGIN\r\n");
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    Rectangle b = segs[i].Box;
+                    sb.Append(i).Append(" @").Append(b.X).Append(',').Append(b.Y)
+                      .Append(' ').Append(b.Width).Append('x').Append(b.Height)
+                      .Append(" | ").Append(segs[i].Text ?? "").Append("\r\n");
+                }
+                sb.Append("SEG_END\r\n");
+                report = sb.ToString();
+            }
+            catch (Exception ex) { report = "ERROR: " + ex.ToString(); }
+            try { File.WriteAllText(outputPath, report, new UTF8Encoding(false)); } catch (Exception) { }
+        }
+
+        private static void OcrSelfTest(string imagePath, string outputPath, string mode)        {
             if (outputPath == null)
             {
                 outputPath = Path.Combine(Path.GetDirectoryName(imagePath), "ocrselftest-result.txt");

@@ -10,7 +10,7 @@ $a = @('/nologo','/target:winexe','/platform:x64','/optimize+','/codepage:65001'
 '/r:System.IO.Compression.dll','/r:System.IO.Compression.FileSystem.dll',
 '/r:E:\下载\豆包\build-src\Microsoft.ML.OnnxRuntime.dll','/r:E:\下载\豆包\build-src\System.Memory.dll',
 '/r:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll',
-'/out:E:\下载\豆包\QRSnap.exe','src.cs','ui_jade.cs','PpOcr.cs','Mt.cs','LlamaMt.cs','TransOverlay.cs')
-& $csc $a *> 'E:\下载\豆包\_mt\build.log'
+'/out:E:\下载\豆包\QRSnap.exe','src.cs','ui_jade.cs','PpOcr.cs','Mt.cs','LlamaMt.cs','TransOverlay.cs','MtRealistic.cs','AiTextFix.cs','AiBoost.cs','LayoutBoost.cs','ShotCache.cs','RuntimeCheck.cs')
+& $csc $a *> 'E:\下载\豆包\build.log'
 Pop-Location
-Get-Content -LiteralPath 'E:\下载\豆包\_mt\build.log' -Encoding UTF8 | Select-Object -Last 20
+Get-Content -LiteralPath 'E:\下载\豆包\build.log' -Encoding UTF8 | Select-Object -Last 20

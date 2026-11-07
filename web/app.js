@@ -67,8 +67,12 @@
     $("swAutocopy").checked = !!c.autocopy;
     $("swRestoreWin").checked = !!c.restorewin;
     $("swRestoreQr").checked = !!c.restoreqr;
+    if ($("swToast")) $("swToast").checked = c.toast !== false;
+    if ($("swOcrFusion")) $("swOcrFusion").checked = !!c.ocrfusion;
     if ($("swMtBar")) $("swMtBar").checked = c.mtbar !== false;
     if ($("selMtPerf")) $("selMtPerf").value = c.mtperf || "balanced";
+    if ($("selMtGpu")) $("selMtGpu").value = c.mtgpu || "auto";
+    if ($("shotCacheInfo")) $("shotCacheInfo").textContent = c.cacheinfo || "—";
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
     if ($("selMtMode")) $("selMtMode").value = c.mtmode === "realistic" ? "realistic" : "efficiency";
     applyMtMode(c.mtmode === "realistic" ? "realistic" : "efficiency");
@@ -77,13 +81,14 @@
     // AI 大模型：只回填参数，不把 key 回显到输入框（只显示末 4 位）
     const ai = c.ai || {};
     if ($("selAiProvider")) $("selAiProvider").value = ai.provider === "custom" ? "custom" : "deepseek";
-    if ($("txtAiModel") && document.activeElement !== $("txtAiModel")) $("txtAiModel").value = ai.model || "4.1flash";
-    if ($("txtAiBase") && document.activeElement !== $("txtAiBase")) $("txtAiBase").value = ai.base || "https://api.deepseek.com/v1";
+    if ($("txtAiModel") && document.activeElement !== $("txtAiModel")) $("txtAiModel").value = ai.model || "deepseek-flash";
+    if ($("txtAiBase") && document.activeElement !== $("txtAiBase")) $("txtAiBase").value = ai.base || "https://api.deepseek.com";
     if ($("swAiOcr")) $("swAiOcr").checked = !!ai.ocr;
-    if ($("swAiMask")) $("swAiMask").checked = !!ai.mask;
+    if ($("swAiCheck")) $("swAiCheck").checked = !!ai.check;
+    if ($("swAiMerge")) $("swAiMerge").checked = !!ai.merge;
     if ($("swAiMt")) $("swAiMt").checked = !!ai.mt;
     if ($("txtAiKey")) $("txtAiKey").placeholder = ai.hasKey ? ((ai.keyTail || "Key") + " 已保存，留空则不改") : "粘贴你自己的 Key，留空则不改";
-    if ($("aiAccNote")) $("aiAccNote").textContent = ai.hasKey ? "已填 Key" : "未填 Key";
+    applyAi(ai);
     if ($("rngMtAlpha")) {
       const a = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
       $("rngMtAlpha").value = a;
@@ -118,12 +123,11 @@
   }
 
   function applyMtProfile(v) {
-    const p = v === "efficiency" ? "efficiency" : (v === "game" ? "game" : "standard");
-    const name = { standard: "标准", efficiency: "效率", game: "游戏" }[p];
+    const p = v === "efficiency" ? "efficiency" : "standard";
+    const name = { standard: "标准", efficiency: "效率" }[p];
     const hint = {
-      standard: "标准 · HyMT1.5 全方向",
-      efficiency: "效率 · 英/日走小模型",
-      game: "游戏 · 仅英/日→中文",
+      standard: "HyMT1.5全语种模型",
+      efficiency: "0.5B 效率模型",
     }[p];
     if ($("mtProfileHint")) $("mtProfileHint").textContent = hint;
     if ($("mtProfileBadge")) {
@@ -133,14 +137,13 @@
     buildMtProfList(p);
   }
 
-  // 设置抽屉里的三档模式：点一下就切，后端收到 mtprofile 会重建路由
+  // 设置抽屉里的两档模式：标准 / 效率
   function buildMtProfList(cur) {
     const box = $("mtProfList");
     if (!box) return;
     const rows = [
-      { key: "standard", title: "标准", note: "只用 HyMT1.5 大模型，所有语种" },
-      { key: "efficiency", title: "效率", note: "英 / 日 走小模型，其他语种走大模型" },
-      { key: "game", title: "游戏", note: "只用两个小模型，仅英 / 日 → 中文" },
+      { key: "standard", title: "标准", note: "HyMT1.5全语种模型，所有语种，按需加载" },
+      { key: "efficiency", title: "效率", note: "0.5B 短句/游戏字幕，常驻" },
     ];
     box.innerHTML = "";
     rows.forEach((r) => {
@@ -211,10 +214,13 @@
 
     buildMtList(mt);
 
-    const profText = prof === "game" ? "游戏（只用小模型）" : (prof === "efficiency" ? "效率（英 / 日走小模型）" : "标准（只用大模型）");
+    const profText = prof === "efficiency" ? "效率（0.5B 短句模型）" : "标准（HyMT1.5全语种模型）";
     let note = ready
-      ? ("三件套齐了。当前模式：" + profText + "。")
-      : ("还缺：" + (missing.length ? missing.join("、") : "翻译模型") + "。三个模型缺一不可，点下面「导入翻译模型包」补上。");
+      ? ("当前档位：" + profText + "。"
+        + (prof === "efficiency"
+          ? "0.5B 模型常驻，约 0.4–0.6 GB 显存/内存；切档或退出软件时释放。"
+          : "按需加载，空闲 60 秒释放。"))
+      : ("当前档位缺模型：" + (missing.length ? missing.join("、") : "翻译模型") + "。可以切换档位，或导入对应的模型包。");
     if (mt.root) note += "\n目录：" + mt.root;
     $("mtNote").textContent = note;
   }
@@ -257,15 +263,22 @@
 
     const list = (e && e.list) ? e.list : [];
     const readyKeys = list.filter((it) => it && it.ready).map((it) => it.key);
+    const fuse = !!(S && S.config && S.config.ocrfusion);
+    const fuseReady = readyKeys.indexOf("wechat") >= 0 && readyKeys.indexOf("pptiny") >= 0;
+    if ($("swOcrFusion")) {
+      $("swOcrFusion").disabled = !fuseReady;
+      $("swOcrFusion").title = fuseReady ? "融合：PP 出框 + 微信出字" : "需要同时装好微信 OCR 和 PP-OCR 极速";
+    }
     let active = (readyKeys.indexOf(current) >= 0) ? current : null;
     if (!active && e && readyKeys.indexOf(e.effective) >= 0) active = e.effective;
     if (!active && readyKeys.length) active = readyKeys[0];
+    const activeKeys = fuse && fuseReady ? ["wechat", "pptiny"] : [active];
 
     list.forEach((it) => {
       if (!it) return;
       const row = document.createElement("div");
       row.className = "engine-opt";
-      if (it.ready) row.className += " pick" + (it.key === active ? " on" : "");
+      if (it.ready) row.className += " pick" + (activeKeys.indexOf(it.key) >= 0 ? " on" : "");
       else row.className += " off";
 
       const tick = document.createElement("span");
@@ -287,6 +300,7 @@
 
       if (it.ready) {
         row.addEventListener("click", () => {
+          if (fuse) { setConfig({ ocrfusion: false, engine: it.key }); return; }
           if (it.key !== active) setConfig({ engine: it.key });
         });
       } else {
@@ -296,8 +310,10 @@
     });
 
     const missing = list.filter((it) => it && !it.ready).map((it) => it.name);
-    let note = "只列出本机真正检测到的可用引擎；灰掉的是没找到模型的。";
-    if (missing.length) note += " 缺少：" + missing.join(" / ") + "。";
+    let note = fuse
+      ? "融合模式已开启：微信 OCR + PP-OCR 极速同时勾选；点任一引擎会退出融合并切回单引擎。"
+      : "只列出本机真正检测到的可用引擎；灰掉的是没找到模型的。";
+    if (!fuse && missing.length) note += " 缺少：" + missing.join(" / ") + "。";
     if (e && e.modelRoot) note += "\n模型目录：" + e.modelRoot;
     $("engineNote").textContent = note;
   }
@@ -381,6 +397,69 @@
     }
   }
 
+  /* AI 大模型：状态只有「就绪」才让用，其余一律置灰 */
+  const AI_LABEL = {
+    unset: { t: "未配置", hint: "填个 Key 就能用", cls: "" },
+    checking: { t: "校验中", hint: "正在连一次接口…", cls: "is-wait" },
+    unknown: { t: "待校验", hint: "点保存或重新校验", cls: "is-wait" },
+    ok: { t: "就绪", hint: "Key 有效，模型名对得上", cls: "is-ok" },
+    badkey: { t: "Key 无效", hint: "Key 没复制全或已过期", cls: "is-bad" },
+    badmodel: { t: "模型名有误", hint: "按提示换个模型名", cls: "is-bad" },
+    offline: { t: "未连接", hint: "网络或接口没通，点右上重新校验", cls: "is-bad" }
+  };
+
+  function applyAi(ai) {
+    ai = ai || {};
+    const st = ai.status || (ai.hasKey ? "unknown" : "unset");
+    const info = AI_LABEL[st] || AI_LABEL.unknown;
+    const msg = ai.statusMsg || info.hint;
+
+    const badge = $("aiBadge");
+    if (badge) {
+      badge.textContent = info.t;
+      badge.classList.remove("ok", "bad", "wait", "plain");
+      if (info.cls === "is-ok") badge.classList.add("ok");
+      else if (info.cls === "is-bad") badge.classList.add("bad");
+      else if (info.cls === "is-wait") badge.classList.add("wait");
+      else badge.classList.add("plain");
+      badge.style.display = "";
+    }
+    if ($("aiHint")) $("aiHint").textContent = msg;
+    if ($("aiAccNote")) $("aiAccNote").textContent = info.t;
+    if ($("aiStatusText")) $("aiStatusText").textContent = info.t;
+    if ($("aiStatusMsg")) $("aiStatusMsg").textContent = msg + (ai.checkedAt ? "（" + ai.checkedAt + " 校验）" : "");
+    const box = $("aiStatusBox");
+    if (box) {
+      box.classList.remove("is-ok", "is-bad", "is-wait");
+      if (info.cls) box.classList.add(info.cls);
+    }
+
+    // 三个 AI 增强开关只在校验通过时可用，不通过就是打不开
+    const ready = st === "ok";
+    ["swAiOcr", "swAiCheck", "swAiMerge", "swAiMt"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.disabled = !ready;
+      const row = el.closest(".switch-row");
+      if (row) row.classList.toggle("locked", !ready);
+    });
+  }
+
+  // 校验在后台线程跑，前端小步轮询拿结果
+  async function pollAi(maxMs) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      await new Promise((r) => setTimeout(r, 600));
+      try {
+        const s = await api("state", {});
+        applyState(s);
+        const a = (s && s.config && s.config.ai) || {};
+        if (a.status && a.status !== "checking" && a.status !== "unknown") return a;
+      } catch (e) { /* 下一次再试 */ }
+    }
+    return null;
+  }
+
   /* AI 抽屉：和设置抽屉互斥，同一时刻只开一个 */
   function openAI(open) {
     const d = $("aiDrawer");
@@ -394,16 +473,32 @@
     if ($("aiMask")) $("aiMask").classList.toggle("show", open);
   }
 
+  // 保存 = 写配置 + 立刻校验一次；校验不通过就一直显示不可用
   async function saveAI() {
     const patch = {
+      aiprovider: $("selAiProvider") ? $("selAiProvider").value : "deepseek",
       aimodel: $("txtAiModel").value.trim(),
       aibase: $("txtAiBase").value.trim(),
     };
     const k = $("txtAiKey").value.trim();
     if (k) patch.aikey = k;
-    await setConfig(patch);
-    if ($("txtAiKey")) $("txtAiKey").value = "";
-    toast("AI 设置已保存");
+
+    const btn = $("btnSaveAI");
+    if (btn) { btn.disabled = true; btn.textContent = "校验中…"; }
+    try {
+      const s = await api("config", patch);
+      applyState(s);
+      if ($("txtAiKey")) $("txtAiKey").value = "";
+      const a = await pollAi(20000);
+      const st = a ? a.status : ((s && s.config && s.config.ai && s.config.ai.status) || "unknown");
+      const info = AI_LABEL[st] || AI_LABEL.unknown;
+      const detail = a && a.statusMsg ? a.statusMsg : info.hint;
+      toast(st === "ok" ? "AI 已就绪" : "AI 不可用 · " + info.t + "：" + detail);
+    } catch (e) {
+      toast("保存失败：" + e);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "保存"; }
+    }
   }
 
   async function setConfig(patch) {
@@ -487,15 +582,37 @@
     if ($("btnClearKey")) $("btnClearKey").addEventListener("click", async () => {
       await setConfig({ aikey: "" });
       if ($("txtAiKey")) $("txtAiKey").value = "";
-      toast("已清除 Key");
+      toast("已清除 Key，AI 功能不可用");
+    });
+
+    // 快捷区「AI 大模型」行：点一下直接开 AI 面板
+    if ($("quickAi")) $("quickAi").addEventListener("click", () => openAI(true));
+
+    // 手动重新校验（换网络、换 key 之后想立刻确认）
+    if ($("btnAiRetry")) $("btnAiRetry").addEventListener("click", async () => {
+      const btn = $("btnAiRetry");
+      if (btn) btn.textContent = "校验中…";
+      try {
+        const s = await api("aiverify", {});
+        applyState(s);
+        const a = await pollAi(20000);
+        const st = a ? a.status : ((s && s.config && s.config.ai && s.config.ai.status) || "unknown");
+        const info = AI_LABEL[st] || AI_LABEL.unknown;
+        toast(st === "ok" ? "AI 已就绪" : "AI 不可用 · " + info.t + "：" + (a && a.statusMsg ? a.statusMsg : info.hint));
+      } catch (e) {
+        toast("校验失败：" + e);
+      } finally {
+        if (btn) btn.textContent = "重新校验";
+      }
     });
     if ($("selAiProvider")) $("selAiProvider").addEventListener("change", (e) => {
       // 切到 DeepSeek 官方就顺手把地址和默认模型名填回去，小白不用记
-      if (e.target.value === "deepseek") setConfig({ aiprovider: "deepseek", aibase: "https://api.deepseek.com/v1", aimodel: "4.1flash" });
+      if (e.target.value === "deepseek") setConfig({ aiprovider: "deepseek", aibase: "https://api.deepseek.com", aimodel: "deepseek-flash" });
       else setConfig({ aiprovider: "custom" });
     });
     if ($("swAiOcr")) $("swAiOcr").addEventListener("change", (e) => setConfig({ aiocr: e.target.checked }));
-    if ($("swAiMask")) $("swAiMask").addEventListener("change", (e) => setConfig({ aimask: e.target.checked }));
+    if ($("swAiCheck")) $("swAiCheck").addEventListener("change", (e) => setConfig({ aicheck: e.target.checked }));
+    if ($("swAiMerge")) $("swAiMerge").addEventListener("change", (e) => setConfig({ aimerge: e.target.checked }));
     if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); } });
 
@@ -514,9 +631,36 @@
     $("swAutocopy").addEventListener("change", (e) => setConfig({ autocopy: e.target.checked }));
     $("swRestoreWin").addEventListener("change", (e) => setConfig({ restorewin: e.target.checked }));
     $("swRestoreQr").addEventListener("change", (e) => setConfig({ restoreqr: e.target.checked }));
+    if ($("swToast") && !$("swToast").dataset.bound) {
+      $("swToast").dataset.bound = "1";
+      $("swToast").addEventListener("change", (e) => setConfig({ toast: e.target.checked }));
+    }
+    if ($("swOcrFusion") && !$("swOcrFusion").dataset.bound) {
+      $("swOcrFusion").dataset.bound = "1";
+      $("swOcrFusion").addEventListener("change", (e) => setConfig({ ocrfusion: e.target.checked }));
+    }
 
     $("swMtBar").addEventListener("change", (e) => setConfig({ mtbar: e.target.checked }));
     $("selMtPerf").addEventListener("change", (e) => setConfig({ mtperf: e.target.value }));
+    if ($("selMtGpu")) $("selMtGpu").addEventListener("change", (e) => setConfig({ mtgpu: e.target.value }));
+    if ($("btnClearShotCache")) $("btnClearShotCache").addEventListener("click", async () => {
+      const btn = $("btnClearShotCache");
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "清理中…";
+      try {
+        const r = await api("cacheclear", {});
+        let info = r && r.info;
+        if (!info && typeof r === "string") { try { info = JSON.parse(r).info; } catch (e) { } }
+        if ($("shotCacheInfo")) $("shotCacheInfo").textContent = info || "0 张";
+        toast("缓存已清理");
+      } catch (e) {
+        toast("清理失败：" + e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
 
     if ($("selMtMode")) $("selMtMode").addEventListener("change", (e) => {
       applyMtMode(e.target.value);
@@ -659,6 +803,14 @@
       $("status").textContent = "与后端通信失败";
       toast("初始化失败：" + e);
     }
+
+    // 每次启动自动校验一次 AI 大模型：后端已经在启动时开跑，这里只负责把结果带回来
+    try {
+      const vs = await api("aiverify", {});
+      applyState(vs);
+      const a = (vs && vs.config && vs.config.ai) || {};
+      if (a.status === "checking" || a.status === "unknown") pollAi(20000);
+    } catch (e) { /* 校验通道不可用就保持原状态 */ }
   }
 
   if (document.readyState === "loading") {

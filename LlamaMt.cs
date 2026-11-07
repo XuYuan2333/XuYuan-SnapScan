@@ -29,6 +29,23 @@ internal static class LlamaMt
     public static string ExeDir()
     {
         string base_ = AppDomain.CurrentDomain.BaseDirectory;
+        // 优先 Vulkan 运行时：一套 DLL 同时支持 AMD / NVIDIA / Intel
+        if (AppConfig.NormalizeMtGpu(AppConfig.MtGpu) != "off")
+        {
+            string vk = Path.Combine(base_, "llama-vulkan");
+            if (File.Exists(Path.Combine(vk, "llama-server.exe")) && File.Exists(Path.Combine(vk, "ggml-vulkan.dll")))
+                return vk;
+        }
+        return CpuDir(base_);
+    }
+
+    private static string CpuDir()
+    {
+        return CpuDir(AppDomain.CurrentDomain.BaseDirectory);
+    }
+
+    private static string CpuDir(string base_)
+    {
         string[] cands = new string[]
         {
             Path.Combine(base_, "llama"),
@@ -43,6 +60,50 @@ internal static class LlamaMt
             if (File.Exists(f)) return cands[i];
         }
         return null;
+    }
+
+    private static bool IsVulkanDir(string dir)
+    {
+        return dir != null && dir.IndexOf("llama-vulkan", StringComparison.OrdinalIgnoreCase) >= 0
+            && File.Exists(Path.Combine(dir, "ggml-vulkan.dll"));
+    }
+
+    public static bool GpuActive;
+
+    private static int _gpuProbe = -1;
+    // 探测 Vulkan 设备：有 ggml-vulkan.dll 且 llama-server --list-devices 能枚举到 Vulkan0
+    public static bool GpuUsable
+    {
+        get
+        {
+            if (_gpuProbe >= 0) return _gpuProbe == 1;
+            _gpuProbe = 0;
+            try
+            {
+                if (AppConfig.NormalizeMtGpu(AppConfig.MtGpu) == "off") return false;
+                string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama-vulkan");
+                if (!File.Exists(Path.Combine(dir, "llama-server.exe")) || !File.Exists(Path.Combine(dir, "ggml-vulkan.dll")))
+                    return false;
+                ProcessStartInfo si = new ProcessStartInfo();
+                si.FileName = Path.Combine(dir, "llama-server.exe");
+                si.Arguments = "--list-devices";
+                si.WorkingDirectory = dir;
+                si.UseShellExecute = false;
+                si.CreateNoWindow = true;
+                si.RedirectStandardOutput = true;
+                si.RedirectStandardError = true;
+                using (Process p = Process.Start(si))
+                {
+                    string outp = p.StandardOutput.ReadToEnd();
+                    try { p.StandardError.ReadToEnd(); } catch (Exception) { }
+                    if (!p.WaitForExit(4000)) { try { p.Kill(); } catch (Exception) { } return false; }
+                    if (outp != null && outp.IndexOf("Vulkan", StringComparison.OrdinalIgnoreCase) >= 0)
+                        _gpuProbe = 1;
+                }
+            }
+            catch (Exception) { _gpuProbe = 0; }
+            return _gpuProbe == 1;
+        }
     }
 
     public static bool RuntimeReady
@@ -99,6 +160,26 @@ internal static class LlamaMt
     {
         string dir = ExeDir();
         if (dir == null) throw new Exception("缺少 llama.cpp 运行时（llama-server.exe）");
+        bool gpu = IsVulkanDir(dir);
+        try
+        {
+            StartServerCore(model, dir, gpu);
+            GpuActive = gpu;
+        }
+        catch (Exception)
+        {
+            // GPU 起不来（驱动/显存/后端不兼容）就回 CPU，不让翻译整体失败
+            if (!gpu) throw;
+            Kill();
+            string cpu = CpuDir();
+            if (cpu == null) throw new Exception("GPU 初始化失败，且找不到 CPU 版 llama.cpp");
+            StartServerCore(model, cpu, false);
+            GpuActive = false;
+        }
+    }
+
+    private static void StartServerCore(string model, string dir, bool gpu)
+    {
         Kill();
 
         int port = FreePort();
@@ -107,7 +188,7 @@ internal static class LlamaMt
         ProcessStartInfo si = new ProcessStartInfo();
         si.FileName = Path.Combine(dir, "llama-server.exe");
         si.Arguments = "--model \"" + model + "\" --host 127.0.0.1 --port " + port
-            + " --jinja -c 1024 -t " + threads + perfArgs + " --no-warmup";
+            + " --jinja -c 2048 -t " + threads + (gpu ? " -ngl 99" : " -ngl 0") + perfArgs + " --no-warmup";
         si.WorkingDirectory = dir;
         si.UseShellExecute = false;
         si.CreateNoWindow = true;
@@ -125,7 +206,7 @@ internal static class LlamaMt
         DateTime t0 = DateTime.UtcNow;
         while (true)
         {
-            if (p.HasExited) throw new Exception("翻译模型加载失败（模型文件与 llama.cpp 版本不匹配）");
+            if (p.HasExited) throw new Exception("翻译模型加载失败（" + (gpu ? "GPU" : "CPU") + " 运行时，模型文件与 llama.cpp 版本可能不匹配）");
             try
             {
                 string body = HttpGet("http://127.0.0.1:" + port + "/health", 2);
@@ -155,6 +236,9 @@ internal static class LlamaMt
             lock (Gate)
             {
                 if (_proc == null) return;
+                // 效率档的 0.5B 短句模型常驻；标准档仍按空闲释放
+                if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency
+                    && MtRouter.IsGameModelPath(_model)) return;
                 int idle = IdleSeconds;
                 if (idle <= 0) return;                                   // 0 = 常驻，不释放
                 if ((DateTime.UtcNow - _lastUse).TotalSeconds < idle) return;
@@ -183,7 +267,11 @@ internal static class LlamaMt
     private static string Prompt(string text, string tgt)
     {
         if (tgt == "zh")
-            return "把下面这段文字翻译成简体中文，忠实原文，不增不减，直接给出译文：\n\n" + text;
+        {
+            if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency)
+                return "翻译成简体中文：\n\n" + text;
+            return "把下面这段文字翻译成简体中文，忠实原文，不增不减；用户名、ID、产品型号、版本号保持原文，直接给出译文：\n\n" + text;
+        }
         return "Translate the following segment into " + langEn(tgt) + ", faithfully, without adding or omitting information, without explanation.\n\n" + text;
     }
 
@@ -209,7 +297,10 @@ internal static class LlamaMt
                 StartServer(model);
             _lastUse = DateTime.UtcNow;
 
-            string payload = BuildRequest(Prompt(text, tgt));
+            string sys = AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency
+                ? "针对短句翻译时，若有多重意思的词尽量以游戏行业术语翻译；只输出译文，不要解释。"
+                : null;
+            string payload = BuildRequest(Prompt(text, tgt), 192, sys);
             string resp = HttpPost("http://127.0.0.1:" + _port + "/v1/chat/completions", payload, 120);
             string content = JsonField(resp, "content");
             _lastUse = DateTime.UtcNow;
@@ -219,11 +310,70 @@ internal static class LlamaMt
 
     private static string BuildRequest(string prompt)
     {
+        return BuildRequest(prompt, 192);
+    }
+
+    private static string BuildRequest(string prompt, int maxTokens, string system = null)
+    {
         StringBuilder sb = new StringBuilder();
-        sb.Append("{\"messages\":[{\"role\":\"user\",\"content\":");
+        sb.Append("{\"messages\":[");
+        if (!string.IsNullOrEmpty(system))
+        {
+            sb.Append("{\"role\":\"system\",\"content\":").Append(J(system)).Append("},");
+        }
+        sb.Append("{\"role\":\"user\",\"content\":");
         sb.Append(J(prompt));
-        sb.Append("}],\"max_tokens\":192,\"temperature\":0.2,\"stream\":false}");
+        sb.Append("}],\"max_tokens\":").Append(maxTokens).Append(",\"temperature\":0.2,\"stream\":false}");
         return sb.ToString();
+    }
+
+    // 纯离线批量翻译：一次请求翻多行，喂给同一个 llama-server，省掉每行一次 HTTP + 前缀计算。
+    // 行数对不上（模型合并/拆行）就返回 null，调用方回退逐行，绝不把错位的译文贴回去。
+    public static List<string> TranslateBatch(string model, List<string> lines, string tgt)
+    {
+        if (lines == null || lines.Count == 0) return new List<string>();
+        if (!RuntimeReady) throw new Exception("缺少 llama.cpp 运行时（llama-server.exe），翻译用不了");
+        lock (Gate)
+        {
+            if (_proc == null || !string.Equals(_model, model, StringComparison.OrdinalIgnoreCase) || (_proc != null && _proc.HasExited))
+                StartServer(model);
+            _lastUse = DateTime.UtcNow;
+
+            StringBuilder prompt = new StringBuilder();
+            int chars = 0;
+            if (tgt == "zh")
+                prompt.Append("把下面 ").Append(lines.Count).Append(" 行英文逐行翻译成简体中文，保持行数和顺序，只输出译文，每行一条，不要编号、不要解释：\n");
+            else
+                prompt.Append("Translate the following ").Append(lines.Count)
+                      .Append(" lines into ").Append(langEn(tgt))
+                      .Append(" line by line, keep the same line count and order, output only the translations, one per line, no numbering:\n");
+            for (int i = 0; i < lines.Count; i++)
+            {
+                prompt.Append(lines[i]).Append('\n');
+                chars += lines[i].Length;
+            }
+            int maxTokens = Math.Min(1536, Math.Max(96, chars * 2));
+            string payload = BuildRequest(prompt.ToString(), maxTokens);
+            string resp = HttpPost("http://127.0.0.1:" + _port + "/v1/chat/completions", payload, 180);
+            string content = Clean(JsonField(resp, "content"));
+            _lastUse = DateTime.UtcNow;
+            if (string.IsNullOrEmpty(content)) return null;
+
+            string[] parts = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            List<string> got = new List<string>();
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string s = parts[i].Trim();
+                if (s.Length == 0) continue;
+                // 去掉模型自作主张加的 “1. ” / “1、” 前缀
+                int k = 0;
+                while (k < s.Length && char.IsDigit(s[k])) k++;
+                if (k > 0 && k < s.Length && (s[k] == '.' || s[k] == '、' || s[k] == ')' || s[k] == '．'))
+                    s = s.Substring(k + 1).Trim();
+                if (s.Length > 0) got.Add(s);
+            }
+            return got.Count == lines.Count ? got : null;
+        }
     }
 
     // 模型偶尔会带出多余说明或引号，收一下尾
@@ -232,9 +382,72 @@ internal static class LlamaMt
         if (string.IsNullOrEmpty(s)) return "";
         s = s.Trim().Trim('\uFEFF').Trim();
         s = s.Trim('"').Trim();
+        s = StripPromptEcho(s);
         if (s.StartsWith("翻译：", StringComparison.Ordinal)) s = s.Substring(3).Trim();
         if (s.StartsWith("译文：", StringComparison.Ordinal)) s = s.Substring(3).Trim();
-        return s;
+        return s.Trim();
+    }
+
+    // 0.5B 偶尔把 system/user 提示词一起吐出来；这里把整行提示和前缀切掉，只留译文
+    private static string StripPromptEcho(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        string[] lines = s.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string t = lines[i].Trim();
+            if (t.Length == 0) continue;
+            if (IsPromptEcho(t))
+            {
+                // 提示词和译文同一行时，取“只输出译文：/翻译成简体中文：”后面的部分
+                int cut = t.LastIndexOf("只输出译文：", StringComparison.Ordinal);
+                if (cut < 0) cut = t.LastIndexOf("翻译成简体中文：", StringComparison.Ordinal);
+                if (cut < 0) cut = t.LastIndexOf("翻译成中文：", StringComparison.Ordinal);
+                if (cut >= 0)
+                {
+                    int p = t.IndexOf('：', cut);
+                    if (p >= 0 && p + 1 < t.Length) t = t.Substring(p + 1).Trim();
+                    else continue;
+                }
+                else continue;
+            }
+            t = TrimMetaPrefix(t);
+            if (t.Length == 0) continue;
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(t);
+        }
+        return sb.ToString();
+    }
+
+    private static string TrimMetaPrefix(string t)
+    {
+        string low = t.ToLowerInvariant();
+        string[] marks = new string[] { "in simple chinese:", "in chinese:", "translation:", "译文：", "翻译：" };
+        for (int i = 0; i < marks.Length; i++)
+        {
+            int at = low.LastIndexOf(marks[i], StringComparison.Ordinal);
+            if (at < 0) continue;
+            int p = t.IndexOf(':', at);
+            if (p < 0) p = t.IndexOf('：', at);
+            if (p >= 0 && p + 1 < t.Length) return t.Substring(p + 1).Trim();
+        }
+        return t;
+    }
+
+    private static bool IsPromptEcho(string t)
+    {
+        if (t.IndexOf("若有多重意思", StringComparison.Ordinal) >= 0) return true;
+        if (t.IndexOf("只输出译文", StringComparison.Ordinal) >= 0) return true;
+        if (t.IndexOf("不要解释", StringComparison.Ordinal) >= 0) return true;
+        if (t.IndexOf("游戏行业术语", StringComparison.Ordinal) >= 0) return true;
+        if (t.IndexOf("游戏短句翻译引擎", StringComparison.Ordinal) >= 0) return true;
+        if (t.StartsWith("针对短句翻译", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("把下面这段", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("翻译成简体中文：", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("翻译成中文：", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("你是", StringComparison.Ordinal) && t.IndexOf("翻译", StringComparison.Ordinal) >= 0) return true;
+        return false;
     }
 
     private static string J(string s)

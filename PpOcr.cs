@@ -10,6 +10,31 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace QRSnap
 {
+    // ONNX Runtime 的 GPU 选择：有 DirectML 就用显卡（AMD/NVIDIA/Intel 都覆盖），失败自动 CPU。
+    internal static class OrtGpu
+    {
+        public static bool Applied;
+        public static string Error = "";
+        public static bool Wanted
+        {
+            get { return AppConfig.OcrGpu && AppConfig.NormalizeMtGpu(AppConfig.MtGpu) != "off"; }
+        }
+
+        public static void Apply(SessionOptions so)
+        {
+            if (so == null || !Wanted) return;
+            try
+            {
+                so.AppendExecutionProvider_DML(0);
+                Applied = true;
+            }
+            catch (Exception ex)
+            {
+                Error = ex.Message;
+            }
+        }
+    }
+
     // PP-OCR (PaddleOCR) ONNX runner: DB detector + CTC recognizer, pure managed + onnxruntime.
     public sealed class PpOcr
     {
@@ -19,6 +44,7 @@ namespace QRSnap
 
         private InferenceSession _det;
         private InferenceSession _rec;
+        private static readonly object CropLock = new object();   // GDI+ 克隆同一张图要串行
         private string _detIn;
         private string _recIn;
         private List<string> _keys = new List<string>();
@@ -50,6 +76,7 @@ namespace QRSnap
             try { so.IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount / 2); } catch { }
             try { so.InterOpNumThreads = 1; } catch { }
             so.EnableCpuMemArena = true;
+            OrtGpu.Apply(so);
 
             _det = new InferenceSession(detPath, so);
             _rec = new InferenceSession(recPath, so);
@@ -104,6 +131,15 @@ namespace QRSnap
             return Detect(src);
         }
 
+        // 对指定框单独识字：布局切分（按栏切开、按徽章底色切开）后，
+        // 每一小块都要重新识一遍，才能保证「框里的字」和「回填的译文」严格对应。
+        public string RecognizeBox(Bitmap src, Box box)
+        {
+            if (src == null || box == null || box.W < 2 || box.H < 2) return null;
+            string t = RecOne(src, box);
+            return t == null ? null : t.Trim();
+        }
+
         // 逐行返回：文字 + 位置 + 倾斜角
         public List<Seg> RecognizeSegments(Bitmap src)
         {
@@ -112,6 +148,7 @@ namespace QRSnap
             List<Box> boxes = Detect(src);
             if (boxes.Count == 0) return list;
             int curOrder = int.MinValue;
+            int lastRight = int.MinValue;
             Seg seg = null;
             for (int i = 0; i < boxes.Count; i++)
             {
@@ -120,7 +157,10 @@ namespace QRSnap
                 if (line == null) continue;
                 line = line.Trim();
                 if (line.Length == 0) continue;
-                if (seg == null || b.Order != curOrder)
+                // 同一行序号的框之间隔着大片空白，说明是左右两栏，不能当成一句话拼起来
+                bool farGap = lastRight != int.MinValue
+                    && (b.X - lastRight) > (int)Math.Max(b.H * 1.6f, 20f);
+                if (seg == null || b.Order != curOrder || farGap)
                 {
                     if (seg != null) list.Add(seg);
                     seg = new Seg();
@@ -129,6 +169,7 @@ namespace QRSnap
                     seg.Text = line;
                     seg.Angle = b.Angle;
                     curOrder = b.Order;
+                    lastRight = b.X + b.W;
                     continue;
                 }
                 int x0 = Math.Min(seg.X, b.X);
@@ -140,6 +181,7 @@ namespace QRSnap
                 float area = (float)(b.W * b.H);
                 float area0 = (float)(seg.W * seg.H);
                 seg.Angle = (seg.Angle * area0 + b.Angle * area) / Math.Max(1f, area0 + area);
+                lastRight = b.X + b.W;
             }
             if (seg != null) list.Add(seg);
             return list;
@@ -152,6 +194,7 @@ namespace QRSnap
             if (boxes.Count == 0) return "";
             StringBuilder sb = new StringBuilder();
             int lastLine = int.MinValue;
+            int lastRight2 = int.MinValue;
             for (int i = 0; i < boxes.Count; i++)
             {
                 Box b = boxes[i];
@@ -159,13 +202,16 @@ namespace QRSnap
                 if (line == null) continue;
                 line = line.Trim();
                 if (line.Length == 0) continue;
+                bool farGap = lastRight2 != int.MinValue
+                    && (b.X - lastRight2) > (int)Math.Max(b.H * 1.6f, 20f);
                 if (lastLine != int.MinValue)
                 {
-                    if (b.Order != lastLine) sb.Append('\n');
+                    if (b.Order != lastLine || farGap) sb.Append('\n');
                     else sb.Append(' ');
                 }
                 sb.Append(line);
                 lastLine = b.Order;
+                lastRight2 = b.X + b.W;
             }
             return sb.ToString();
         }
@@ -216,9 +262,10 @@ namespace QRSnap
         // ---------- detection ----------
         private List<Box> Detect(Bitmap src)
         {
-            const int MaxSide = 960;
             int ow = src.Width, oh = src.Height;
-            double scale = Math.Min(1.0, (double)MaxSide / Math.Max(ow, oh));
+            // 小图用 1000 检测更快；1200 以上用 1280 保小字/行首准确率
+            int maxSide = Math.Max(ow, oh) >= 1200 ? 1280 : 1000;
+            double scale = Math.Min(1.0, (double)maxSide / Math.Max(ow, oh));
             int w = (int)Math.Round(ow * scale / 32.0) * 32;
             int h = (int)Math.Round(oh * scale / 32.0) * 32;
             if (w < 32) w = 32;
@@ -399,7 +446,9 @@ namespace QRSnap
 
             float[] data = new float[3 * th * tw];
             // padded region stays 0 (= mid gray after normalisation), matching Paddle padding
-            using (Bitmap crop = src.Clone(rc, PixelFormat.Format24bppRgb))
+            Bitmap crop;
+            lock (CropLock) crop = src.Clone(rc, PixelFormat.Format24bppRgb);
+            using (crop)
             using (Bitmap rs = Resize(crop, tw, th, false))
             {
                 byte[] px;

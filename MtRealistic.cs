@@ -16,10 +16,14 @@ namespace QRSnap
     {
         public sealed class Block
         {
-            public Rectangle Box;   // 原图坐标系里的原文框
+            public Rectangle Box;   // 原图坐标系里的原文框（段落块 = 排版区域）
             public string Text;     // 译文
             public float Angle;     // 原文倾角（度）
             public float SizeCap;   // 同段落统一字号上限，0 表示按框高自适应
+            public int Group;       // AI 判断的段落分组（-1 = 没有 AI 建议，按几何聚类）
+            public List<Rectangle> SourceBoxes;  // 段落由多行合并时，擦除只擦这些原行框
+            public bool PreGrouped;              // 已在 OCR 层做过版面切分，不再走 MergeBlocks
+            public List<Rectangle> Obstacles;    // 头像/表情等不参与翻译的图形，回填时躲开
         }
 
         public sealed class Stats
@@ -38,52 +42,92 @@ namespace QRSnap
             if (blocks == null || blocks.Count == 0) return work;
 
             int w = src.Width, h = src.Height;
-            List<Block> work2 = MergeBlocks(blocks, w, h);
+            bool preGrouped = false;
+            for (int i = 0; i < blocks.Count; i++) if (blocks[i] != null && blocks[i].PreGrouped) { preGrouped = true; break; }
+
+            List<Block> work2;
             int skippedCross = 0;
-            // 一整行里词距拉得很开（导航栏、分栏标签）时，按框内空白列拆成独立的小块，
-            // 每块自己擦、自己排，观感比「一大块遮罩 + 一串挤在左边的译文」自然
-            work2 = SplitByGaps(src, work2, out skippedCross);
+            if (preGrouped)
+            {
+                // 版面切分已经在 OCR 层做完（分栏 / 徽章 / 段落），这里原样使用。
+                // 再跑一遍 MergeBlocks 会把徽章和正文重新粘回去，前功尽弃。
+                work2 = new List<Block>();
+                for (int i = 0; i < blocks.Count; i++) if (blocks[i] != null) work2.Add(blocks[i]);
+            }
+            else
+            {
+                work2 = MergeBlocks(blocks, w, h);
+                // 一整行里词距拉得很开（导航栏、分栏标签）时，按框内空白列拆成独立的小块，
+                // 每块自己擦、自己排，观感比「一大块遮罩 + 一串挤在左边的译文」自然
+                work2 = SplitByGaps(src, work2, out skippedCross);
+            }
             stats.Skipped = skippedCross;
             for (int i = 0; i < work2.Count; i++)
             {
                 Block b = work2[i];
                 if (b == null || string.IsNullOrEmpty(b.Text)) continue;
                 Rectangle r = b.Box;
-                r.Inflate(2, 2);
                 r.Intersect(new Rectangle(0, 0, w, h));
                 if (r.Width < 6 || r.Height < 6) continue;
 
-                // 单行框塞不下长译文时，看框下方有没有空白可以借一点高度；
-                // 但不能长到下一行身上去
-                int limitBottom = h;
-                for (int j = 0; j < work2.Count; j++)
+                if (!b.PreGrouped)
                 {
-                    if (j == i) continue;
-                    Rectangle o = work2[j].Box;
-                    if (o.Top <= r.Top) continue;
-                    if (o.Left >= r.Right || o.Right <= r.Left) continue;
-                    if (o.Top < limitBottom) limitBottom = o.Top;
+                    // 单行框塞不下长译文时，看框下方有没有空白可以借一点高度；
+                    // 但不能长到下一行身上去
+                    int limitBottom = h;
+                    for (int j = 0; j < work2.Count; j++)
+                    {
+                        if (j == i) continue;
+                        Rectangle o = work2[j].Box;
+                        if (o.Top <= r.Top) continue;
+                        if (o.Left >= r.Right || o.Right <= r.Left) continue;
+                        if (o.Top < limitBottom) limitBottom = o.Top;
+                    }
+                    r = TryGrowDown(src, r, limitBottom, w, h, b.Text);
                 }
-                r = TryGrowDown(src, r, limitBottom, w, h, b.Text);
 
                 // 颜色要在擦之前取，擦完就只剩背景了
                 Color textColor;
                 int bgLum;
                 SampleColors(src, r, out textColor, out bgLum);
 
-                bool hard;
-                int inkPixels = EraseBlock(work, r, out hard);
+                bool hard = false;
+                int inkPixels = 0;
+                List<Rectangle> erase = (b.SourceBoxes != null && b.SourceBoxes.Count > 0) ? b.SourceBoxes : null;
+                if (erase == null)
+                {
+                    Rectangle rr = r;
+                    rr.Inflate(2, 2);
+                    rr.Intersect(new Rectangle(0, 0, w, h));
+                    inkPixels = EraseBlock(work, rr, out hard);
+                }
+                else
+                {
+                    // 段落块只擦每一行原来的字，不擦行间空白/徽章/头像
+                    for (int k = 0; k < erase.Count; k++)
+                    {
+                        Rectangle rr = erase[k];
+                        // 段落块的行框来自 OCR，边缘往往比实际字形紧 1~2px；
+                        // 留一圈 4px 把抗锯齿和行首的残留符号一起带走
+                        rr.Inflate(4, 3);
+                        rr.Intersect(new Rectangle(0, 0, w, h));
+                        if (rr.Width < 4 || rr.Height < 4) continue;
+                        bool hh;
+                        inkPixels += EraseBlock(work, rr, out hh);
+                        hard = hard || hh;
+                    }
+                }
                 if (hard) stats.Hard++;
                 stats.Lines++;
 
                 bool wrapped;
                 bool eraseOnly = Environment.GetEnvironmentVariable("QRSNAP_DBG_ERASE_ONLY") == "1";
-                if (!eraseOnly) DrawText(work, r, b.Text, b.Angle, textColor, bgLum, b.SizeCap, out wrapped);
+                if (!eraseOnly) DrawText(work, r, b.Text, b.Angle, textColor, bgLum, b.SizeCap, b.Obstacles, out wrapped);
                 else wrapped = false;
                 if (wrapped) stats.Wrapped++;
 
                 NativeShell.Log("mt realistic box=" + b.Box.X + "," + b.Box.Y + "," + b.Box.Width + "," + b.Box.Height
-                    + (r.Height != b.Box.Height + 4 ? " grown=" + (r.Height - b.Box.Height - 4) : "")
+                    + (r.Height > b.Box.Height + 4 ? " grown=" + (r.Height - b.Box.Height) : "")
                     + " ink=" + inkPixels + (hard ? " hardbg=1" : "") + (wrapped ? " wrap=1" : "") + " | " + b.Text);
             }
             return work;
@@ -132,12 +176,53 @@ namespace QRSnap
             return outList;
         }
 
+        // 行框高 → 字号。行框是 OCR 给的词框按行合并出来的，高度基本等于这一行的字高，
+        // 所以 0.85 倍是稳妥的字面大小；再夹一个上下限，避免极端图把字画飞或画成蚂蚁。
+        private static float CapFromHeight(float h)
+        {
+            float cap = h * 0.85f;
+            if (cap < 7f) cap = 7f;       // 再小就不可读了
+            if (cap > 48f) cap = 48f;     // 超大字保护，防止个别框异常把整块撑爆
+            return cap;
+        }
+
         // 把上下相邻、横向重叠、行高接近的行视为同一段落，统一字号上限
         private static void UnifyParagraphSizes(List<Block> list)
+        {
+            // 先按 AI 给的分组走：它认得「哪几行是一段」，比纯几何聚类更准；
+            // 分组已经过行号连续 / 同栏 / 行距校验，不合规的根本不会被采纳。
+            Dictionary<int, List<Block>> ai = new Dictionary<int, List<Block>>();
+            for (int i = 0; i < list.Count; i++)
+            {
+                Block b = list[i];
+                if (b.Group < 0) continue;
+                List<Block> one;
+                if (!ai.TryGetValue(b.Group, out one)) { one = new List<Block>(); ai[b.Group] = one; }
+                one.Add(b);
+            }
+            int aiDone = 0;
+            foreach (KeyValuePair<int, List<Block>> kv in ai)
+            {
+                List<Block> one = kv.Value;
+                if (one.Count < 2) continue;
+                int sumH = 0;
+                for (int k = 0; k < one.Count; k++) sumH += one[k].Box.Height;
+                // 字号跟着 OCR 行框高度走：行框高≈这一行的字高（含少量上下留白），淘 0.85 就是字面大小。
+                // 原来固定卡 24，遇到大标题（行框 40~60）会被压成正文大小，这一版按行高给。
+                float cap = CapFromHeight(sumH / (float)one.Count);
+                for (int k = 0; k < one.Count; k++) one[k].SizeCap = cap;
+                aiDone++;
+            }
+            // 没被 AI 分组的行继续走几何聚类；UnifyGeometric 内部会跳过已定字的块
+            UnifyGeometric(list);
+        }
+
+        private static void UnifyGeometric(List<Block> list)
         {
             int i = 0;
             while (i < list.Count)
             {
+                if (list[i].SizeCap > 0f) { i++; continue; }    // 已被 AI 分组定过字号
                 int j = i + 1;
                 int minH = list[i].Box.Height, maxH = minH;
                 int sumH = minH, cntH = 1;
@@ -146,6 +231,7 @@ namespace QRSnap
                 while (j < list.Count)
                 {
                     Block b = list[j];
+                    if (b.SizeCap > 0f) break;
                     int hAvg = (span.Height + b.Box.Height) / 2;
                     int vGap = b.Box.Top - lastBottom;
                     if (vGap < -Math.Max(4, hAvg / 2) || vGap > Math.Max(6, hAvg / 2)) break;
@@ -162,7 +248,7 @@ namespace QRSnap
                 if (j - i >= 2)
                 {
                     // 用段落内的平均行高定字号：取最矮行会把整段字压小一圈
-                    float cap = Math.Min((sumH / (float)cntH) * 0.85f, 24f);
+                    float cap = CapFromHeight(sumH / (float)cntH);
                     for (int k = i; k < j; k++) list[k].SizeCap = cap;
                 }
                 i = j > i ? j : i + 1;
@@ -567,12 +653,23 @@ namespace QRSnap
         }
 
         // ---------- 回填 ----------
-        private static void DrawText(Bitmap bmp, Rectangle box, string text, float angle, Color textColor, int bgLum, float sizeCap, out bool wrapped)
+        private static void DrawText(Bitmap bmp, Rectangle box, string text, float angle, Color textColor, int bgLum, float sizeCap, List<Rectangle> obstacles, out bool wrapped)
         {
             wrapped = false;
             int W = box.Width, H = box.Height;
             // 允许往右侧/下方空白里溢出一点点，避免长译文被压成小字
             float maxW = W * 1.02f, maxH = H * 1.06f;
+            // 段落首行右侧有头像/表情时，把排版宽度收到图形左边，别把字画到图标上
+            if (obstacles != null)
+            {
+                for (int i = 0; i < obstacles.Count; i++)
+                {
+                    Rectangle o = obstacles[i];
+                    if (o.Bottom <= box.Top + 2 || o.Top >= box.Top + H * 0.65f) continue;
+                    float cut = o.Left - box.X - 3f;
+                    if (cut >= W * 0.45f && cut < maxW) maxW = cut;
+                }
+            }
             if (Math.Abs(LumOf(textColor) - bgLum) < 70)
                 textColor = bgLum > 128 ? Color.FromArgb(24, 24, 28) : Color.FromArgb(242, 244, 248);
 
@@ -725,6 +822,35 @@ namespace QRSnap
         }
 
         private static int LumOf(Color c) { return (c.R * 77 + c.G * 151 + c.B * 28) >> 8; }
+
+        // 给效率模式的底板取「这一块本来的底色」：底板刷成同色，看上去就像没盖东西，
+        // 只剩中文浮在上面。量化到 16 级取众数，文字是少数派，不会把底色带偏。
+        public static Color SampleBackground(Bitmap bmp, Rectangle box)
+        {
+            Color fallback = Color.FromArgb(14, 18, 26);
+            if (bmp == null) return fallback;
+            int x0 = Math.Max(0, box.Left), y0 = Math.Max(0, box.Top);
+            int x1 = Math.Min(bmp.Width, box.Right), y1 = Math.Min(bmp.Height, box.Bottom);
+            if (x1 <= x0 || y1 <= y0) return fallback;
+            Dictionary<int, int> hist = new Dictionary<int, int>();
+            int step = (x1 - x0) * (y1 - y0) > 4000 ? 2 : 1;
+            for (int y = y0; y < y1; y += step)
+                for (int x = x0; x < x1; x += step)
+                {
+                    Color c = bmp.GetPixel(x, y);
+                    // 6bit/通道（步长 4）：比 16 级细，底板颜色和背景几乎一致
+                    int k = ((c.R >> 2) << 12) | ((c.G >> 2) << 6) | (c.B >> 2);
+                    int n;
+                    hist.TryGetValue(k, out n);
+                    hist[k] = n + 1;
+                }
+            int bestK = 0, bestN = -1;
+            foreach (KeyValuePair<int, int> kv in hist)
+                if (kv.Value > bestN) { bestN = kv.Value; bestK = kv.Key; }
+            if (bestN < 0) return fallback;
+            return Color.FromArgb(((bestK >> 12) & 0x3F) * 4 + 2,
+                ((bestK >> 6) & 0x3F) * 4 + 2, (bestK & 0x3F) * 4 + 2);
+        }
 
         private static List<string> WrapText(Graphics g, string text, Font f, float maxW)
         {

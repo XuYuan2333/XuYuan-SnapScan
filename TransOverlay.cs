@@ -15,7 +15,11 @@ namespace QRSnap
     {
         public sealed class Item
         {
-            public Rectangle Box;      // 相对覆盖层的坐标
+            public Rectangle Box;      // 相对覆盖层的坐标（底板范围）
+            public Rectangle TextBox;  // 译文排版范围（段落块：从徽章右侧起排）；空 = 用 Box
+            public List<Rectangle> MaskRects;  // 段落块：逐行底板，避免盖住徽章/图标
+            public Color BgColor;      // 底板颜色（取原图底色，空 = 默认深色）
+            public Color TextColor;    // 译文颜色（按底色明暗自动选）
             public float Angle;        // 原文倾角（度）
             public string Text;        // 译文
         }
@@ -302,33 +306,45 @@ namespace QRSnap
                 }
                 else
                 {
-                    for (int i = 0; i < _items.Count; i++) DrawItem(g, _items[i], w, h);
+                    for (int i = 0; i < _items.Count; i++) DrawItemCore(g, _items[i], w, h);
                 }
             }
             Commit(bmp);
             bmp.Dispose();
         }
 
-        private void DrawItem(Graphics g, Item it, int w, int h)
+        // 把译文遮罩直接合成到截图上（给「重复截图缓存」用：下次同一屏直接贴成品图）
+        internal static Bitmap Compose(Bitmap screen, List<Item> items)
+        {
+            if (screen == null) return null;
+            Bitmap b = new Bitmap(screen.Width, screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.DrawImage(screen, new Rectangle(0, 0, b.Width, b.Height));
+                if (items != null)
+                    for (int i = 0; i < items.Count; i++) DrawItemCore(g, items[i], b.Width, b.Height);
+            }
+            return b;
+        }
+
+        private static void DrawItemCore(Graphics g, Item it, int w, int h)
         {
             if (it == null || string.IsNullOrEmpty(it.Text)) return;
-            Rectangle box = it.Box;
-            if (box.Width < 6 || box.Height < 6) return;
-            if (box.Right > w) box.Width = w - box.X;
-            if (box.Bottom > h) box.Height = h - box.Y;
+            Rectangle box = Clamp(it.Box, w, h);
             if (box.Width < 6 || box.Height < 6) return;
 
-            // 底板严格用原文本框：从原文起笔到收笔的长宽高，不跟着译文长度变
-            float padX = Math.Max(2f, box.Height * 0.06f);
-            RectangleF bg = new RectangleF(box.X, box.Y, box.Width, box.Height);
+            Rectangle textRect = it.TextBox;
+            if (textRect.Width < 6 || textRect.Height < 6) textRect = box;
+            textRect = Clamp(textRect, w, h);
+            if (textRect.Width < 6 || textRect.Height < 6) return;
 
-            Font font = FitFont(g, it.Text, (int)Math.Max(8f, bg.Width - padX * 2f), (int)Math.Max(8f, bg.Height));
-            if (font == null) return;
-            StringFormat sf = new StringFormat();
-            sf.Alignment = StringAlignment.Near;
-            sf.LineAlignment = StringAlignment.Center;
-            sf.Trimming = StringTrimming.None;
-            sf.FormatFlags = StringFormatFlags.NoWrap;
+            float padX = Math.Max(3f, textRect.Height * 0.05f);
+            float maxW = Math.Max(8f, textRect.Width - padX * 2f);
+            float maxH = Math.Max(8f, textRect.Height - 4f);
+
+            List<string> lines;
+            Font font = FitFont(g, it.Text, maxW, maxH, out lines);
+            if (font == null || lines == null) return;
 
             float cx = box.X + box.Width / 2f;
             float cy = box.Y + box.Height / 2f;
@@ -338,55 +354,189 @@ namespace QRSnap
             if (Math.Abs(it.Angle) >= 1.5f) g.RotateTransform(it.Angle);
             g.TranslateTransform(-cx, -cy);
 
-            float radius = Math.Min(bg.Height / 2f, 6f);
             int maskA = AppConfig.NormalizeMtMaskAlpha(AppConfig.MtMaskAlpha);
             int fillA = (int)Math.Round(255.0 * maskA / 100.0);
-            int edgeA = (int)Math.Round(52.0 * maskA / 100.0);
-            using (GraphicsPath path = RoundRect(bg, radius))
+            int edgeA = it.BgColor.IsEmpty ? (int)Math.Round(52.0 * maskA / 100.0) : 0;
+            Color fillBase = it.BgColor.IsEmpty ? Color.FromArgb(14, 18, 26) : it.BgColor;
+            Color textBase = it.TextColor.IsEmpty ? Color.FromArgb(246, 249, 255) : it.TextColor;
+            // 底板刷成本来的底色，效率模式就会「融进背景」，只留下中文
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(fillA, fillBase)))
+            using (Pen edge = new Pen(Color.FromArgb(edgeA, 108, 128, 158), 1f))
+            using (Pen glow = new Pen(Color.FromArgb(18, 0, 0, 0), 2f))
             {
-                using (SolidBrush fill = new SolidBrush(Color.FromArgb(fillA, 14, 18, 26)))
-                    g.FillPath(fill, path);
-                using (Pen edge = new Pen(Color.FromArgb(edgeA, 108, 128, 158), 1f))
-                    g.DrawPath(edge, path);
+                if (it.MaskRects != null && it.MaskRects.Count > 0)
+                {
+                    // 段落块：每条原文行一块底板，徽章/图标所在的位置不会被整块盖住
+                    for (int i = 0; i < it.MaskRects.Count; i++)
+                    {
+                        Rectangle r = Clamp(it.MaskRects[i], w, h);
+                        if (r.Width < 4 || r.Height < 4) continue;
+                        RectangleF rf = new RectangleF(r.X - 1f, r.Y - 1f, r.Width + 2f, r.Height + 2f);
+                        using (GraphicsPath path = RoundRect(rf, Math.Min(rf.Height / 2f, 7f)))
+                        {
+                            g.DrawPath(glow, path);
+                            g.FillPath(fill, path);
+                            g.DrawPath(edge, path);
+                        }
+                    }
+                }
+                else
+                {
+                    RectangleF bg = new RectangleF(box.X, box.Y, box.Width, box.Height);
+                    using (GraphicsPath path = RoundRect(bg, Math.Min(bg.Height / 2f, 8f)))
+                    {
+                        g.DrawPath(glow, path);
+                        g.FillPath(fill, path);
+                        g.DrawPath(edge, path);
+                    }
+                }
             }
 
-            // 译文一律贴着底板左侧起排（留一点点边距），不居中
-            float tx = bg.X + padX;
-            float ty = bg.Y + bg.Height / 2f;
-
-            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
-                g.DrawString(it.Text, font, shadow, tx + 1f, ty + 1f, sf);
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(248, 246, 249, 255)))
-                g.DrawString(it.Text, font, brush, tx, ty, sf);
+            // 译文贴着排版区左侧起排，自动折行，垂直居中
+            float lh = font.GetHeight(g);
+            float total = lines.Count * lh;
+            float top = textRect.Y + (textRect.Height - total) / 2f;
+            if (top < textRect.Y) top = textRect.Y;
+            using (StringFormat sf = new StringFormat())
+            {
+                sf.Alignment = StringAlignment.Near;
+                sf.LineAlignment = StringAlignment.Near;
+                sf.FormatFlags = StringFormatFlags.NoWrap;
+                sf.Trimming = StringTrimming.None;
+                using (SolidBrush shadow = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
+                using (SolidBrush brush = new SolidBrush(Color.FromArgb(248, textBase)))
+                {
+                    for (int i = 0; i < lines.Count; i++)
+                    {
+                        float y = top + i * lh;
+                        g.DrawString(lines[i], font, shadow, textRect.X + padX + 1f, y + 1f, sf);
+                        g.DrawString(lines[i], font, brush, textRect.X + padX, y, sf);
+                    }
+                }
+            }
 
             g.Restore(gs);
             font.Dispose();
-            sf.Dispose();
         }
 
-        private static Font FitFont(Graphics g, string text, int maxW, int maxH)
+        private static Rectangle Clamp(Rectangle r, int w, int h)
+        {
+            if (r.X < 0) { r.Width += r.X; r.X = 0; }
+            if (r.Y < 0) { r.Height += r.Y; r.Y = 0; }
+            if (r.Right > w) r.Width = w - r.X;
+            if (r.Bottom > h) r.Height = h - r.Y;
+            return r;
+        }
+
+        private static Font FitFont(Graphics g, string text, float maxW, float maxH, out List<string> lines)
         {
             string family = "Microsoft YaHei UI";
-            float top = Math.Min(maxH * 0.86f, 44f);
-            float size = top;
-            while (size >= 6f)
+            float size = Math.Min(maxH * 0.82f, 42f);
+            if (size < 7f) size = 7f;
+            for (; size >= 6.5f; size -= 0.5f)
             {
                 Font f = null;
                 try
                 {
-                    f = new Font(family, size, FontStyle.Regular, GraphicsUnit.Point);
-                    SizeF sz = g.MeasureString(text, f);
-                    if (sz.Width <= maxW + 2f && sz.Height <= maxH + 2f) return f;
+                    // 像素单位，和底板尺寸同一套坐标
+                    f = new Font(family, size, FontStyle.Regular, GraphicsUnit.Pixel);
+                    List<string> ls = WrapLines(g, text, f, maxW);
+                    float lh = f.GetHeight(g);
+                    float widest = 0f;
+                    for (int i = 0; i < ls.Count; i++) widest = Math.Max(widest, g.MeasureString(ls[i], f).Width);
+                    if (widest <= maxW + 1f && ls.Count * lh <= maxH + 1f)
+                    {
+                        lines = ls;
+                        return f;
+                    }
                     f.Dispose();
                 }
                 catch (Exception)
                 {
                     if (f != null) f.Dispose();
                 }
-                size -= 1f;
             }
-            try { return new Font(family, 6f, FontStyle.Regular, GraphicsUnit.Point); }
+            lines = null;
+            try
+            {
+                Font f = new Font(family, 6.5f, FontStyle.Regular, GraphicsUnit.Pixel);
+                lines = WrapLines(g, text, f, maxW);
+                return f;
+            }
             catch (Exception) { return null; }
+        }
+
+        // 按「英文单词整体 / 单个汉字 / 单个标点」折行，中文不在词中间断
+        private static List<string> WrapLines(Graphics g, string text, Font f, float maxW)
+        {
+            List<string> lines = new List<string>();
+            if (string.IsNullOrEmpty(text)) { lines.Add(""); return lines; }
+            List<string> tokens = new List<string>();
+            int i = 0;
+            while (i < text.Length)
+            {
+                char c = text[i];
+                if (c == '\r' || c == '\n') { tokens.Add("\n"); i++; continue; }
+                if (c == ' ')
+                {
+                    int j = i;
+                    while (j < text.Length && text[j] == ' ') j++;
+                    tokens.Add(" ");
+                    i = j;
+                    continue;
+                }
+                if (c < 128)
+                {
+                    int j = i;
+                    while (j < text.Length && text[j] < 128 && text[j] != ' ') j++;
+                    tokens.Add(text.Substring(i, j - i));
+                    i = j;
+                    continue;
+                }
+                tokens.Add(c.ToString());
+                i++;
+            }
+
+            const string noHead = "，。、！？：；）】」』》…—·%";
+            string cur = "";
+            for (int t = 0; t < tokens.Count; t++)
+            {
+                string tk = tokens[t];
+                if (tk == "\n") { lines.Add(cur.TrimEnd()); cur = ""; continue; }
+                if (tk == " ") { if (cur.Length > 0) cur += " "; continue; }
+                string cand = cur + tk;
+                if (cur.Length > 0 && g.MeasureString(cand, f).Width > maxW)
+                {
+                    if (noHead.IndexOf(tk[0]) >= 0)
+                    {
+                        lines.Add((cur + tk).TrimEnd());
+                        cur = "";
+                        continue;
+                    }
+                    lines.Add(cur.TrimEnd());
+                    cur = tk;
+                }
+                else cur = cand;
+            }
+            if (cur.TrimEnd().Length > 0) lines.Add(cur.TrimEnd());
+            if (lines.Count == 0) lines.Add(text);
+
+            List<string> fixedLines = new List<string>();
+            foreach (string line in lines)
+            {
+                string c2 = line;
+                while (c2.Length > 0 && g.MeasureString(c2, f).Width > maxW)
+                {
+                    int take = c2.Length;
+                    while (take > 1 && g.MeasureString(c2.Substring(0, take), f).Width > maxW) take--;
+                    fixedLines.Add(c2.Substring(0, take));
+                    c2 = c2.Substring(take).TrimStart();
+                }
+                if (c2.Length > 0) fixedLines.Add(c2);
+                else if (line.Length == 0) fixedLines.Add("");
+            }
+            if (fixedLines.Count == 0) fixedLines.Add(text);
+            return fixedLines;
         }
 
         private static GraphicsPath RoundRect(RectangleF r, float radius)

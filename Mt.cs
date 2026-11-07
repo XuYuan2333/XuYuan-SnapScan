@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Text;
+using System.Threading;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -294,6 +295,7 @@ namespace QRSnap
             try { so.IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount / 2); } catch { }
             try { so.InterOpNumThreads = 1; } catch { }
             so.EnableCpuMemArena = true;
+            OrtGpu.Apply(so);
 
             _enc = new InferenceSession(Path.Combine(dir, EncFile), so);
             string merged = Path.Combine(dir, DecFile);
@@ -637,6 +639,7 @@ namespace QRSnap
         public string Gguf;     // 非空表示 GGUF 单文件模型（一个模型覆盖多语种）
         public string Label;    // 界面显示名
         public bool Multi;      // 是否支持多方向
+        public bool Game;       // 游戏档专用小模型（不允许标准/效率误用）
         public string Pair { get { return Multi ? "多语种" : (Src + "-" + Tgt); } }
     }
 
@@ -645,6 +648,12 @@ namespace QRSnap
         private readonly string _root;
         private readonly Dictionary<string, MtModel> _cache = new Dictionary<string, MtModel>(StringComparer.Ordinal);
         private readonly object _lock = new object();
+        // 同一屏反复截图很常见：进程内记一份「原文→译文」，命中就不再跑模型
+        private readonly Dictionary<string, string> _trCache = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly object _trLock = new object();
+        // 小模型并行 worker 池：常驻复用，避免每次翻译都重新加载 ONNX
+        private readonly Dictionary<string, List<MtModel>> _pool = new Dictionary<string, List<MtModel>>(StringComparer.Ordinal);
+        private DateTime _lastUse = DateTime.UtcNow;
 
         public MtRouter(string root) { _root = root; }
 
@@ -725,33 +734,13 @@ namespace QRSnap
                     m.Dir = Path.GetDirectoryName(f);
                     m.Gguf = f;
                     m.Multi = true;
+                    m.Game = IsGameModel(f);
                     m.Ready = LlamaMt.RuntimeReady;
                     list.Add(m);
                 }
             }
 
-            string[] dirs;
-            try { dirs = Directory.GetDirectories(_root); }
-            catch (Exception) { return list; }
-            for (int i = 0; i < dirs.Length; i++)
-            {
-                string d = dirs[i];
-                string name = Path.GetFileName(d);
-                string src, tgt;
-                if (!TryParsePair(name, out src, out tgt))
-                {
-                    src = ReadSidecar(d, "src");
-                    tgt = ReadSidecar(d, "tgt");
-                    if (src == null || tgt == null || !IsLangCode(src) || !IsLangCode(tgt)) continue;
-                }
-                MtModelInfo m = new MtModelInfo();
-                m.Name = name;
-                m.Src = src;
-                m.Tgt = tgt;
-                m.Dir = d;
-                m.Ready = MtModel.FolderReady(d);
-                list.Add(m);
-            }
+            // 不再扫描 en-zh / ja-zh 目录包：只支持 .gguf 单文件模型
             list.Sort(delegate(MtModelInfo a, MtModelInfo b) { return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase); });
             return list;
         }
@@ -761,6 +750,11 @@ namespace QRSnap
             foreach (MtModelInfo m in Models())
                 if (m.Ready && m.Src == src && m.Tgt == tgt) return true;
             return false;
+        }
+
+        public bool GameReady
+        {
+            get { return GameGgufPath() != null; }
         }
 
         public static string NameOf(string code)
@@ -783,45 +777,57 @@ namespace QRSnap
             return PlanFor(src, tgt, preferred, null);
         }
 
+        public string LastPlanError { get; private set; }
+
         // profile：standard / efficiency / game（null 或空 = 标准）
-        // 口径：所有翻译都是「外语 → 中文」，目标固定 zh；三件套（多语种 GGUF + en-zh + ja-zh）
-        // 缺一即整体不可用。用户明确三个模型都是必需品，不做模型切换，也就不做降级。
-        // preferred 仅保留参数位（旧调用兼容），不再参与选路。
+        // 按档位各自判断可用性：不再要求三件套齐全。
         public string[] PlanFor(string src, string tgt, string preferred, string profile)
         {
+            LastPlanError = null;
             if (src == tgt) return new string[0];
-            if (tgt != "zh") return new string[0];
-            if (MissingKit().Count > 0) return new string[0];
-            string prof = profile == null ? string.Empty : profile.Trim().ToLowerInvariant();
+            if (tgt != "zh") { LastPlanError = "只支持翻译成中文"; return new string[0]; }
 
-            // 游戏模式：只用两个小模型，多语种大模型彻底不参与，非英/日一律不支持
-            if (prof == "game")
+            string prof = profile == null ? string.Empty : profile.Trim().ToLowerInvariant();
+            bool isEff = prof == "efficiency" || prof == "game";
+
+            // 效率档：固定 Qwen2.5-0.5B 短句模型，GPU 优先、CPU 兜底；只做英/日短句
+            if (isEff)
             {
-                if (src == "en" && PairReady("en", "zh")) return new string[] { "en-zh" };
-                if (src == "ja" && PairReady("ja", "zh")) return new string[] { "ja-zh" };
+                if (src != "en" && src != "ja")
+                {
+                    LastPlanError = "效率档只支持英/日短句";
+                    return new string[0];
+                }
+                string small = GameGgufPath();
+                if (small != null) return new string[] { "gguf", small };
+                LastPlanError = "效率档需要 0.5B 小模型（Qwen2.5-0.5B Q2_K）";
                 return new string[0];
             }
 
-            // 效率模式：英文走 en-zh、日文走 ja-zh，其他语种交给多语种大模型
-            if (prof == "efficiency" && src == "en" && PairReady("en", "zh")) return new string[] { "en-zh" };
-            if (prof == "efficiency" && src == "ja" && PairReady("ja", "zh")) return new string[] { "ja-zh" };
-
-            foreach (MtModelInfo m in Models())
-                if (m.Multi && m.Ready) return new string[] { "gguf", m.Gguf };
+            // 标准档：只用 1.8B GGUF
+            string gguf = GgufPath();
+            if (gguf != null) return new string[] { "gguf", gguf };
+            LastPlanError = "标准档需要 HyMT1.5 全语种模型（GGUF）";
             return new string[0];
         }
 
-        // 三件套：多语种 GGUF、en-zh、ja-zh。缺任何一件，翻译功能整体禁用。
+        // 诊断用：列出缺哪些模型；是否可用由各档位自己判断，不再三件套缺一就整体禁用。
         // 只查文件齐不齐（GGUF 看实体文件，目录包走 FolderReady），运行时能不能起来另算。
         public List<string> MissingKit()
         {
             List<string> miss = new List<string>();
-            bool multi = false;
+            bool multi = false, small = false;
             foreach (MtModelInfo m in Models())
-                if (m.Multi && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf)) { multi = true; break; }
+            {
+                if (m.Game)
+                {
+                    if (m.Ready && m.Gguf != null && File.Exists(m.Gguf)) small = true;
+                    continue;
+                }
+                if (m.Multi && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf)) multi = true;
+            }
             if (!multi) miss.Add("多语种模型 Hy-MT1.5（.gguf）");
-            if (!PairReady("en", "zh")) miss.Add("en-zh 英→中小模型");
-            if (!PairReady("ja", "zh")) miss.Add("ja-zh 日→中小模型");
+            if (!small) miss.Add("效率小模型 Qwen2.5-0.5B Q2_K（.gguf）");
             return miss;
         }
 
@@ -831,6 +837,7 @@ namespace QRSnap
             foreach (MtModelInfo m in Models())
             {
                 if (!m.Ready) continue;
+                if (m.Game) { if (!list.Contains("0.5B 效率模型")) list.Add("0.5B 效率模型"); continue; }
                 if (m.Multi) { if (!list.Contains("多语种")) list.Add("多语种"); continue; }
                 if (!list.Contains(m.Pair)) list.Add(m.Pair);
             }
@@ -838,6 +845,37 @@ namespace QRSnap
         }
 
         // 找到某对语言该用哪个目录：优先用户选中的模型，否则第一个装好的
+        private string GgufPath()
+        {
+            foreach (MtModelInfo m in Models())
+                if (!m.Game && m.Multi && m.Ready && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf))
+                    return m.Gguf;
+            return null;
+        }
+
+        private string GameGgufPath()
+        {
+            foreach (MtModelInfo m in Models())
+                if (m.Game && m.Ready && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf))
+                    return m.Gguf;
+            return null;
+        }
+
+        public static bool IsGameModelPath(string path)
+        {
+            return IsGameModel(path);
+        }
+
+        private static bool IsGameModel(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string p = path.Replace('/', '\\').ToLowerInvariant();
+            if (p.IndexOf("\\game\\") >= 0 || p.EndsWith("\\game")) return true;
+            string n = Path.GetFileName(p);
+            return n.IndexOf("qwen2.5-0.5b") >= 0 || n.IndexOf("qwen2.5_0.5b") >= 0
+                || n.IndexOf("game") >= 0 && n.EndsWith(".gguf");
+        }
+
         private string DirForPair(string pair, string preferred)
         {
             List<MtModelInfo> all = Models();
@@ -1084,6 +1122,23 @@ namespace QRSnap
             route = "";
             if (string.IsNullOrEmpty(text)) return "";
             if (src == tgt) return text;
+            _lastUse = DateTime.UtcNow;
+
+            string trimmed = text.Trim();
+            // 用户名/纯数字/带数字的短代号（shaunj66、Q2、90Hz）不送模型，原样保留
+            if (KeepAsIs(trimmed))
+            {
+                route = "keep";
+                return trimmed;
+            }
+
+            string ck = (profile ?? "") + "\u0001" + src + "\u0001" + trimmed;
+            lock (_trLock)
+            {
+                string cv;
+                if (_trCache.TryGetValue(ck, out cv)) { route = "cache"; return cv; }
+            }
+
             string[] plan = PlanFor(src, tgt, preferred, profile);
             if (plan.Length == 0) { route = "缺模型"; return ""; }
             if (plan[0] == "gguf")
@@ -1103,7 +1158,137 @@ namespace QRSnap
                 route += (route.Length == 0 ? "" : " → ") + pair;
             }
             if (tgt == "zh") cur = PostFixZh(ToSimplified(cur));
+            if (trimmed.Length <= 400)
+            {
+                lock (_trLock)
+                {
+                    if (_trCache.Count > 3000) _trCache.Clear();
+                    _trCache[ck] = cur;
+                }
+            }
             return cur;
+        }
+
+        // 纯离线小模型批量翻译：多个 worker 各持一份 MtModel，按块并行。
+        // 只支持单跳语言对（en-zh / ja-zh）；多跳仍走 Translate 串行。
+        public string[] TranslateMany(List<string> texts, string src, string tgt, string preferred, string profile, out string route)
+        {
+            route = "";
+            int n = texts == null ? 0 : texts.Count;
+            string[] res = new string[n];
+            if (n == 0) return res;
+            _lastUse = DateTime.UtcNow;
+            string[] plan = PlanFor(src, tgt, preferred, profile);
+            if (plan.Length == 0) { route = "缺模型"; return res; }
+            if (plan[0] == "gguf")
+            {
+                for (int i = 0; i < n; i++) res[i] = Translate(texts[i], src, tgt, preferred, profile, out route);
+                return res;
+            }
+
+            string pair = plan[0];
+            route = pair;
+            List<int> todo = new List<int>();
+            for (int i = 0; i < n; i++)
+            {
+                string trimmed = (texts[i] ?? "").Trim();
+                if (trimmed.Length == 0) { res[i] = ""; continue; }
+                if (KeepAsIs(trimmed)) { res[i] = trimmed; continue; }
+                string ck = (profile ?? "") + "\u0001" + src + "\u0001" + trimmed;
+                lock (_trLock)
+                {
+                    string cv;
+                    if (_trCache.TryGetValue(ck, out cv)) { res[i] = cv; continue; }
+                }
+                todo.Add(i);
+            }
+            if (todo.Count == 0) return res;
+
+            string dir = DirForPair(pair, preferred);
+            if (dir == null) dir = Path.Combine(_root, pair);
+            int workers = todo.Count < 4 ? 1 : Math.Min(2, Math.Max(2, Environment.ProcessorCount / 8));
+            List<MtModel> pool = PoolFor(pair, dir, workers);
+
+            System.Threading.Tasks.ParallelOptions po = new System.Threading.Tasks.ParallelOptions();
+            po.MaxDegreeOfParallelism = workers;
+            System.Threading.Tasks.Parallel.For(0, todo.Count, po, delegate(int k)
+            {
+                int i = todo[k];
+                string cur = texts[i];
+                if (src == "ja") cur = FixJaOcr(cur);
+                int maxTokens = Math.Min(220, Math.Max(24, (int)(cur.Length * 1.8f)));
+                cur = TranslateSmall(pool[k % pool.Count], cur, maxTokens);
+                if (tgt == "zh") cur = PostFixZh(ToSimplified(cur));
+                res[i] = cur;
+                string trimmed = (texts[i] ?? "").Trim();
+                if (trimmed.Length <= 400)
+                {
+                    string ck = (profile ?? "") + "\u0001" + src + "\u0001" + trimmed;
+                    lock (_trLock)
+                    {
+                        if (_trCache.Count > 3000) _trCache.Clear();
+                        _trCache[ck] = cur;
+                    }
+                }
+            });
+            _lastUse = DateTime.UtcNow;
+            return res;
+        }
+
+        public void ClearCache()
+        {
+            lock (_trLock) _trCache.Clear();
+        }
+
+        // 常驻小模型池：同一 pair 复用，最多 2 份（并行用），空闲时统一释放
+        private List<MtModel> PoolFor(string pair, string dir, int count)
+        {
+            lock (_lock)
+            {
+                List<MtModel> list;
+                if (!_pool.TryGetValue(pair, out list))
+                {
+                    list = new List<MtModel>();
+                    _pool[pair] = list;
+                }
+                while (list.Count < count)
+                    list.Add(new MtModel(dir, pair));
+                return list;
+            }
+        }
+
+        public void TrimIdle(int seconds)
+        {
+            if (seconds <= 0) return;
+            if ((DateTime.UtcNow - _lastUse).TotalSeconds < seconds) return;
+            lock (_lock)
+            {
+                foreach (var kv in _pool)
+                    foreach (MtModel m in kv.Value)
+                        try { m.Dispose(); } catch (Exception) { }
+                _pool.Clear();
+                foreach (var kv in _cache)
+                    try { kv.Value.Dispose(); } catch (Exception) { }
+                _cache.Clear();
+            }
+        }
+
+        // 用户名 / 纯数字 / 带数字的短代号：模型翻了只会添乱，直接保留
+        private static bool KeepAsIs(string s)
+        {
+            if (s.Length == 0 || s.Length > 28) return false;
+            if (s.IndexOf(' ') >= 0 || s.IndexOf('\t') >= 0) return false;
+            bool hasLetter = false, hasDigit = false;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c > 127) return false;
+                if (c >= '0' && c <= '9') hasDigit = true;
+                else if (char.IsLetter(c)) hasLetter = true;
+                else if (c != '_' && c != '-' && c != '.' && c != '/' && c != '+' && c != '#' && c != '@') return false;
+            }
+            if (!hasLetter) return true;        // 纯数字/符号
+            return hasDigit;                    // 带数字的短代号
         }
 
         // Opus-MT 小模型对长句很容易提前吐 EOS、只出半截（实测 130 字符的句子只给 5 个字），
@@ -1173,6 +1358,10 @@ namespace QRSnap
             {
                 foreach (var kv in _cache) { try { kv.Value.Dispose(); } catch { } }
                 _cache.Clear();
+                foreach (var kv in _pool)
+                    foreach (MtModel m in kv.Value)
+                        try { m.Dispose(); } catch { }
+                _pool.Clear();
             }
         }
     }

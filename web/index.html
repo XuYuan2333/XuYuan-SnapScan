@@ -105,9 +105,9 @@
           <span class="q-badge" id="mtBadge">—</span>
         </div>
 
-        <div class="quick-row soon">
-          <span class="q-text"><b>启用 OCR 纠错</b><i>用词典与上下文修正错字</i></span>
-          <span class="soon-tag">待开放</span>
+        <div class="quick-row pick" id="quickAi">
+          <span class="q-text"><b>AI 大模型</b><i id="aiHint">未填 Key</i></span>
+          <span class="q-badge" id="aiBadge">未配置</span>
         </div>
 
         <div class="quick-row pick" id="quickMtProfile">
@@ -154,6 +154,10 @@
         <div class="engine-list" id="engineList"></div>
         <div class="engine-desc" id="engineDesc">—</div>
         <div class="group-note" id="engineNote">只读取本软件自己的「OCR Model」目录；灰掉的是该目录里没找到模型的。</div>
+        <label class="switch-row">
+          <div><b>融合模式（PP 框 + 微信字）</b><i>PP 出更细的框、微信出文字；纯识字会慢一点，翻译链路基本不增加时间。需要两个引擎都装好。</i></div>
+          <input type="checkbox" id="swOcrFusion"><span class="sw"></span>
+        </label>
         <div class="row-btns">
           <button class="btn ghost" id="btnRecheck2">重新检测</button>
           <button class="btn" id="btnImportModel">导入模型包</button>
@@ -167,35 +171,15 @@
       <div class="acc-body">
         <div class="sub-title">翻译模式</div>
         <div class="engine-list" id="mtProfList"></div>
-        <div class="group-note" id="noteMtProfile">标准：只用 Hy-MT1.5 大模型，所有语种一个模型直连，速度慢一点但最稳。<br>效率：英文自动走 en-zh、日文自动走 ja-zh 小模型，其他语种仍走大模型。<br>游戏：只用两个小模型，只支持英文 / 日文翻译成中文，大模型完全不参与。</div>
+        <div class="group-note" id="noteMtProfile">标准：HyMT1.5全语种模型，所有语种，按需加载，空闲 60 秒释放。<br>效率：Qwen2.5-0.5B 短句/游戏字幕模型，常驻（约 0.4–0.6 GB 显存/内存），切档或退出释放。<br>AI 接管：不占用本地显存，走云端。</div>
 
-        <div class="sub-title">翻译模型（三件套）</div>
+        <div class="sub-title">翻译模型（按档位）</div>
         <div class="engine-list" id="mtList"></div>
-        <div class="group-note" id="mtNote">三个模型缺一不可：多语种大模型负责其他语种，en-zh / ja-zh 两个小模型负责英、日快翻。少任何一个，翻译功能整体置灰——所以不提供切换模型的选项，装齐就能用。</div>
+        <div class="group-note" id="mtNote">按档位取模型：标准要 HyMT1.5 全语种模型；效率要 Qwen2.5-0.5B 短句模型。缺哪个只影响对应档位，不再整体禁用。</div>
         <div class="row-btns">
           <button class="btn" id="btnImportMt">导入翻译模型包</button>
         </div>
-        <div class="group-note">支持只含一个 .gguf 的 zip（Hy-MT1.5），也支持 en-zh / ja-zh 这种目录包（带 encoder + decoder + tokenizer.json）。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
-
-        <div class="sub-title">翻译性能</div>
-        <label class="field">
-          <span>占用</span>
-          <select id="selMtPerf">
-            <option value="silent">后台无感（最省）</option>
-            <option value="balanced">均衡（默认）</option>
-            <option value="performance">性能</option>
-            <option value="full">全力以赴</option>
-          </select>
-        </label>
-        <div class="group-note">后台无感只用约 1/8 线程并降到低优先级，翻得慢但不抢前台；均衡约 1/3；性能约 1/2；全力以赴吃满所有核，最快但会短时抢占 CPU。改档位后下次翻译生效。</div>
-
-        <div class="sub-title">内存释放</div>
-        <label class="field">
-          <span>空闲</span>
-          <input type="number" id="numMtIdle" min="0" max="86400" step="5" value="30" inputmode="numeric">
-          <span class="val" style="width:auto;">秒后释放</span>
-        </label>
-        <div class="group-note">超过这么多秒没有再次翻译，就把翻译服务整个退出，内存立刻还回去，只留本体这点基础占用；填 0 表示常驻不释放。改完立即生效。</div>
+        <div class="group-note">只支持含 .gguf 单文件的模型包（HyMT1.5 1.8B / Qwen2.5-0.5B）。en-zh / ja-zh 目录包已不再支持。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
 
         <div class="sub-title">译文遮罩</div>
         <label class="field">
@@ -219,7 +203,52 @@
           <div><b>显示「✕ 关闭译文」控制条</b><i>关掉后翻译只画译文、不留浮动控制条，用 Esc / 滚轮 / Ctrl+Alt+G 关</i></div>
           <input type="checkbox" id="swMtBar"><span class="sw"></span>
         </label>
-        <div class="group-note">遮罩本身默认点击穿透，不拦鼠标；控制条不穿透，是给你随时关掉全部译文用的。</div>
+      </div>
+    </div>
+
+    <div class="acc">
+      <button class="acc-head" type="button">性能与缓存<span class="acc-note">GPU / 线程 / 内存 / 缓存</span><span class="chev"></span></button>
+      <div class="acc-body">
+        <div class="group-note">这一组都是「跑得快不快、占多少资源」的开关：GPU 加速、CPU 线程档位、空闲释放、重复截图缓存。</div>
+
+        <div class="sub-title">GPU 加速</div>
+        <label class="field">
+          <span>翻译</span>
+          <select id="selMtGpu">
+            <option value="auto">自动（优先 GPU，失败回 CPU）</option>
+            <option value="on">强制 GPU</option>
+            <option value="off">纯 CPU</option>
+          </select>
+        </label>
+        <div class="group-note">检测到 llama-vulkan 运行时就用显卡跑 GGUF，AMD / NVIDIA / Intel 都支持；初始化失败自动回 CPU，不会让翻译整体失败。标准 / 效率两档都走 GGUF。改完下次翻译生效。</div>
+
+        <div class="sub-title">翻译性能（CPU）</div>
+        <label class="field">
+          <span>占用</span>
+          <select id="selMtPerf">
+            <option value="silent">后台无感（最省）</option>
+            <option value="balanced">均衡（默认）</option>
+            <option value="performance">性能</option>
+            <option value="full">全力以赴</option>
+          </select>
+        </label>
+        <div class="group-note">后台无感只用约 1/8 线程并降到低优先级，翻得慢但不抢前台；均衡约 1/3；性能约 1/2；全力以赴吃满所有核，最快但会短时抢占 CPU。只影响 CPU 侧；改档位后下次翻译生效。</div>
+
+        <div class="sub-title">内存释放（标准档）</div>
+        <label class="field">
+          <span>空闲</span>
+          <input type="number" id="numMtIdle" min="0" max="86400" step="5" value="60" inputmode="numeric">
+          <span class="val" style="width:auto;">秒后释放</span>
+        </label>
+        <div class="group-note">只对标准档的 1.8B 生效：超过这么多秒没有再次翻译就退出服务，内存/显存还回去；填 0 表示常驻。效率档的 0.5B 是常驻模型，不参与这个计时，切档或退出软件时才释放；AI 接管不占本地模型。</div>
+
+        <div class="sub-title">截图缓存</div>
+        <label class="field">
+          <span>重复截图</span>
+          <span class="val" id="shotCacheInfo">—</span>
+        </label>
+        <button class="btn ghost" id="btnClearShotCache" type="button">清理截图缓存</button>
+        <div class="group-note">同一屏（允许轻微差异）再翻一次直接贴上次成品，不再 OCR / 翻译；引擎、翻译模式、GPU 等设置变化后自动隔离。缓存目录在程序当前文件夹的 <code>shotcache</code>。</div>
       </div>
     </div>
 
@@ -265,6 +294,10 @@
           <b class="val" id="frostVal">3</b>
         </label>
         <div class="group-note">透明度越低，背景图透出越多；毛玻璃强度越高，背景越糊。</div>
+        <label class="switch-row">
+          <div><b>显示识别提示</b><i>右下角「识别中 / 识别完成」的悬浮提示；关掉后完全静默</i></div>
+          <input type="checkbox" id="swToast"><span class="sw"></span>
+        </label>
       </div>
     </div>
 
@@ -294,7 +327,16 @@
 
     <div class="ai-hero">
       <b>填个 Key 就能用</b>
-      <i>已经默认好：DeepSeek 官方地址、不思考、不联网搜索。只当翻译和识字的助手，不改动你本地的模型。</i>
+      <i>已默认好：DeepSeek 官方地址、不思考、不联网搜索。只当识字和翻译的助手，不碰你本地的模型。</i>
+    </div>
+
+    <div class="ai-status" id="aiStatusBox">
+      <span class="ai-dot" id="aiDot"></span>
+      <div class="ai-status-text">
+        <b id="aiStatusText">未配置</b>
+        <i id="aiStatusMsg">还没填 Key，填好点保存会自动校验一次</i>
+      </div>
+      <button class="link" id="btnAiRetry">重新校验</button>
     </div>
 
     <div class="acc open">
@@ -309,11 +351,11 @@
         </label>
         <label class="field">
           <span>模型名称</span>
-          <input type="text" id="txtAiModel" placeholder="4.1flash" spellcheck="false">
+          <input type="text" id="txtAiModel" placeholder="deepseek-flash" spellcheck="false">
         </label>
         <label class="field">
           <span>接口地址</span>
-          <input type="text" id="txtAiBase" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+          <input type="text" id="txtAiBase" placeholder="https://api.deepseek.com" spellcheck="false">
         </label>
         <label class="field">
           <span>API Key</span>
@@ -323,27 +365,31 @@
           <button class="btn" id="btnSaveAI">保存</button>
           <button class="btn ghost" id="btnClearKey">清除 Key</button>
         </div>
-        <div class="group-note" id="aiKeyNote">Key 只存在本机 ini 里，不上传。去 platform.deepseek.com 注册一个，复制出来粘进去就行；其它保持默认即可。</div>
-        <div class="group-note">不思考、不联网搜索：已固定关闭，翻译只走一次性直出，速度优先。</div>
+        <div class="group-note" id="aiKeyNote">Key 只存本机 ini，不上传。去 platform.deepseek.com 注册，复制粘进来即可。</div>
+        <div class="group-note">已固定关闭思考与联网搜索，只走一次性直出，速度优先。</div>
       </div>
     </div>
 
     <div class="acc open">
-      <button class="acc-head" type="button">AI 增强开关<span class="acc-note">功能开发中</span><span class="chev"></span></button>
+      <button class="acc-head" type="button">AI 增强开关<span class="acc-note">识字 / 质检 / 合并 / 接管</span><span class="chev"></span></button>
       <div class="acc-body">
         <label class="switch-row">
-          <div><b>AI 识字强化</b><i>用大模型校正 OCR 的错字、粘连和断行，识别结果更干净</i></div>
+          <div><b>AI 识字强化</b><i>只修低置信/融合不一致的行，不再整图送 AI；不改行、不改框。</i></div>
           <input type="checkbox" id="swAiOcr"><span class="sw"></span>
         </label>
         <label class="switch-row">
-          <div><b>AI 译文遮罩强化</b><i>按上下文判断段落和字号，让遮罩块的位置、宽高更贴合原文</i></div>
-          <input type="checkbox" id="swAiMask"><span class="sw"></span>
+          <div><b>AI 译文质检</b><i>本地翻译后只挑漏行、长度异常、没翻、重复的行送 AI 重翻，不全屏重翻。</i></div>
+          <input type="checkbox" id="swAiCheck"><span class="sw"></span>
         </label>
         <label class="switch-row">
-          <div><b>AI 翻译强化</b><i>本地模型翻完后用大模型修术语和人名，只修不重写</i></div>
+          <div><b>AI 短句合并</b><i>窄栏/侧栏被拆开的短行（上一行没标点、下一行小写/连词开头）先合并再翻译。</i></div>
+          <input type="checkbox" id="swAiMerge"><span class="sw"></span>
+        </label>
+        <label class="switch-row">
+          <div><b>AI 翻译接管</b><i>不再调用本地翻译模型，整段交给大模型翻。AI 出错直接提示，不会退回本地模型。</i></div>
           <input type="checkbox" id="swAiMt"><span class="sw"></span>
         </label>
-        <div class="group-note">这三个开关先占位，开关状态会保存，功能还没接上——现在打开也不会报错，等后面接好就按这里的状态走。</div>
+        <div class="group-note">四个开关都要先校验到「就绪」才能打开。识字强化只修低置信行；质检只重翻少数坏行；短句合并只调一次分组；翻译接管最慢但术语最稳。</div>
       </div>
     </div>
 
