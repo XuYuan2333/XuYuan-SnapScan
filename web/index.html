@@ -117,15 +117,6 @@
       </div>
 
     </section>
-
-    <section class="panel game-panel">
-      <div class="panel-title"><span>游戏专属遮罩</span><span class="q-badge">重点</span></div>
-      <div class="ai-hero">
-        <b>为游戏字幕准备的专属模式</b>
-        <i>固定字幕区域 · 低延迟 · 小模型常驻。具体选项在「游戏专属配置」里，下一轮按你的清单补齐。</i>
-      </div>
-      <button class="btn" id="btnGameOpen" type="button">打开游戏专属配置</button>
-    </section>
   </aside>
 </main>
 
@@ -180,6 +171,11 @@
         <div class="sub-title">翻译模式</div>
         <div class="engine-list" id="mtProfList"></div>
         <div class="group-note" id="noteMtProfile">标准：HyMT1.5全语种模型，所有语种，按需加载，空闲 60 秒释放。<br>效率：Qwen2.5-0.5B 短句/游戏字幕模型，常驻（约 0.4–0.6 GB 显存/内存），切档或退出释放。<br>AI 接管：不占用本地显存，走云端。</div>
+
+        <div class="game-inline">
+          <div class="sub-title">游戏专属配置<span class="q-badge">重点</span></div>
+          <div class="group-note">固定字幕区域 · 低延迟 · 小模型常驻 · 游戏术语。具体选项下一轮按你的清单补，先放这里，不另开抽屉。</div>
+        </div>
 
         <div class="sub-title">翻译模型（按档位）</div>
         <div class="engine-list" id="mtList"></div>
@@ -322,22 +318,6 @@
 </div>
 
 <div class="toast" id="toast"></div>
-
-<!-- 游戏专属配置抽屉 -->
-<div class="drawer-mask" id="gameMask"></div>
-<div class="drawer" id="gameDrawer">
-  <div class="drawer-head">
-    <h2>游戏专属配置</h2>
-    <button class="icon-btn" id="btnCloseGame" title="关闭">✕</button>
-  </div>
-  <div class="drawer-body">
-    <div class="ai-hero">
-      <b>游戏翻译专用</b>
-      <i>这里只放游戏场景的配置：固定字幕区域、低延迟、常驻小模型、游戏术语。具体选项下一轮按你的清单补。</i>
-    </div>
-    <div class="group-note">当前先占位，不改变现有翻译行为。后续加入的选项会写到 ini 并在这里即时生效。</div>
-  </div>
-</div>
 
 <!-- AI 大模型抽屉 -->
 <div class="drawer-mask" id="aiMask"></div>
