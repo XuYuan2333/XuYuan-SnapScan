@@ -140,7 +140,10 @@
     if (!g) return;
     if ($("gameOn")) $("gameOn").checked = !!g.on;
     if ($("gameTrigger")) $("gameTrigger").value = String(g.trigger || 0);
-    if ($("gameInterval")) $("gameInterval").value = String(g.interval || 500);
+    if ($("gameInterval")) {
+      $("gameInterval").value = String(g.interval || 500);
+      $("gameInterval").disabled = Number(g.trigger || 0) !== 1;
+    }
     if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
     if ($("gameFilter")) $("gameFilter").checked = g.filter !== false;
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
