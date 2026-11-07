@@ -52,6 +52,13 @@ namespace QRSnap
         private const int WM_SYSKEYDOWN = 0x0104;
         private const int WM_MOUSEWHEEL = 0x020A;
         private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
+        private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
+        // 遮罩从截图里排除后，游戏模式不用每帧隐藏/恢复遮罩，避免闪屏
+        public static bool CaptureExcluded { get; private set; }
 
         [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
@@ -60,6 +67,13 @@ namespace QRSnap
             if (f == null || !f.IsHandleCreated) return;
             try { SetWindowPos(f.Handle, (IntPtr)(-1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW); }
             catch (Exception) { }
+        }
+
+        private static void ExcludeCapture(Form f)
+        {
+            if (f == null || !f.IsHandleCreated) return;
+            try { CaptureExcluded = SetWindowDisplayAffinity(f.Handle, WDA_EXCLUDEFROMCAPTURE); }
+            catch (Exception) { CaptureExcluded = false; }
         }
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -140,6 +154,7 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
+            ExcludeCapture(_inst);
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -163,6 +178,7 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
+            ExcludeCapture(_inst);
             _inst.HookOn();
             BarShow(screenRect);
         }

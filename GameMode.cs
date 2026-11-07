@@ -266,29 +266,34 @@ namespace QRSnap
             Rectangle union = Union(regions);
             if (union.Width < 16 || union.Height < 12) return;
 
-            // 先收起遮罩，避免 OCR 把上一轮译文当成游戏原文；没变化再恢复
-            try { TransOverlay.HideOverlay(); } catch (Exception) { }
-            Thread.Sleep(24);
+            // 优先让遮罩从截图里排除，这样不用每帧隐藏：不会闪屏
+            bool excluded = TransOverlay.CaptureExcluded;
+            if (!excluded)
+            {
+                try { TransOverlay.HideOverlay(); } catch (Exception) { }
+                Thread.Sleep(24);
+            }
             Bitmap bmp = Capture(union);
             if (bmp == null)
             {
-                try { TransOverlay.Restore(); } catch (Exception) { }
+                if (!excluded) { try { TransOverlay.Restore(); } catch (Exception) { } }
                 return;
             }
             byte[] sig = Signature(bmp, union, regions);
             double diff = _prevSig == null ? 1.0 : SignatureDiff(_prevSig, sig);
             bool changed = _prevSig == null || diff >= 0.015;
             _prevSig = sig;
-            JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " changed=" + (changed ? 1 : 0));
+            JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " changed=" + (changed ? 1 : 0)
+                + " excluded=" + (excluded ? 1 : 0));
             if (!force && AppConfig.GameTrigger == 0 && !changed)
             {
                 bmp.Dispose();
-                try { TransOverlay.Restore(); } catch (Exception) { }
+                if (!excluded) { try { TransOverlay.Restore(); } catch (Exception) { } }
                 return;
             }
 
-            // 关键：旧遮罩立刻恢复，OCR/模型处理期间画面不会空着；新遮罩出来时再替换
-            try { TransOverlay.Restore(); } catch (Exception) { }
+            // 没排除能力的系统才需要恢复；排除成功时旧遮罩根本没动
+            if (!excluded) { try { TransOverlay.Restore(); } catch (Exception) { } }
 
             try
             {
