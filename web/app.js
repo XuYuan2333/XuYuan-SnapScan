@@ -115,10 +115,8 @@
     buildEngineList(e, c.engine);
     applyMtState(s.mt);
 
-    $("verText").textContent = s.version || "—";
     $("verText2").textContent = s.version || "—";
     const rt = (s.runtime && s.runtime.win11) ? "WebView2 · Windows 11" : "WebView2 · Windows 10";
-    $("rtText").textContent = rt;
     $("rtText2").textContent = rt;
   }
 
@@ -461,6 +459,14 @@
   }
 
   /* AI 抽屉：和设置抽屉互斥，同一时刻只开一个 */
+  function openGame(open) {
+    const d = $("gameDrawer");
+    if (!d) return;
+    if (open) openDrawer(false);
+    d.classList.toggle("open", open);
+    if ($("gameMask")) $("gameMask").classList.toggle("show", open);
+  }
+
   function openAI(open) {
     const d = $("aiDrawer");
     if (!d) return;
@@ -574,6 +580,9 @@
     $("btnSettings").addEventListener("click", () => openDrawer(true));
     $("btnCloseDrawer").addEventListener("click", () => openDrawer(false));
     $("mask").addEventListener("click", () => openDrawer(false));
+    if ($("btnGameOpen")) $("btnGameOpen").addEventListener("click", () => openGame(true));
+    if ($("btnCloseGame")) $("btnCloseGame").addEventListener("click", () => openGame(false));
+    if ($("gameMask")) $("gameMask").addEventListener("click", () => openGame(false));
     if ($("btnAI")) $("btnAI").addEventListener("click", () => openAI(true));
     if ($("btnCloseAI")) $("btnCloseAI").addEventListener("click", () => openAI(false));
     if ($("aiMask")) $("aiMask").addEventListener("click", () => openAI(false));
@@ -614,7 +623,7 @@
     if ($("swAiCheck")) $("swAiCheck").addEventListener("change", (e) => setConfig({ aicheck: e.target.checked }));
     if ($("swAiMerge")) $("swAiMerge").addEventListener("change", (e) => setConfig({ aimerge: e.target.checked }));
     if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); openGame(false); } });
 
     // 折叠分组：同一个抽屉里一次只开一组，省地方
     document.querySelectorAll(".acc-head").forEach((head) => {
@@ -798,7 +807,7 @@
       // 翻译没有独立开关：只要装了模型就是可用状态
       if (s && s.mt && s.mt.on === false) setConfig({ translate: true });
       const hk = (s && s.hotkeys) || {};
-      $("status").textContent = "就绪 · " + (hk.qr || "Ctrl+Alt+D") + " 识码 / " + (hk.mt || "Ctrl+Alt+F") + " 翻译";
+      $("status").textContent = "就绪";
     } catch (e) {
       $("status").textContent = "与后端通信失败";
       toast("初始化失败：" + e);
