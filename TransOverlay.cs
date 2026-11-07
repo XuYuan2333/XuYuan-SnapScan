@@ -374,9 +374,10 @@ namespace QRSnap
 
             int alpha = AppConfig.NormalizeMtMaskAlpha(AppConfig.MtMaskAlpha);
             bool white = AppConfig.MtTextStyle != "black";
-            Color bg = white ? Color.FromArgb(alpha * 255 / 100, 250, 250, 250)
-                             : Color.FromArgb(alpha * 255 / 100, 16, 18, 22);
-            Color fg = white ? Color.FromArgb(255, 20, 22, 26) : Color.FromArgb(255, 248, 250, 255);
+            int a = (int)Math.Round(255.0 * alpha / 100.0);
+            Color fg = white ? Color.FromArgb(a, 255, 255, 255) : Color.FromArgb(a, 8, 10, 14);
+            Color shadow = white ? Color.FromArgb((int)(a * 0.72), 0, 0, 0)
+                                 : Color.FromArgb((int)(a * 0.72), 255, 255, 255);
 
             float maxW = Math.Max(40f, Math.Min(w - 8f, Math.Max(box.Width * 1.6f, 140f)));
             Font font;
@@ -424,20 +425,18 @@ namespace QRSnap
             if (x < 2) x = 2;
             if (x + bw > w - 2) x = Math.Max(2, w - bw - 2);
 
-            using (SolidBrush fill = new SolidBrush(bg))
-            using (Pen edge = new Pen(Color.FromArgb(white ? 60 : 90, 255, 255, 255), 1f))
             using (SolidBrush brush = new SolidBrush(fg))
+            using (SolidBrush sh = new SolidBrush(shadow))
             using (StringFormat sf = new StringFormat())
             {
                 sf.Alignment = StringAlignment.Near;
                 sf.LineAlignment = StringAlignment.Near;
-                using (GraphicsPath path = RoundRect(new RectangleF(x, y, bw, bh), 6f))
-                {
-                    g.FillPath(fill, path);
-                    g.DrawPath(edge, path);
-                }
                 for (int i = 0; i < lines.Count; i++)
-                    g.DrawString(lines[i], font, brush, x + pad, y + pad + i * lh, sf);
+                {
+                    float ty = y + pad + i * lh;
+                    g.DrawString(lines[i], font, sh, x + pad + 1.2f, ty + 1.2f, sf);
+                    g.DrawString(lines[i], font, brush, x + pad, ty, sf);
+                }
             }
             font.Dispose();
         }

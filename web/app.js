@@ -74,13 +74,17 @@
     const paintDemo = (demo) => {
       if (!demo) return;
       if (mode === "textonly") {
-        demo.style.background = style === "white"
-          ? "rgba(250,250,250," + (alpha / 100).toFixed(2) + ")"
-          : "rgba(16,18,22," + (alpha / 100).toFixed(2) + ")";
-        demo.style.color = style === "white" ? "#15181d" : "#f7faff";
+        demo.style.background = "transparent";
+        demo.style.border = "none";
+        demo.style.padding = "0";
+        demo.style.color = style === "white" ? "#ffffff" : "#111317";
+        demo.style.textShadow = style === "white" ? "0 1px 2px rgba(0,0,0,.95)" : "0 1px 2px rgba(255,255,255,.9)";
       } else {
         demo.style.background = "rgba(14,18,26," + (alpha / 100).toFixed(2) + ")";
+        demo.style.border = "";
+        demo.style.padding = "";
         demo.style.color = "#f6f9ff";
+        demo.style.textShadow = "none";
       }
     };
     paintDemo($("maskDemo"));
@@ -101,13 +105,17 @@
     const paint = (demo) => {
       if (!demo) return;
       if (mode === "textonly") {
-        demo.style.background = style === "white"
-          ? "rgba(250,250,250," + (p / 100).toFixed(2) + ")"
-          : "rgba(16,18,22," + (p / 100).toFixed(2) + ")";
-        demo.style.color = style === "white" ? "#15181d" : "#f7faff";
+        demo.style.background = "transparent";
+        demo.style.border = "none";
+        demo.style.padding = "0";
+        demo.style.color = style === "white" ? "#ffffff" : "#111317";
+        demo.style.textShadow = style === "white" ? "0 1px 2px rgba(0,0,0,.95)" : "0 1px 2px rgba(255,255,255,.9)";
       } else {
         demo.style.background = "rgba(14,18,26," + (p / 100).toFixed(2) + ")";
+        demo.style.border = "";
+        demo.style.padding = "";
         demo.style.color = "#f6f9ff";
+        demo.style.textShadow = "none";
       }
     };
     paint($("maskDemo"));
