@@ -12,6 +12,7 @@ namespace QRSnap
     internal static class GameRuntime
     {
         private static System.Threading.Timer _timer;
+        private static System.Threading.Timer _watch;
         private static bool _busy;
         private static int _gen;
         private static byte[] _prevSig;
@@ -122,6 +123,7 @@ namespace QRSnap
             try { JadeHost.HideWindow(true); } catch (Exception) { }   // 让游戏画面露出来
             _prevSig = null;
             StartTimer();
+            StartWatch();
             WarmModel(profile);
             JadeHost.Log("[game] start regions=" + rs.Count + " profile=" + profile
                 + " trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs);
@@ -131,6 +133,7 @@ namespace QRSnap
         public static void Stop()
         {
             if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
+            if (_watch != null) { try { _watch.Dispose(); } catch (Exception) { } _watch = null; }
             _gen++;
             _busy = false;
             _paused = false;
@@ -155,6 +158,7 @@ namespace QRSnap
             if (!AppConfig.GameOn) return;
             _prevSig = null;
             StartTimer();
+            StartWatch();
             JadeHost.Log("[game] reconfigure trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs);
         }
 
@@ -164,8 +168,9 @@ namespace QRSnap
             if (paused)
             {
                 if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
+                if (_watch != null) { try { _watch.Dispose(); } catch (Exception) { } _watch = null; }
             }
-            else if (AppConfig.GameOn) StartTimer();
+            else if (AppConfig.GameOn) { StartTimer(); StartWatch(); }
         }
 
         // 游戏模式下只有「隐藏遮罩」快捷键和遮罩上的关闭按钮能关遮罩
@@ -210,6 +215,55 @@ namespace QRSnap
         {
             try { JadeHost.RunOnUi(delegate { Trigger(false); }); }
             catch (Exception ex) { JadeHost.Log("[game] timer fail " + ex.Message); }
+        }
+
+        // 固定间隔/手动模式也要盯着画面：一旦变了就先把旧遮罩收掉，别让旧译文停在画面上
+        private static void StartWatch()
+        {
+            if (_watch != null) { try { _watch.Dispose(); } catch (Exception) { } _watch = null; }
+            _watch = new System.Threading.Timer(WatchTick, null, 250, 250);
+        }
+
+        private static void WatchTick(object state)
+        {
+            try { JadeHost.RunOnUi(delegate { WatchChange(); }); }
+            catch (Exception ex) { JadeHost.Log("[game] watch fail " + ex.Message); }
+        }
+
+        private static void WatchChange()
+        {
+            if (_paused || _overlayClosed || !AppConfig.GameOn) return;
+            if (AppConfig.GameTrigger == 0) return;   // 变化模式由翻译轮次自己处理
+            List<Rectangle> regions = Regions();
+            if (regions.Count == 0) return;
+            Rectangle union = Union(regions);
+            if (union.Width < 16 || union.Height < 12) return;
+
+            bool excluded = TransOverlay.CaptureExcluded;
+            if (!excluded)
+            {
+                try { TransOverlay.HideOverlay(); } catch (Exception) { }
+                Thread.Sleep(16);
+            }
+            Bitmap bmp = Capture(union);
+            if (bmp == null)
+            {
+                if (!excluded) { try { TransOverlay.Restore(); } catch (Exception) { } }
+                return;
+            }
+            byte[] sig = Signature(bmp, union, regions);
+            bmp.Dispose();
+            if (!excluded) { try { TransOverlay.Restore(); } catch (Exception) { } }
+
+            double diff = _prevSig == null ? 0 : SignatureDiff(_prevSig, sig);
+            if (_prevSig != null && diff >= SensitivityThreshold())
+            {
+                _prevSig = sig;
+                try { TransOverlay.HideOverlay(); } catch (Exception) { }
+                JadeHost.Log("[game] page changed, hide overlay diff=" + diff.ToString("0.000"));
+            }
+            else if (_prevSig == null) _prevSig = sig;
+            else if (diff < SensitivityThreshold()) _prevSig = sig;
         }
 
         private static void WarmModel(string profile)
