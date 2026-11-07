@@ -326,58 +326,68 @@
     <button class="icon-btn" id="btnCloseGame" title="关闭">✕</button>
   </div>
   <div class="drawer-body" id="gameDetail">
-    <div class="game-line">
-      <label class="game-check"><input type="checkbox" id="gameOn"> 启用游戏模式</label>
-    </div>
+    <label class="switch-row">
+      <div><b>启用游戏模式</b><i>只翻译固定区域内的字幕；启动时自动加载 0.5B，关闭时释放所有本地模型。</i></div>
+      <input type="checkbox" id="gameOn"><span class="sw"></span>
+    </label>
     <div class="group-note" id="gameMsg">先添加固定字幕区域</div>
 
     <div class="sub-title">固定字幕区域</div>
     <div class="game-regions" id="gameRegions"></div>
     <div class="row-btns">
-      <button class="btn" id="btnGameAdd" type="button">添加区域</button>
-      <button class="btn" id="btnGameClear" type="button">全部清空</button>
+      <button class="btn ghost" id="btnGameAdd" type="button">添加区域</button>
+      <button class="btn ghost" id="btnGameClear" type="button">全部清空</button>
     </div>
 
-    <div class="sub-title">触发方式</div>
-    <select class="game-select" id="gameTrigger">
-      <option value="0">变化时立即翻译（上一轮没结束不排下一轮）</option>
-      <option value="1">固定时间间隔翻译</option>
-      <option value="2">手动快捷键翻译（Ctrl+Alt+F）</option>
-    </select>
-    <div class="game-line">
-      <span>固定间隔</span>
-      <select class="game-select" id="gameInterval">
-        <option value="500">0.5 秒</option>
-        <option value="1000">1.0 秒</option>
-        <option value="1500">1.5 秒</option>
-        <option value="2000">2.0 秒</option>
+    <div class="sub-title">翻译触发</div>
+    <label class="field">
+      <span>触发方式</span>
+      <select id="gameTrigger">
+        <option value="0">变化时立即翻译（上一轮没结束不排下一轮）</option>
+        <option value="1">固定时间间隔翻译</option>
+        <option value="2">手动快捷键翻译（Ctrl+Alt+F）</option>
       </select>
+    </label>
+    <div class="field-grid">
+      <label class="field">
+        <span>固定间隔</span>
+        <select id="gameInterval">
+          <option value="500">0.5 秒</option>
+          <option value="1000">1.0 秒</option>
+          <option value="1500">1.5 秒</option>
+          <option value="2000">2.0 秒</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>变化敏感度</span>
+        <select id="gameSens">
+          <option value="0">超灵敏</option>
+          <option value="1">灵敏</option>
+          <option value="2">平衡</option>
+          <option value="3">迟钝</option>
+          <option value="4">最迟钝</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>游戏模型</span>
+        <select id="gameModel">
+          <option value="efficiency">0.5B 效率（推荐）</option>
+          <option value="standard">HyMT1.5 标准（较慢）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>遮罩模式</span>
+        <select id="gameMask">
+          <option value="efficiency">效率遮罩（固定）</option>
+        </select>
+      </label>
     </div>
-    <div class="game-line">
-      <span>变化敏感度</span>
-      <select class="game-select" id="gameSens">
-        <option value="0">超灵敏</option>
-        <option value="1">灵敏</option>
-        <option value="2">平衡</option>
-        <option value="3">迟钝</option>
-        <option value="4">最迟钝</option>
-      </select>
-    </div>
-    <div class="game-line">
-      <span>游戏模型</span>
-      <select class="game-select" id="gameModel">
-        <option value="efficiency">0.5B 效率（推荐，延迟低）</option>
-        <option value="standard">HyMT1.5 标准（高质量，较慢）</option>
-      </select>
-    </div>
-    <div class="game-line">
-      <span>遮罩模式</span>
-      <select class="game-select" id="gameMask">
-        <option value="efficiency">效率遮罩（游戏固定）</option>
-      </select>
-    </div>
-    <label class="game-check"><input type="checkbox" id="gameMerge"> 合并被拆成两行的字幕</label>
-    <div class="group-note">建议游戏使用「无边框窗口」；独占全屏可能截到黑屏。启动游戏模式会自动加载 0.5B，关闭时释放所有本地模型。</div>
+
+    <label class="switch-row">
+      <div><b>合并被拆成两行的字幕</b><i>同一区域、上一行没句末标点、下一行是续行时，先合并再翻译。</i></div>
+      <input type="checkbox" id="gameMerge"><span class="sw"></span>
+    </label>
+    <div class="group-note">建议游戏使用「无边框窗口」；独占全屏可能截到黑屏。</div>
   </div>
 </div>
 
