@@ -1,4 +1,4 @@
-﻿/* XuYuan-SnapScan · Web UI
+/* XuYuan-SnapScan · Web UI
    浅色毛玻璃 + 蓝色主色，全部可读性优先 */
 
 :root {
@@ -374,6 +374,13 @@ html, body {
 .field input[readonly] { background: rgba(247, 250, 255, .9); cursor: pointer; }
 
 .group-note { font-size: 11.5px; color: #9aa6b9; line-height: 1.7; margin: 2px 0 10px; }
+.game-inline {
+  margin: 2px 0 12px; padding: 10px 12px; border-radius: 12px;
+  background: linear-gradient(135deg, rgba(47,111,237,.06), rgba(91,140,255,.035));
+  border: 1px solid rgba(47,111,237,.14);
+}
+.game-inline .sub-title { display: flex; align-items: center; gap: 8px; margin-top: 0; border-top: none; padding-top: 0; }
+.game-inline .group-note { margin-bottom: 0; }
 .row-btns { display: flex; gap: 8px; }
 
 /* 引擎选择：竖排选项，没找到模型的整行置灰不可点 */
