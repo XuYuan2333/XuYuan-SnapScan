@@ -114,6 +114,7 @@ namespace QRSnap
             AppConfig.GameOn = true;
             LastError = "";
             try { AppConfig.Save(); } catch (Exception) { }
+            try { JadeHost.HideWindow(true); } catch (Exception) { }   // 让游戏画面露出来
             _lastHash = 0;
             StartTimer();
             WarmModel(profile);
@@ -134,6 +135,7 @@ namespace QRSnap
             _prevProfile = null;
             try { AppConfig.Save(); } catch (Exception) { }
             try { TransOverlay.HideOverlay(); } catch (Exception) { }
+            try { JadeHost.ShowWindow(true); } catch (Exception) { }
             // 关闭游戏模式释放所有本地模型
             try { MtRunner.Invalidate(); } catch (Exception) { }
             try { LlamaMt.Shutdown(); } catch (Exception) { }
@@ -356,6 +358,7 @@ namespace QRSnap
             if (bt.Length == 0) return false;
             char first = bt[0];
             if (char.IsLower(first)) return true;
+            if (first >= '\u3040' && first <= '\u9FFF') return true;   // 日文/中文续行
             if (end == ',' || end == '，' || end == '、' || end == '-' || end == '—') return true;
             string low = bt.ToLowerInvariant();
             string[] conn = { "and ", "or ", "but ", "of ", "the ", "to ", "in ", "with ", "for ", "as ", "that ", "which " };
