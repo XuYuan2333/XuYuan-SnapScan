@@ -2046,6 +2046,7 @@ namespace QRSnap
             sb.Append("\"on\":").Append(J.B(AppConfig.GameOn));
             sb.Append(",\"trigger\":").Append(AppConfig.GameTrigger);
             sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
+            sb.Append(",\"sens\":").Append(AppConfig.GameSensitivity);
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.MtModeEfficiency));
@@ -2267,6 +2268,12 @@ namespace QRSnap
                     {
                         int gv;
                         if (int.TryParse(v, out gv)) AppConfig.GameIntervalMs = Math.Max(250, Math.Min(5000, gv));
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gamesens")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameSensitivity = Math.Max(0, Math.Min(4, gv));
                         GameRuntime.Reconfigure();
                     }
                     else if (k == "gamemodel")

@@ -459,6 +459,7 @@ namespace QRSnap
         public static string GameRegions = "";                           // 多个固定区域：x,y,w,h;x,y,w,h
         public static int GameTrigger;                                   // 0=变化即翻 1=固定间隔 2=手动快捷键
         public static int GameIntervalMs = 500;                          // 固定间隔，默认 0.5s
+        public static int GameSensitivity = 2;                           // 0超灵敏 1灵敏 2平衡 3迟钝 4最迟钝
         public static string GameModel = MtProfileEfficiency;            // 游戏模式默认 0.5B，可切标准
         public static string GameMaskMode = MtModeEfficiency;            // 游戏遮罩独立控制；仅效率，游戏页不提供拟真
         public static bool GameMerge = true;                             // 合并被拆开的字幕行
@@ -619,6 +620,7 @@ namespace QRSnap
             GameRegions = "";
             GameTrigger = 0;
             GameIntervalMs = 500;
+            GameSensitivity = 2;
             GameModel = MtProfileEfficiency;
             GameMaskMode = MtModeEfficiency;
             GameMerge = true;
@@ -694,6 +696,7 @@ namespace QRSnap
                     else if (k.Equals("gameregions", StringComparison.OrdinalIgnoreCase)) GameRegions = v;
                     else if (k.Equals("gametrigger", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameTrigger = Math.Max(0, Math.Min(2, n)); }
                     else if (k.Equals("gameinterval", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameIntervalMs = Math.Max(250, Math.Min(5000, n)); }
+                    else if (k.Equals("gamesens", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameSensitivity = Math.Max(0, Math.Min(4, n)); }
                     else if (k.Equals("gamemodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameModel = NormalizeMtProfile(v);
                     else if (k.Equals("gamemask", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameMaskMode = NormalizeMtMode(v);
                     else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
@@ -751,6 +754,7 @@ namespace QRSnap
             sb.Append("gameregions=").Append(GameRegions ?? "").Append("\r\n");
             sb.Append("gametrigger=").Append(GameTrigger).Append("\r\n");
             sb.Append("gameinterval=").Append(GameIntervalMs).Append("\r\n");
+            sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
             sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
             sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
             sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");

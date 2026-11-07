@@ -144,6 +144,7 @@
       $("gameInterval").value = String(g.interval || 500);
       $("gameInterval").disabled = Number(g.trigger || 0) !== 1;
     }
+    if ($("gameSens")) $("gameSens").value = String(g.sens == null ? 2 : g.sens);
     if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
     if ($("gameMask")) $("gameMask").value = "efficiency";
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
@@ -776,6 +777,9 @@
     });
     if ($("gameInterval")) $("gameInterval").addEventListener("change", (e) => {
       setConfig({ gameinterval: Number(e.target.value) });
+    });
+    if ($("gameSens")) $("gameSens").addEventListener("change", (e) => {
+      setConfig({ gamesens: Number(e.target.value) });
     });
     if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
       setConfig({ gamemerge: e.target.checked });

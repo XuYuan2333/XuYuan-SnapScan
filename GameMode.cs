@@ -281,10 +281,11 @@ namespace QRSnap
             }
             byte[] sig = Signature(bmp, union, regions);
             double diff = _prevSig == null ? 1.0 : SignatureDiff(_prevSig, sig);
-            bool changed = _prevSig == null || diff >= 0.015;
+            double threshold = SensitivityThreshold();
+            bool changed = _prevSig == null || diff >= threshold;
             _prevSig = sig;
-            JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " changed=" + (changed ? 1 : 0)
-                + " excluded=" + (excluded ? 1 : 0));
+            JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " threshold=" + threshold.ToString("0.000")
+                + " changed=" + (changed ? 1 : 0) + " excluded=" + (excluded ? 1 : 0));
             if (!force && AppConfig.GameTrigger == 0 && !changed)
             {
                 bmp.Dispose();
@@ -322,6 +323,18 @@ namespace QRSnap
             finally
             {
                 bmp.Dispose();
+            }
+        }
+
+        private static double SensitivityThreshold()
+        {
+            switch (AppConfig.GameSensitivity)
+            {
+                case 0: return 0.004;   // 超灵敏
+                case 1: return 0.008;   // 灵敏
+                case 3: return 0.030;   // 迟钝
+                case 4: return 0.060;   // 最迟钝
+                default: return 0.015;  // 平衡
             }
         }
 
