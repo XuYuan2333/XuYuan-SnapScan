@@ -365,7 +365,8 @@ namespace QRSnap
             string custom = MtDir != null ? MtDir.Trim() : string.Empty;
             if (custom.Length > 0) return custom;
             string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), MtFolderName);
-            if (Directory.Exists(beside)) return beside;
+            try { if (!Directory.Exists(beside)) Directory.CreateDirectory(beside); return beside; }
+            catch (Exception) { }
             return Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan"), MtFolderName);
         }
 
@@ -377,7 +378,8 @@ namespace QRSnap
             string custom = ModelDir != null ? ModelDir.Trim() : string.Empty;
             if (custom.Length > 0) return custom;
             string beside = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), ModelFolderName);
-            if (Directory.Exists(beside)) return beside;
+            try { if (!Directory.Exists(beside)) Directory.CreateDirectory(beside); return beside; }
+            catch (Exception) { }
             return Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan"), ModelFolderName);
         }
 

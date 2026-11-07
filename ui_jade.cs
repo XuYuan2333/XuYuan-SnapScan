@@ -2455,6 +2455,7 @@ namespace QRSnap
                 {
                     string mtRoot = AppConfig.MtRoot();
                     if (!Directory.Exists(mtRoot)) Directory.CreateDirectory(mtRoot);
+                    bool sawSmall = false, sawBig = false;
                     for (int i = 0; i < ggufs.Count; i++)
                     {
                         string fn = Path.GetFileName(ggufs[i]);
@@ -2462,9 +2463,15 @@ namespace QRSnap
                         {
                             File.Copy(ggufs[i], Path.Combine(mtRoot, fn), true);
                             got.Add("翻译模型 " + Path.GetFileNameWithoutExtension(fn));
+                            if (MtRouter.IsGameModelPath(fn)) sawSmall = true;
+                            else sawBig = true;
                         }
                         catch (Exception) { }
                     }
+                    // 导入哪个档的 GGUF 就自动切到对应档，避免“装了却还是缺模型”
+                    if (sawSmall) AppConfig.MtProfile = AppConfig.MtProfileEfficiency;
+                    else if (sawBig) AppConfig.MtProfile = AppConfig.MtProfileStandard;
+                    try { AppConfig.Save(); } catch (Exception) { }
                     MtRunner.Invalidate();
                 }
 
