@@ -2072,7 +2072,9 @@ namespace QRSnap
 
         private static bool IsWin11()
         {
-            try { return JadeNative.is_windows_11() == 1; } catch (Exception) { return false; }
+            try { if (JadeNative.is_windows_11() == 1) return true; } catch (Exception) { }
+            // JadeView 在 Win11 24H2/25H2 上可能误判，按 build 兜底
+            return Environment.OSVersion.Version.Major >= 10 && Environment.OSVersion.Version.Build >= 22000;
         }
 
         private static string AppVersion()        {
