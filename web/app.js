@@ -150,7 +150,7 @@
 
     const badge = $("gameBadge");
     if (badge) {
-      badge.textContent = g.on ? "运行中" : (g.ready ? "未启用" : "未就绪");
+      badge.textContent = g.on ? "已启用" : (g.ready ? "未启用" : "未就绪");
       badge.className = "q-badge" + (g.on ? " ok" : (g.ready ? "" : " warn"));
     }
     if ($("gameMsg")) $("gameMsg").textContent = g.msg || "";
@@ -505,6 +505,14 @@
   }
 
   /* AI 抽屉：和设置抽屉互斥，同一时刻只开一个 */
+  function openGame(open) {
+    const d = $("gameDrawer");
+    if (!d) return;
+    if (open) openDrawer(false);
+    d.classList.toggle("open", open);
+    if ($("gameMask")) $("gameMask").classList.toggle("show", open);
+  }
+
   function openAI(open) {
     const d = $("aiDrawer");
     if (!d) return;
@@ -659,7 +667,7 @@
     if ($("swAiCheck")) $("swAiCheck").addEventListener("change", (e) => setConfig({ aicheck: e.target.checked }));
     if ($("swAiMerge")) $("swAiMerge").addEventListener("change", (e) => setConfig({ aimerge: e.target.checked }));
     if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); openGame(false); } });
 
     // 折叠分组：同一个抽屉里一次只开一组，省地方
     document.querySelectorAll(".acc-head").forEach((head) => {
@@ -746,11 +754,10 @@
       }
     });
 
-    // 快捷区的「游戏专属配置」：就地展开，不另开抽屉
-    if ($("quickGame")) $("quickGame").addEventListener("click", () => {
-      const d = $("gameDetail");
-      if (d) d.hidden = !d.hidden;
-    });
+    // 快捷区的「游戏专属配置」：打开独立设置页
+    if ($("quickGame")) $("quickGame").addEventListener("click", () => openGame(true));
+    if ($("btnCloseGame")) $("btnCloseGame").addEventListener("click", () => openGame(false));
+    if ($("gameMask")) $("gameMask").addEventListener("click", () => openGame(false));
 
     if ($("gameOn")) $("gameOn").addEventListener("change", async (e) => {
       const want = e.target.checked;

@@ -185,6 +185,13 @@ namespace QRSnap
             try { if (!IsShowing) Toggle(); } catch (Exception) { }
         }
 
+        // 用户点遮罩上的「关闭译文」或滚轮关闭：游戏模式下要记住“用户关的”，不能下一轮又弹出来
+        public static void HideByUser()
+        {
+            try { GameRuntime.SetOverlayClosed(true); } catch (Exception) { }
+            HideOverlay();
+        }
+
         public static void HideOverlay()
         {
             if (_inst != null)
@@ -267,7 +274,7 @@ namespace QRSnap
                     {
                         NativeShell.Log("trans esc pressed");
                         _closing = true;
-                        BeginInvoke(new MethodInvoker(delegate() { HideOverlay(); }));
+                        BeginInvoke(new MethodInvoker(delegate() { HideByUser(); }));
                     }
                 }
             }
@@ -280,7 +287,7 @@ namespace QRSnap
             {
                 _closing = true;
                 NativeShell.Log("trans wheel close");
-                BeginInvoke(new MethodInvoker(delegate() { HideOverlay(); }));
+                BeginInvoke(new MethodInvoker(delegate() { HideByUser(); }));
             }
             return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }
@@ -757,7 +764,7 @@ namespace QRSnap
         {
             base.OnMouseDown(e);
             NativeShell.Log("trans bar click " + e.X + "," + e.Y + " btn=" + e.Button);
-            TransOverlay.HideOverlay();
+            TransOverlay.HideByUser();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)

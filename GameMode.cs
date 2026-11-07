@@ -17,6 +17,7 @@ namespace QRSnap
         private static int _gen;
         private static ulong _lastHash;
         private static bool _paused;
+        private static bool _overlayClosed;
         private static string _prevProfile;
 
         public static bool Running { get { return AppConfig.GameOn; } }
@@ -113,6 +114,7 @@ namespace QRSnap
             AppConfig.GameModel = profile;
             AppConfig.GameOn = true;
             LastError = "";
+            _overlayClosed = false;
             try { AppConfig.Save(); } catch (Exception) { }
             try { JadeHost.HideWindow(true); } catch (Exception) { }   // 让游戏画面露出来
             _lastHash = 0;
@@ -129,6 +131,7 @@ namespace QRSnap
             _gen++;
             _busy = false;
             _paused = false;
+            _overlayClosed = false;
             AppConfig.GameOn = false;
             LastError = "";
             if (!string.IsNullOrEmpty(_prevProfile)) AppConfig.MtProfile = _prevProfile;
@@ -158,6 +161,36 @@ namespace QRSnap
                 if (_timer != null) _timer.Stop();
             }
             else if (AppConfig.GameOn) StartTimer();
+        }
+
+        // 游戏模式下只有「隐藏遮罩」快捷键和遮罩上的关闭按钮能关遮罩
+        public static void ToggleOverlay()
+        {
+            if (_overlayClosed)
+            {
+                _overlayClosed = false;
+                _lastHash = 0;
+                Trigger(true);
+            }
+            else
+            {
+                _overlayClosed = true;
+                _gen++;
+                try { TransOverlay.HideOverlay(); } catch (Exception) { }
+                JadeHost.Log("[game] overlay closed by user");
+            }
+        }
+
+        public static void SetOverlayClosed(bool closed)
+        {
+            if (!AppConfig.GameOn) return;
+            if (closed)
+            {
+                _overlayClosed = true;
+                _gen++;
+                try { TransOverlay.HideOverlay(); } catch (Exception) { }
+            }
+            else _overlayClosed = false;
         }
 
         private static void StartTimer()
@@ -193,7 +226,7 @@ namespace QRSnap
         // force=true：手动快捷键，翻译中则中断与上一轮，开新一轮
         public static void Trigger(bool force)
         {
-            if (_paused) return;
+            if (_paused || _overlayClosed) return;
             if (!AppConfig.GameOn) return;
             if (_busy)
             {
@@ -255,6 +288,7 @@ namespace QRSnap
                     return;
                 }
                 int lines = JadeHost.GameTranslate(bmp, union, segs);
+                if (_overlayClosed) { try { TransOverlay.HideOverlay(); } catch (Exception) { } }
                 JadeHost.Log("[game] shown=" + lines + " blocks=" + segs.Count
                     + " trigger=" + AppConfig.GameTrigger + " force=" + (force ? 1 : 0));
             }

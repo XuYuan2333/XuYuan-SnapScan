@@ -282,8 +282,9 @@ namespace QRSnap
                 else if (id == ID_MT) HotkeyCapture("mt");
                 else if (id == ID_HIDE)
                 {
-                    // 全局显隐：Ctrl+Alt+G 关掉全部译文 / 再按一次恢复
-                    TransOverlay.Toggle();
+                    // 全局显隐：Ctrl+Alt+G 关掉全部译文 / 再按一次恢复；游戏模式记住用户关闭状态
+                    if (AppConfig.GameOn) GameRuntime.ToggleOverlay();
+                    else TransOverlay.Toggle();
                     Log("hide toggle showing=" + TransOverlay.IsShowing);
                 }
                 return;
