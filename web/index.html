@@ -194,9 +194,9 @@
           </select>
         </label>
         <div class="group-note" id="noteMtMode">效率：秒出结果，原文被半透明遮罩块盖住，放大看得到块边。<br>拟真：把原文笔画擦掉、按周围背景补洞，再把译文按原框大小画回去。<br>仅译文：原文完全不动，只把白字/黑字的译文贴在原文附近。</div>
-        <div id="textOnlyOpts" hidden>
+        <div id="textOnlyOpts" style="display:none">
           <div class="field-grid">
-            <label class="field"><span>底色</span><select id="selMtTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
+            <label class="field"><span>文字颜色</span><select id="selMtTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
             <label class="field"><span>位置</span><select id="selMtTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
             <label class="field"><span>字号</span><select id="selMtTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
             <label class="field"><span>固定大小</span><input type="number" id="numMtTextSize" min="8" max="72" step="1" value="18"></label>
@@ -405,9 +405,9 @@
       <input type="range" id="gameRngMtAlpha" min="0" max="100" step="1" value="100">
       <span class="val" id="gameLblMtAlpha" style="width:44px;">100%</span>
     </label>
-    <div id="gameTextOnlyOpts" hidden>
+    <div id="gameTextOnlyOpts" style="display:none">
       <div class="field-grid">
-        <label class="field"><span>底色</span><select id="gameTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
+        <label class="field"><span>文字颜色</span><select id="gameTextStyle"><option value="white">白字</option><option value="black">黑字</option></select></label>
         <label class="field"><span>位置</span><select id="gameTextPos"><option value="0">左上</option><option value="1">中上</option><option value="2">右上</option><option value="3">左下</option><option value="4">中下</option><option value="5">右下</option></select></label>
         <label class="field"><span>字号</span><select id="gameTextAuto"><option value="1">自适应</option><option value="0">固定</option></select></label>
         <label class="field"><span>固定大小</span><input type="number" id="gameTextSize" min="8" max="72" step="1" value="18"></label>

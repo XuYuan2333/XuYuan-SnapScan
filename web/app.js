@@ -37,10 +37,10 @@
     if (pv) pv.style.display = (real || text) ? "none" : "";
     if (row) row.style.display = real ? "none" : "";
     if (n1) n1.style.display = real ? "none" : "";
-    if ($("textOnlyOpts")) $("textOnlyOpts").style.display = text ? "" : "none";
-    if ($("textOnlyPreview")) $("textOnlyPreview").style.display = text ? "" : "none";
-    if ($("gameTextOnlyOpts")) $("gameTextOnlyOpts").style.display = text ? "" : "none";
-    if ($("gameMaskPreview")) $("gameMaskPreview").style.display = real ? "none" : "";
+    if ($("textOnlyOpts")) { $("textOnlyOpts").hidden = !text; $("textOnlyOpts").style.display = text ? "block" : "none"; }
+    if ($("textOnlyPreview")) { $("textOnlyPreview").hidden = !text; $("textOnlyPreview").style.display = text ? "block" : "none"; }
+    if ($("gameTextOnlyOpts")) { $("gameTextOnlyOpts").hidden = !text; $("gameTextOnlyOpts").style.display = text ? "block" : "none"; }
+    if ($("gameMaskPreview")) $("gameMaskPreview").style.display = real ? "none" : "block";
   }
 
   function normMaskMode(v) {
@@ -94,8 +94,8 @@
 
     const gamePv = $("gameMaskPreview");
     if (gamePv) gamePv.style.display = mode === "realistic" ? "none" : "";
-    if ($("gameTextOnlyOpts")) $("gameTextOnlyOpts").style.display = mode === "textonly" ? "" : "none";
-    if ($("gameRowAlpha")) $("gameRowAlpha").style.display = mode === "realistic" ? "none" : "";
+    if ($("gameTextOnlyOpts")) { $("gameTextOnlyOpts").hidden = mode !== "textonly"; $("gameTextOnlyOpts").style.display = mode === "textonly" ? "block" : "none"; }
+    if ($("gameRowAlpha")) $("gameRowAlpha").style.display = mode === "realistic" ? "none" : "block";
   }
 
   function paintMaskPreviewAlpha(p) {
