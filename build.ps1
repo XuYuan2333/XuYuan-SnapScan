@@ -40,7 +40,7 @@ try {
         /r:zxing.dll /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Core.dll `
         /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
         "/r:$ort" "/r:$mem" "/r:$netstd" `
-        "/out:$out" src.cs ui_jade.cs PpOcr.cs
+        "/out:$out" src.cs ui_jade.cs PpOcr.cs Mt.cs TransOverlay.cs
 } finally {
     Pop-Location
 }

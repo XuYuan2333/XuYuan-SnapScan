@@ -88,6 +88,22 @@ html, body {
 }
 .icon-btn:hover { background: #fff; border-color: #c3d5f4; color: #2f6fed; box-shadow: 0 4px 12px rgba(47,111,237,.12); }
 
+/* AI 按钮：和设置齿轮并排，放在齿轮左边 */
+.icon-btn.ai-btn {
+  width: 40px; font-size: 12.5px; font-weight: 700; letter-spacing: .8px;
+  color: #2f6fed; border-color: rgba(47,111,237,.28);
+  background: linear-gradient(135deg, rgba(47,111,237,.10), rgba(91,140,255,.16));
+}
+.icon-btn.ai-btn:hover { color: #fff; background: linear-gradient(135deg, #2f6fed, #5b8cff); border-color: transparent; }
+
+.ai-hero {
+  margin: 12px 0 6px; padding: 12px 14px; border-radius: 12px;
+  background: linear-gradient(135deg, rgba(47,111,237,.09), rgba(91,140,255,.05));
+  border: 1px solid rgba(47,111,237,.16);
+}
+.ai-hero b { display: block; font-size: 13px; color: #1f2b45; }
+.ai-hero i { display: block; font-style: normal; font-size: 11.5px; color: #7c8aa1; margin-top: 5px; line-height: 1.65; }
+
 /* ---------- 布局 ---------- */
 .layout {
   height: calc(100% - 64px - 14px - 34px);
@@ -360,7 +376,13 @@ html, body {
 .engine-opt.on { border-color: rgba(96, 150, 255, .95); background: rgba(238, 245, 255, .98); box-shadow: 0 6px 16px rgba(47, 111, 237, .1); }
 .engine-opt.on .tick { background: #2f6fed; border-color: #2f6fed; box-shadow: inset 0 0 0 3.5px #fff; }
 .engine-opt.off { opacity: .42; }
-.engine-opt.off .tick { background: rgba(226, 232, 242, .9); }
+.engine-opt.off .tick { background: rgba(226, 232, 242, .9); font-size: 9px; line-height: 13px; text-align: center; color: #8e9aad; }
+/* 三件套状态行：只展示、不点选，用对勾区分「有 / 缺」 */
+.engine-opt.ok { border-color: rgba(110, 196, 152, .55); background: rgba(246, 253, 249, .95); }
+.engine-opt.ok .tick {
+  background: #2ea36a; border-color: #2ea36a; color: #fff;
+  font-size: 9px; line-height: 13px; text-align: center; font-weight: 700;
+}
 
 .switch-row {
   display: flex; align-items: center; gap: 14px;

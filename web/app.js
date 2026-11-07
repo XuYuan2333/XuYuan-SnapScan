@@ -72,6 +72,18 @@
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
     if ($("selMtMode")) $("selMtMode").value = c.mtmode === "realistic" ? "realistic" : "efficiency";
     applyMtMode(c.mtmode === "realistic" ? "realistic" : "efficiency");
+    applyMtProfile(c.mtprofile || "standard");
+
+    // AI 大模型：只回填参数，不把 key 回显到输入框（只显示末 4 位）
+    const ai = c.ai || {};
+    if ($("selAiProvider")) $("selAiProvider").value = ai.provider === "custom" ? "custom" : "deepseek";
+    if ($("txtAiModel") && document.activeElement !== $("txtAiModel")) $("txtAiModel").value = ai.model || "4.1flash";
+    if ($("txtAiBase") && document.activeElement !== $("txtAiBase")) $("txtAiBase").value = ai.base || "https://api.deepseek.com/v1";
+    if ($("swAiOcr")) $("swAiOcr").checked = !!ai.ocr;
+    if ($("swAiMask")) $("swAiMask").checked = !!ai.mask;
+    if ($("swAiMt")) $("swAiMt").checked = !!ai.mt;
+    if ($("txtAiKey")) $("txtAiKey").placeholder = ai.hasKey ? ((ai.keyTail || "Key") + " 已保存，留空则不改") : "粘贴你自己的 Key，留空则不改";
+    if ($("aiAccNote")) $("aiAccNote").textContent = ai.hasKey ? "已填 Key" : "未填 Key";
     if ($("rngMtAlpha")) {
       const a = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
       $("rngMtAlpha").value = a;
@@ -105,6 +117,49 @@
     $("rtText2").textContent = rt;
   }
 
+  function applyMtProfile(v) {
+    const p = v === "efficiency" ? "efficiency" : (v === "game" ? "game" : "standard");
+    const name = { standard: "标准", efficiency: "效率", game: "游戏" }[p];
+    const hint = {
+      standard: "标准 · HyMT1.5 全方向",
+      efficiency: "效率 · 英/日走小模型",
+      game: "游戏 · 仅英/日→中文",
+    }[p];
+    if ($("mtProfileHint")) $("mtProfileHint").textContent = hint;
+    if ($("mtProfileBadge")) {
+      $("mtProfileBadge").textContent = name;
+      $("mtProfileBadge").className = "q-badge" + (p === "standard" ? "" : " ok");
+    }
+    buildMtProfList(p);
+  }
+
+  // 设置抽屉里的三档模式：点一下就切，后端收到 mtprofile 会重建路由
+  function buildMtProfList(cur) {
+    const box = $("mtProfList");
+    if (!box) return;
+    const rows = [
+      { key: "standard", title: "标准", note: "只用 HyMT1.5 大模型，所有语种" },
+      { key: "efficiency", title: "效率", note: "英 / 日 走小模型，其他语种走大模型" },
+      { key: "game", title: "游戏", note: "只用两个小模型，仅英 / 日 → 中文" },
+    ];
+    box.innerHTML = "";
+    rows.forEach((r) => {
+      const row = document.createElement("div");
+      row.className = "engine-opt pick" + (r.key === cur ? " on" : "");
+      const tick = document.createElement("span"); tick.className = "tick";
+      const name = document.createElement("span"); name.className = "e-name"; name.textContent = r.title;
+      const note = document.createElement("span"); note.className = "e-note"; note.textContent = "（" + r.note + "）";
+      row.appendChild(tick); row.appendChild(name); row.appendChild(note);
+      row.addEventListener("click", () => {
+        if (r.key === cur) return;
+        if (S && S.config) S.config.mtprofile = r.key;
+        applyMtProfile(r.key);
+        setConfig({ mtprofile: r.key });
+      });
+      box.appendChild(row);
+    });
+  }
+
   function describeEngine(e) {
     if (!e) return "—";
     if (e.effective === "wechat") {
@@ -123,96 +178,73 @@
   }
 
   /* ---------------- 翻译 ---------------- */
-  function activeModel(mt) {
-    const models = (mt && mt.models) || [];
-    const ready = models.filter((m) => m && m.ready);
-    if (mt && mt.selected) {
-      const hit = ready.filter((m) => m.name === mt.selected)[0];
-      if (hit) return hit;
-    }
-    return ready[0] || null;
-  }
-
   function applyMtState(mt) {
     mt = mt || {};
-    const models = mt.models || [];
-    const anyReady = !!mt.ready;
-    const model = activeModel(mt);
+    const ready = !!mt.ready;                        // 三件套齐全才为 true
+    const missing = mt.missing || [];
+    const active = mt.active || "";
+    const prof = (S && S.config && S.config.mtprofile) || "standard";
 
-    // 右上角第二颗 pill：只显示当前翻译模型名（没有就写「未装翻译模型」，不显示语言对）
+    // 右上角 pill：只显示当前模式实际吃什么模型（用短文案，避免被 pill 宽度截断）
     const pill = $("mtPill");
-    pill.classList.toggle("is-none", !anyReady);
-    $("mtPillText").textContent = anyReady
-      ? (model ? model.name : "翻译模型")
-      : "未装翻译模型";
-    $("mtAccNote").textContent = anyReady ? (model ? model.name : "") : "未装模型";
+    pill.classList.toggle("is-none", !ready);
+    $("mtPillText").textContent = ready
+      ? (mt.short || active || "翻译就绪")
+      : (missing.length ? "缺 " + missing.length + " 个模型" : "未装翻译模型");
+    $("mtAccNote").textContent = ready ? (active || "") : "模型不全";
 
-    // 主界面翻译按钮：没模型就置灰
+    // 主界面翻译按钮：三件套缺一就整体置灰
     const btn = $("btnMt");
-    btn.classList.toggle("disabled", !anyReady);
-    btn.disabled = !anyReady;
-    btn.title = anyReady ? "截图后原地显示译文" : "先到设置里导入翻译模型";
-    $("mtSub").textContent = anyReady ? "原地显示译文" : "未装翻译模型";
+    btn.classList.toggle("disabled", !ready);
+    btn.disabled = !ready;
+    btn.title = ready ? "截图后原地显示译文" : ("缺 " + (missing.length ? missing.join("、") : "翻译模型") + "，翻译已停用");
+    $("mtSub").textContent = ready ? "原地显示译文" : "模型不全，翻译已停用";
 
-    // 快捷区：翻译模型行（只写模型名）
-    $("mtName").textContent = anyReady
-      ? (model ? model.name : "已装模型")
-      : "未装翻译模型";
-    $("mtBadge").textContent = anyReady ? "就绪" : "未装";
-    $("mtBadge").className = "q-badge" + (anyReady ? " ok" : " off");
+    // 快捷区：翻译模型行只做状态展示，不提供切换
+    $("mtName").textContent = ready
+      ? (active || "三件套已就绪")
+      : ("缺 " + (missing.length ? missing.join("、") : "翻译模型"));
+    if ($("mtBadge")) {
+      $("mtBadge").textContent = ready ? "就绪" : "不全";
+      $("mtBadge").className = "q-badge" + (ready ? " ok" : " off");
+    }
 
-    const sel = $("selMtLang");
-    if (mt.lang) sel.value = mt.lang;
+    buildMtList(mt);
 
-    buildMtList(models, mt.selected);
-
-    let note = anyReady
-      ? (model ? ("当前使用：" + model.name + "（" + (model.pair || "多语种") + "，以英→中 / 日→中 / 俄→中 为主）") : "已装翻译模型")
-      : "还没装翻译模型。点下面的「导入翻译模型包」选一个 zip，或把模型目录放进「MT Model」。";
-    if (!anyReady && models.length) note = "有 " + models.length + " 个模型目录，但文件不全（缺 encoder / decoder / tokenizer.json）。";
+    const profText = prof === "game" ? "游戏（只用小模型）" : (prof === "efficiency" ? "效率（英 / 日走小模型）" : "标准（只用大模型）");
+    let note = ready
+      ? ("三件套齐了。当前模式：" + profText + "。")
+      : ("还缺：" + (missing.length ? missing.join("、") : "翻译模型") + "。三个模型缺一不可，点下面「导入翻译模型包」补上。");
     if (mt.root) note += "\n目录：" + mt.root;
     $("mtNote").textContent = note;
   }
 
-  // 翻译模型列表：和识字引擎一样的竖排单选，点一下就切过去
-  function buildMtList(models, selected) {
+  // 三件套状态：只展示，不提供点选（三个模型都是必需品）
+  function buildMtList(mt) {
     const box = $("mtList");
+    if (!box) return;
     box.innerHTML = "";
-    const list = models || [];
-    if (!list.length) {
+    const kit = (mt && mt.kit) || [];
+    if (!kit.length) {
       const row = document.createElement("div");
       row.className = "engine-opt off";
       const tick = document.createElement("span"); tick.className = "tick";
       const name = document.createElement("span"); name.className = "e-name"; name.textContent = "未装翻译模型";
-      const note = document.createElement("span"); note.className = "e-note"; note.textContent = "（先导入一个模型包）";
+      const note = document.createElement("span"); note.className = "e-note"; note.textContent = "（先导入模型包）";
       row.appendChild(tick); row.appendChild(name); row.appendChild(note);
       box.appendChild(row);
       return;
     }
-
-    const readyNames = list.filter((m) => m.ready).map((m) => m.name);
-    let active = selected && readyNames.indexOf(selected) >= 0 ? selected : (readyNames[0] || null);
-    if (!selected) active = readyNames[0] || null;
-
-    list.forEach((m) => {
-      if (!m) return;
+    kit.forEach((k) => {
       const row = document.createElement("div");
-      row.className = "engine-opt" + (m.ready ? (" pick" + (m.name === active ? " on" : "")) : " off");
-
+      row.className = "engine-opt" + (k.ready ? " ok" : " off");
       const tick = document.createElement("span"); tick.className = "tick";
+      tick.textContent = k.ready ? "✓" : "×";
       const name = document.createElement("span"); name.className = "e-name";
-      name.textContent = m.label || m.pair || m.name;
+      name.textContent = k.title + (k.ready ? "" : "（缺）");
       const note = document.createElement("span"); note.className = "e-note";
-      note.textContent = m.ready ? "（" + m.name + "）" : "（文件不全）";
-
+      note.textContent = "（" + k.sub + "）";
       row.appendChild(tick); row.appendChild(name); row.appendChild(note);
-      if (m.ready) {
-        row.addEventListener("click", () => {
-          if (m.name !== active) setConfig({ mtpair: m.name });
-        });
-      } else {
-        row.title = "这个模型目录里缺 encoder / decoder / tokenizer.json，用不了";
-      }
       box.appendChild(row);
     });
   }
@@ -339,6 +371,39 @@
   function openDrawer(open) {
     $("drawer").classList.toggle("open", open);
     $("mask").classList.toggle("show", open);
+    if (open) {
+      const box = $("mtProfList");
+      const acc = box ? box.closest(".acc") : null;
+      if (acc) {
+        document.querySelectorAll("#drawer .acc").forEach((a) => { if (a !== acc) a.classList.remove("open"); });
+        acc.classList.add("open");
+      }
+    }
+  }
+
+  /* AI 抽屉：和设置抽屉互斥，同一时刻只开一个 */
+  function openAI(open) {
+    const d = $("aiDrawer");
+    if (!d) return;
+    if (open) {
+      const acc = d.querySelector(".acc");
+      if (acc) acc.classList.add("open");
+      openDrawer(false);
+    }
+    d.classList.toggle("open", open);
+    if ($("aiMask")) $("aiMask").classList.toggle("show", open);
+  }
+
+  async function saveAI() {
+    const patch = {
+      aimodel: $("txtAiModel").value.trim(),
+      aibase: $("txtAiBase").value.trim(),
+    };
+    const k = $("txtAiKey").value.trim();
+    if (k) patch.aikey = k;
+    await setConfig(patch);
+    if ($("txtAiKey")) $("txtAiKey").value = "";
+    toast("AI 设置已保存");
   }
 
   async function setConfig(patch) {
@@ -414,14 +479,33 @@
     $("btnSettings").addEventListener("click", () => openDrawer(true));
     $("btnCloseDrawer").addEventListener("click", () => openDrawer(false));
     $("mask").addEventListener("click", () => openDrawer(false));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") openDrawer(false); });
+    if ($("btnAI")) $("btnAI").addEventListener("click", () => openAI(true));
+    if ($("btnCloseAI")) $("btnCloseAI").addEventListener("click", () => openAI(false));
+    if ($("aiMask")) $("aiMask").addEventListener("click", () => openAI(false));
+    if ($("btnSaveAI")) $("btnSaveAI").addEventListener("click", saveAI);
+    if ($("txtAiKey")) $("txtAiKey").addEventListener("keydown", (e) => { if (e.key === "Enter") saveAI(); });
+    if ($("btnClearKey")) $("btnClearKey").addEventListener("click", async () => {
+      await setConfig({ aikey: "" });
+      if ($("txtAiKey")) $("txtAiKey").value = "";
+      toast("已清除 Key");
+    });
+    if ($("selAiProvider")) $("selAiProvider").addEventListener("change", (e) => {
+      // 切到 DeepSeek 官方就顺手把地址和默认模型名填回去，小白不用记
+      if (e.target.value === "deepseek") setConfig({ aiprovider: "deepseek", aibase: "https://api.deepseek.com/v1", aimodel: "4.1flash" });
+      else setConfig({ aiprovider: "custom" });
+    });
+    if ($("swAiOcr")) $("swAiOcr").addEventListener("change", (e) => setConfig({ aiocr: e.target.checked }));
+    if ($("swAiMask")) $("swAiMask").addEventListener("change", (e) => setConfig({ aimask: e.target.checked }));
+    if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); } });
 
-    // 折叠分组：一次只开一组，省地方
+    // 折叠分组：同一个抽屉里一次只开一组，省地方
     document.querySelectorAll(".acc-head").forEach((head) => {
       head.addEventListener("click", () => {
         const acc = head.parentElement;
+        const scope = acc.closest(".drawer") || document;
         const willOpen = !acc.classList.contains("open");
-        document.querySelectorAll(".acc").forEach((a) => a.classList.remove("open"));
+        scope.querySelectorAll(".acc").forEach((a) => a.classList.remove("open"));
         if (willOpen) acc.classList.add("open");
       });
     });
@@ -431,7 +515,6 @@
     $("swRestoreWin").addEventListener("change", (e) => setConfig({ restorewin: e.target.checked }));
     $("swRestoreQr").addEventListener("change", (e) => setConfig({ restoreqr: e.target.checked }));
 
-    $("selMtLang").addEventListener("change", (e) => setConfig({ mtlang: e.target.value }));
     $("swMtBar").addEventListener("change", (e) => setConfig({ mtbar: e.target.checked }));
     $("selMtPerf").addEventListener("change", (e) => setConfig({ mtperf: e.target.value }));
 
@@ -468,6 +551,16 @@
     $("quickEngine").addEventListener("click", () => {
       openDrawer(true);
       const acc = $("engineList").closest(".acc");
+      if (acc) {
+        document.querySelectorAll(".acc").forEach((a) => a.classList.remove("open"));
+        acc.classList.add("open");
+      }
+    });
+
+    // 快捷区的「翻译模式」行：切换入口在设置里，点这一行直接跳到对应分组并展开
+    $("quickMtProfile").addEventListener("click", () => {
+      openDrawer(true);
+      const acc = $("mtProfList").closest(".acc");
       if (acc) {
         document.querySelectorAll(".acc").forEach((a) => a.classList.remove("open"));
         acc.classList.add("open");

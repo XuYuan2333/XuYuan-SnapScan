@@ -27,6 +27,7 @@
       <span class="dot"></span>
       <span id="mtPillText">翻译模型…</span>
     </div>
+    <button class="icon-btn ai-btn" id="btnAI" title="AI 大模型设置">AI</button>
     <button class="icon-btn" id="btnSettings" title="设置">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
         <path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.4-2.9c.04-.3.06-.6.06-.9s-.02-.6-.07-.9l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.6-.9l-.3-2.5h-4l-.3 2.5c-.6.2-1.1.5-1.6.9l-2.4-1-2 3.4 2 1.5c-.05.3-.07.6-.07.9s.02.6.07.9l-2 1.5 2 3.4 2.4-1c.5.4 1 .7 1.6.9l.3 2.5h4l.3-2.5c.6-.2 1.1-.5 1.6-.9l2.4 1 2-3.4-2-1.5Z"
@@ -99,7 +100,7 @@
           <span class="q-badge" id="engineBadge">—</span>
         </div>
 
-        <div class="quick-row pick" id="quickMt">
+        <div class="quick-row" id="quickMt">
           <span class="q-text"><b>翻译模型</b><i id="mtName">—</i></span>
           <span class="q-badge" id="mtBadge">—</span>
         </div>
@@ -109,9 +110,9 @@
           <span class="soon-tag">待开放</span>
         </div>
 
-        <div class="quick-row soon">
-          <span class="q-text"><b>译文显示方式</b><i>原位置遮罩 / 对照窗口</i></span>
-          <span class="soon-tag">待开放</span>
+        <div class="quick-row pick" id="quickMtProfile">
+          <span class="q-text"><b>翻译模式</b><i id="mtProfileHint">标准 · HyMT1.5 全方向</i></span>
+          <span class="q-badge" id="mtProfileBadge">标准</span>
         </div>
       </div>
 
@@ -164,26 +165,17 @@
     <div class="acc">
       <button class="acc-head" type="button">翻译<span class="acc-note" id="mtAccNote"></span><span class="chev"></span></button>
       <div class="acc-body">
-        <div class="sub-title">翻译模型</div>
+        <div class="sub-title">翻译模式</div>
+        <div class="engine-list" id="mtProfList"></div>
+        <div class="group-note" id="noteMtProfile">标准：只用 Hy-MT1.5 大模型，所有语种一个模型直连，速度慢一点但最稳。<br>效率：英文自动走 en-zh、日文自动走 ja-zh 小模型，其他语种仍走大模型。<br>游戏：只用两个小模型，只支持英文 / 日文翻译成中文，大模型完全不参与。</div>
+
+        <div class="sub-title">翻译模型（三件套）</div>
         <div class="engine-list" id="mtList"></div>
-        <div class="group-note" id="mtNote">翻译模型放在「MT Model」目录，一个 .gguf 就够。当前用的是混元 Hy-MT1.5-1.8B（Q4_K_M，约 1.08 GB）：英→中 / 日→中 / 俄→中 最稳，其余 30 种语言也能直连，不用按语言对分文件夹。</div>
+        <div class="group-note" id="mtNote">三个模型缺一不可：多语种大模型负责其他语种，en-zh / ja-zh 两个小模型负责英、日快翻。少任何一个，翻译功能整体置灰——所以不提供切换模型的选项，装齐就能用。</div>
         <div class="row-btns">
           <button class="btn" id="btnImportMt">导入翻译模型包</button>
         </div>
-        <div class="group-note">支持只含一个 .gguf 的 zip（如 Hy-MT1.5），或旧式 en-zh 目录包（带 model.json / encoder+decoder）。模型包从 GitHub 发布页手动下，不用单独开关：扫到模型就能用，没有模型整块自动置灰。</div>
-
-        <div class="sub-title">目标语言</div>
-        <label class="field">
-          <span>译成</span>
-          <select id="selMtLang">
-            <option value="zh">中文</option>
-            <option value="en">英语</option>
-            <option value="ja">日语</option>
-            <option value="ko">韩语</option>
-            <option value="ru">俄语</option>
-          </select>
-        </label>
-        <div class="group-note">混元翻译模型一个文件就能直接翻 33 种语言，英→中 / 日→中 / 俄→中 都是直连，不用中转。</div>
+        <div class="group-note">支持只含一个 .gguf 的 zip（Hy-MT1.5），也支持 en-zh / ja-zh 这种目录包（带 encoder + decoder + tokenizer.json）。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
 
         <div class="sub-title">翻译性能</div>
         <label class="field">
@@ -289,6 +281,74 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- AI 大模型抽屉 -->
+<div class="drawer-mask" id="aiMask"></div>
+<div class="drawer" id="aiDrawer">
+  <div class="drawer-head">
+    <h2>AI 大模型</h2>
+    <button class="icon-btn" id="btnCloseAI" title="关闭">✕</button>
+  </div>
+
+  <div class="drawer-body">
+
+    <div class="ai-hero">
+      <b>填个 Key 就能用</b>
+      <i>已经默认好：DeepSeek 官方地址、不思考、不联网搜索。只当翻译和识字的助手，不改动你本地的模型。</i>
+    </div>
+
+    <div class="acc open">
+      <button class="acc-head" type="button">连接设置<span class="acc-note" id="aiAccNote"></span><span class="chev"></span></button>
+      <div class="acc-body">
+        <label class="field">
+          <span>服务商</span>
+          <select id="selAiProvider">
+            <option value="deepseek">DeepSeek（官方）</option>
+            <option value="custom">自定义（OpenAI 兼容）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>模型名称</span>
+          <input type="text" id="txtAiModel" placeholder="4.1flash" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>接口地址</span>
+          <input type="text" id="txtAiBase" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>API Key</span>
+          <input type="password" id="txtAiKey" placeholder="粘贴你自己的 Key，留空则不改" spellcheck="false" autocomplete="off">
+        </label>
+        <div class="row-btns">
+          <button class="btn" id="btnSaveAI">保存</button>
+          <button class="btn ghost" id="btnClearKey">清除 Key</button>
+        </div>
+        <div class="group-note" id="aiKeyNote">Key 只存在本机 ini 里，不上传。去 platform.deepseek.com 注册一个，复制出来粘进去就行；其它保持默认即可。</div>
+        <div class="group-note">不思考、不联网搜索：已固定关闭，翻译只走一次性直出，速度优先。</div>
+      </div>
+    </div>
+
+    <div class="acc open">
+      <button class="acc-head" type="button">AI 增强开关<span class="acc-note">功能开发中</span><span class="chev"></span></button>
+      <div class="acc-body">
+        <label class="switch-row">
+          <div><b>AI 识字强化</b><i>用大模型校正 OCR 的错字、粘连和断行，识别结果更干净</i></div>
+          <input type="checkbox" id="swAiOcr"><span class="sw"></span>
+        </label>
+        <label class="switch-row">
+          <div><b>AI 译文遮罩强化</b><i>按上下文判断段落和字号，让遮罩块的位置、宽高更贴合原文</i></div>
+          <input type="checkbox" id="swAiMask"><span class="sw"></span>
+        </label>
+        <label class="switch-row">
+          <div><b>AI 翻译强化</b><i>本地模型翻完后用大模型修术语和人名，只修不重写</i></div>
+          <input type="checkbox" id="swAiMt"><span class="sw"></span>
+        </label>
+        <div class="group-note">这三个开关先占位，开关状态会保存，功能还没接上——现在打开也不会报错，等后面接好就按这里的状态走。</div>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.1.9.0")]
-[assembly: AssemblyFileVersion("1.1.9.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace QRSnap
 {
@@ -326,7 +326,7 @@ namespace QRSnap
         public const string DefaultHotkeyOcr = "Ctrl+Alt+X";
         public const string DefaultHotkeyMt = "Ctrl+Alt+F";     // 截图翻译
         public const string DefaultHotkeyHide = "Ctrl+Alt+G";   // 译文遮罩 显示/隐藏
-        public const string ConfigVersion = "1201";
+        public const string ConfigVersion = "1301";
         // 引擎：wechat = 微信内置 OCR（默认，中文支持好）；system = Windows 内置 OCR
         // pp* = 本地 PP-OCR（模型放在 exe 同级 "OCR Model" 目录，离线可用，无需装任何软件）
         public const string EngineWeChat = "wechat";
@@ -403,6 +403,21 @@ namespace QRSnap
         public const string MtModeEfficiency = "efficiency";   // 效率：遮罩块直接盖住原文
         public const string MtModeRealistic = "realistic";     // 拟真：擦掉原字、按背景补洞、再画译文
         public static string MtMode = MtModeEfficiency;
+        // 翻译模式（与上面的「译文遮罩」是两件事）
+        public const string MtProfileStandard = "standard";      // 标准：用大模型（HyMT1.5）翻所有方向
+        public const string MtProfileEfficiency = "efficiency";  // 效率：英→中 / 日→中 先走小模型，其余回退标准
+        public const string MtProfileGame = "game";              // 游戏：只用中日互译，强制停用标准模型
+        public static string MtProfile = MtProfileStandard;
+
+        // ---------- AI 大模型（只做辅助增强，默认 DeepSeek 官方；不思考、不联网，只求快） ----------
+        public const string AiProviderDeepSeek = "deepseek";
+        public static string AiProvider = AiProviderDeepSeek;
+        public static string AiModel = "4.1flash";                       // 模型名称，用户可改
+        public static string AiBase = "https://api.deepseek.com/v1";     // 官方地址
+        public static string AiKey = "";                                 // 用户自己填 key
+        public static bool AiOcr;                                        // AI 识字强化（占位开关，功能待做）
+        public static bool AiMask;                                       // AI 译文遮罩强化（占位）
+        public static bool AiMt;                                         // AI 翻译强化（占位）
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -497,6 +512,24 @@ namespace QRSnap
             return MtModeEfficiency;
         }
 
+        // 翻译模式：标准 / 效率 / 游戏，其余一律按标准
+        public static string NormalizeMtProfile(string v)
+        {
+            if (v == null) return MtProfileStandard;
+            string s = v.Trim().ToLowerInvariant();
+            if (s == MtProfileEfficiency || s == "eff" || s == "效率") return MtProfileEfficiency;
+            if (s == MtProfileGame || s == "游戏") return MtProfileGame;
+            return MtProfileStandard;
+        }
+
+        public static string MtProfileName(string v)
+        {
+            string s = NormalizeMtProfile(v);
+            if (s == MtProfileEfficiency) return "效率";
+            if (s == MtProfileGame) return "游戏";
+            return "标准";
+        }
+
         public static void Load()
         {
             HotkeyQr = DefaultHotkeyQr;
@@ -520,6 +553,14 @@ namespace QRSnap
             MtIdle = DefaultMtIdle;
             MtMaskAlpha = DefaultMtMaskAlpha;
             MtMode = MtModeEfficiency;
+            MtProfile = MtProfileStandard;
+            AiProvider = AiProviderDeepSeek;
+            AiModel = "4.1flash";
+            AiBase = "https://api.deepseek.com/v1";
+            AiKey = "";
+            AiOcr = false;
+            AiMask = false;
+            AiMt = false;
             Legacy = false;
             try
             {
@@ -556,8 +597,9 @@ namespace QRSnap
                     else if (k.Equals("restoreqr", StringComparison.OrdinalIgnoreCase)) RestoreAfterQr = ToBool(v);
                     else if (k.Equals("freehand", StringComparison.OrdinalIgnoreCase)) Freehand = ToBool(v);
                     else if (k.Equals("translate", StringComparison.OrdinalIgnoreCase)) Translate = ToBool(v);
-                    else if (k.Equals("mtlang", StringComparison.OrdinalIgnoreCase) && v.Length > 0) TargetLang = v.Trim().ToLowerInvariant();
-                    else if (k.Equals("mtpair", StringComparison.OrdinalIgnoreCase)) MtPair = v.Trim();
+                    // 目标语言固定中文：老 ini 里的 mtlang 一律忽略，产品只做外语 → 中文
+                    else if (k.Equals("mtlang", StringComparison.OrdinalIgnoreCase)) TargetLang = "zh";
+                    else if (k.Equals("mtpair", StringComparison.OrdinalIgnoreCase)) MtPair = string.Empty;   // 手动选模型已取消
                     else if (k.Equals("mtdir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) MtDir = v;
                     else if (k.Equals("mtbar", StringComparison.OrdinalIgnoreCase)) MtBar = ToBool(v);
                     else if (k.Equals("mtperf", StringComparison.OrdinalIgnoreCase)) MtPerf = NormalizeMtPerf(v);
@@ -572,6 +614,14 @@ namespace QRSnap
                         if (int.TryParse(v, out av)) MtMaskAlpha = NormalizeMtMaskAlpha(av);
                     }
                     else if (k.Equals("mtmode", StringComparison.OrdinalIgnoreCase)) MtMode = NormalizeMtMode(v);
+                    else if (k.Equals("mtprofile", StringComparison.OrdinalIgnoreCase)) MtProfile = NormalizeMtProfile(v);
+                    else if (k.Equals("aiprovider", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiProvider = v;
+                    else if (k.Equals("aimodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiModel = v;
+                    else if (k.Equals("aibase", StringComparison.OrdinalIgnoreCase) && v.Length > 0) AiBase = v;
+                    else if (k.Equals("aikey", StringComparison.OrdinalIgnoreCase)) AiKey = v;
+                    else if (k.Equals("aiocr", StringComparison.OrdinalIgnoreCase)) AiOcr = ToBool(v);
+                    else if (k.Equals("aimask", StringComparison.OrdinalIgnoreCase)) AiMask = ToBool(v);
+                    else if (k.Equals("aimt", StringComparison.OrdinalIgnoreCase)) AiMt = ToBool(v);
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
@@ -606,6 +656,14 @@ namespace QRSnap
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
             sb.Append("mtmode=").Append(MtMode).Append("\r\n");
+            sb.Append("mtprofile=").Append(MtProfile).Append("\r\n");
+            sb.Append("aiprovider=").Append(AiProvider).Append("\r\n");
+            sb.Append("aimodel=").Append(AiModel).Append("\r\n");
+            sb.Append("aibase=").Append(AiBase).Append("\r\n");
+            sb.Append("aikey=").Append(AiKey).Append("\r\n");
+            sb.Append("aiocr=").Append(AiOcr ? "1" : "0").Append("\r\n");
+            sb.Append("aimask=").Append(AiMask ? "1" : "0").Append("\r\n");
+            sb.Append("aimt=").Append(AiMt ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -4176,7 +4234,7 @@ namespace QRSnap
 
         private static string VersionLine()
         {
-            string ver = "1.1.9.0";
+            string ver = "1.3.0.0";
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;

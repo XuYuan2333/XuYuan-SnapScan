@@ -586,7 +586,8 @@ namespace QRSnap
             {
                 try { bmp.Save(@"E:\下载\豆包\_mt\crop.png", System.Drawing.Imaging.ImageFormat.Png); } catch { }
             }
-            string tgt = AppConfig.TargetLang;
+            // 目标语言固定中文：整套产品只做「外语 → 中文」，不再提供译成什么语言的选择
+            string tgt = "zh";
             StringBuilder all = new StringBuilder();
             for (int i = 0; i < segs.Count; i++) all.Append(segs[i].Text).Append('\n');
             string src = LangDetect.Detect(all.ToString());
@@ -619,15 +620,23 @@ namespace QRSnap
                     + " crop=" + bmp.Width + "x" + bmp.Height + " sel=" + screenRect.Width + "x" + screenRect.Height);
             }
             string err = null;
+            string lastRoute = "";
+            string profile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
             RunPumped(delegate()
             {
                 try
                 {
                     MtRouter router = MtRunner.Router;
-                    string[] plan = router.PlanFor(src, tgt, AppConfig.MtPair);
+                    string[] plan = router.PlanFor(src, tgt, AppConfig.MtPair, profile);
                     if (plan.Length == 0)
                     {
-                        err = "缺少 " + MtRouter.NameOf(src) + "→" + MtRouter.NameOf(tgt) + " 的模型，装一个再试";
+                        List<string> miss = router.MissingKit();
+                        if (miss.Count > 0)
+                            err = "翻译功能已停用：缺少 " + string.Join("、", miss.ToArray()) + "。三个模型缺一不可，导入齐了再试";
+                        else if (profile == AppConfig.MtProfileGame)
+                            err = "游戏模式只支持英文、日文翻译成中文，当前选区识别成「" + MtRouter.NameOf(src) + "」";
+                        else
+                            err = "这套模型不支持「" + MtRouter.NameOf(src) + " → 中文」";
                         return;
                     }
                     for (int i = 0; i < segs.Count; i++)
@@ -635,7 +644,8 @@ namespace QRSnap
                         OcrSegment s = segs[i];
                         if (s.Text == null || s.Text.Trim().Length == 0) continue;
                         string route;
-                        string tr = router.Translate(s.Text, src, tgt, AppConfig.MtPair, out route);
+                        string tr = router.Translate(s.Text, src, tgt, AppConfig.MtPair, profile, out route);
+                        lastRoute = route;
                         if (string.IsNullOrEmpty(tr)) continue;
                         TransOverlay.Item it = new TransOverlay.Item();
                         // 拟真模式不要 InkBounds：那个外扩是为「实色遮罩盖住整行」服务的，
@@ -658,7 +668,7 @@ namespace QRSnap
                         blk.Angle = s.Angle;
                         blocks.Add(blk);
                         Log("mt line box=" + s.Box.X + "," + s.Box.Y + "," + s.Box.Width + "," + s.Box.Height
-                            + " ang=" + s.Angle + " | " + s.Text + " => " + tr);
+                            + " ang=" + s.Angle + " route=" + route + " | " + s.Text + " => " + tr);
                     }
                 }
                 catch (Exception ex)
@@ -710,7 +720,7 @@ namespace QRSnap
                 }
                 TransOverlay.ShowImage(screenRect, outImg);
                 Log("translate realistic lines=" + st.Lines + " hard=" + st.Hard + " wrap=" + st.Wrapped
-                    + " src=" + src + " tgt=" + tgt);
+                    + " src=" + src + " tgt=" + tgt + " prof=" + profile + " route=" + lastRoute);
                 return st.Lines;
             }
 
@@ -775,6 +785,13 @@ namespace QRSnap
         {
             try { return Router.AvailablePairs(); }
             catch (Exception) { return new List<string>(); }
+        }
+
+        // 三件套缺哪几件（UI 用来置灰和提示，缺一件就整体禁用翻译）
+        public static List<string> MissingKit()
+        {
+            try { return Router.MissingKit(); }
+            catch (Exception) { return new List<string>(new string[] { "翻译模型" }); }
         }
 
         // 模型列表：界面上「翻译模型」那一栏用（含没装全的，置灰显示）
@@ -1088,6 +1105,14 @@ namespace QRSnap
         }
 
         // ---------- 状态 ----------
+        // 只把 key 的末 4 位暴露给前端，完整 key 始终留在本机 ini 里
+        internal static string KeyTail(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "";
+            if (key.Length <= 4) return "****";
+            return "****" + key.Substring(key.Length - 4);
+        }
+
         internal static string BuildState()
         {
             EngineProbe p = Ocr.Probe();
@@ -1145,7 +1170,17 @@ namespace QRSnap
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
             sb.Append(",\"mtmode\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
+            sb.Append(",\"mtprofile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.MtProfile)));
             sb.Append(",\"mtcores\":").Append(Environment.ProcessorCount);
+            sb.Append(",\"ai\":{");
+            sb.Append("\"provider\":").Append(J.S(AppConfig.AiProvider));
+            sb.Append(",\"model\":").Append(J.S(AppConfig.AiModel));
+            sb.Append(",\"base\":").Append(J.S(AppConfig.AiBase));
+            sb.Append(",\"hasKey\":").Append(J.B(!string.IsNullOrEmpty(AppConfig.AiKey)));
+            sb.Append(",\"keyTail\":").Append(J.S(KeyTail(AppConfig.AiKey)));
+            sb.Append(",\"ocr\":").Append(J.B(AppConfig.AiOcr));
+            sb.Append(",\"mask\":").Append(J.B(AppConfig.AiMask));
+            sb.Append(",\"mt\":").Append(J.B(AppConfig.AiMt)).Append("}");
             sb.Append("}");
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
             sb.Append(",\"ocr\":").Append(J.S(HotkeyOcrText()));
@@ -1155,35 +1190,44 @@ namespace QRSnap
             sb.Append(",\"win11\":").Append(J.B(IsWin11())).Append("}");
             sb.Append(",\"mt\":{");
             sb.Append("\"on\":").Append(J.B(AppConfig.Translate));
-            sb.Append(",\"lang\":").Append(J.S(AppConfig.TargetLang));
             sb.Append(",\"root\":").Append(J.S(AppConfig.MtRoot()));
-            sb.Append(",\"selected\":").Append(J.S(AppConfig.MtPair));
             List<MtModelInfo> models = MtRunner.Models();
-            bool anyReady = false;
-            for (int i = 0; i < models.Count; i++) if (models[i].Ready) { anyReady = true; break; }
-            sb.Append(",\"ready\":").Append(J.B(anyReady));
-            sb.Append(",\"models\":[");
+            // 三件套缺一件就整体禁用（用户口径：三个模型都是必需品，不做切换也不做降级）
+            List<string> miss = MtRunner.MissingKit();
+            bool allReady = miss.Count == 0;
+            string profNow = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+            string multiName = "", multiFile = "";
+            long multiSize = 0;
             for (int i = 0; i < models.Count; i++)
             {
                 MtModelInfo m = models[i];
-                if (i > 0) sb.Append(',');
-                sb.Append("{\"name\":").Append(J.S(m.Name));
-                sb.Append(",\"src\":").Append(J.S(m.Src));
-                sb.Append(",\"tgt\":").Append(J.S(m.Tgt));
-                sb.Append(",\"pair\":").Append(J.S(m.Pair));
-                sb.Append(",\"label\":").Append(J.S(m.Multi ? (m.Label != null && m.Label.Length > 0 ? m.Label : m.Name) : (MtRouter.NameOf(m.Src) + " → " + MtRouter.NameOf(m.Tgt))));
-                sb.Append(",\"note\":").Append(J.S(m.Name + "  ·  " + m.Pair));
-                sb.Append(",\"ready\":").Append(J.B(m.Ready));
-                sb.Append("}");
+                if (!m.Multi || m.Gguf == null || m.Gguf.Length == 0) continue;
+                try { if (!File.Exists(m.Gguf)) continue; multiSize = new FileInfo(m.Gguf).Length; }
+                catch (Exception) { continue; }
+                multiName = m.Name; multiFile = Path.GetFileName(m.Gguf);
+                break;
             }
-            sb.Append("]");
-            List<string> pairs = MtRunner.Pairs();
-            sb.Append(",\"pairs\":[");
-            for (int i = 0; i < pairs.Count; i++)
+            string active = "", shortTag = "";
+            if (allReady)
             {
-                if (i > 0) sb.Append(',');
-                sb.Append(J.S(pairs[i]));
+                if (profNow == AppConfig.MtProfileEfficiency) { active = "英/日 走小模型 · 其他语种走大模型"; shortTag = "效率 · 英/日小模型"; }
+                else if (profNow == AppConfig.MtProfileGame) { active = "英/日 走小模型"; shortTag = "游戏 · 仅英/日"; }
+                else { active = multiName.Length > 0 ? multiName : "多语种大模型"; shortTag = "标准 · 大模型"; }
             }
+            else shortTag = "未就绪";
+            sb.Append(",\"active\":").Append(J.S(active));
+            sb.Append(",\"short\":").Append(J.S(shortTag));
+            sb.Append(",\"ready\":").Append(J.B(allReady));
+            sb.Append(",\"missing\":[");
+            for (int i = 0; i < miss.Count; i++) { if (i > 0) sb.Append(','); sb.Append(J.S(miss[i])); }
+            sb.Append("],\"kit\":[");
+            sb.Append("{\"key\":\"gguf\",\"title\":\"多语种大模型\",\"sub\":")
+              .Append(J.S(multiFile.Length > 0 ? (multiFile + " · " + (multiSize / (1024L * 1024L)) + " MB") : "未装 · 所有语种 → 中文"))
+              .Append(",\"ready\":").Append(J.B(multiName.Length > 0)).Append("}");
+            sb.Append(",{\"key\":\"en-zh\",\"title\":\"英 → 中小模型\",\"sub\":").Append(J.S("Opus-MT 量化 ONNX · 约 119 MB"))
+              .Append(",\"ready\":").Append(J.B(!miss.Contains("en-zh 英→中小模型"))).Append("}");
+            sb.Append(",{\"key\":\"ja-zh\",\"title\":\"日 → 中小模型\",\"sub\":").Append(J.S("Opus-MT 量化 ONNX · 约 220 MB"))
+              .Append(",\"ready\":").Append(J.B(!miss.Contains("ja-zh 日→中小模型"))).Append("}");
             sb.Append("]}");
             sb.Append("}");
             return sb.ToString();
@@ -1263,12 +1307,20 @@ namespace QRSnap
                     {
                         AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
                     }
-                    else if (k == "mtlang") { if (v != null && v.Trim().Length > 0) AppConfig.TargetLang = v.Trim().ToLowerInvariant(); }
-                    else if (k == "mtpair")
+                    else if (k == "mtprofile")
                     {
-                        AppConfig.MtPair = v == null ? string.Empty : v.Trim();
-                        MtRunner.Invalidate();   // 换模型要重建路由，别拿旧缓存
+                        AppConfig.MtProfile = AppConfig.NormalizeMtProfile(v);
+                        MtRunner.Invalidate();   // 换模式要重挑模型
                     }
+                    else if (k == "mtlang") { /* 已取消目标语言设置：整套只做外语 → 中文 */ }
+                    else if (k == "mtpair") { /* 已取消手动选模型：三个模型都是必需品，不做切换 */ }
+                    else if (k == "aiprovider") { if (v.Length > 0) AppConfig.AiProvider = v.Trim(); }
+                    else if (k == "aimodel") { AppConfig.AiModel = v.Trim(); }
+                    else if (k == "aibase") { if (v.Length > 0) AppConfig.AiBase = v.Trim(); }
+                    else if (k == "aikey") { AppConfig.AiKey = v.Trim(); }
+                    else if (k == "aiocr") { AppConfig.AiOcr = v == "true" || v == "1"; }
+                    else if (k == "aimask") { AppConfig.AiMask = v == "true" || v == "1"; }
+                    else if (k == "aimt") { AppConfig.AiMt = v == "true" || v == "1"; }
                     else if (k == "opacity")
                     {
                         int ov;

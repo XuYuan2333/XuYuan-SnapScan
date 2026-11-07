@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -357,9 +357,19 @@ namespace QRSnap
         // 贪心解码：够快，屏幕短句质量够用
         public string Translate(string text, int maxTokens)
         {
+            try { return TranslateCore(text, maxTokens); }
+            catch (Exception) { return ""; }
+        }
+
+        private string TranslateCore(string text, int maxTokens)
+        {
             if (string.IsNullOrEmpty(text)) return "";
             int[] srcIds = _tok.Encode(text, 500);
             if (srcIds.Length == 0) return "";
+            for (int i = 0; i < srcIds.Length; i++)
+            {
+                if (srcIds[i] < 0 || srcIds[i] >= _tok.Count) return "";
+            }
             int[] inIds = new int[srcIds.Length + 1];
             for (int i = 0; i < srcIds.Length; i++) inIds[i] = srcIds[i];
             inIds[srcIds.Length] = _eosId;
@@ -434,11 +444,22 @@ namespace QRSnap
         }
 
         // 不借助 KV cache 的解码：每一步把整段前缀重算一遍（merged 图在部分 ORT 版本上首步会崩，这条是兜底路径）
+        // 外层做异常隔离：个别句子让 ORT 抛错/断言时，只丢这一句，别把整个进程带走
         public string TranslateNoCache(string text, int maxTokens)
+        {
+            try { return TranslateNoCacheCore(text, maxTokens); }
+            catch (Exception) { return ""; }
+        }
+
+        private string TranslateNoCacheCore(string text, int maxTokens)
         {
             if (string.IsNullOrEmpty(text)) return "";
             int[] srcIds = _tok.Encode(text, 500);
             if (srcIds.Length == 0) return "";
+            for (int i = 0; i < srcIds.Length; i++)
+            {
+                if (srcIds[i] < 0 || srcIds[i] >= _tok.Count) return "";   // id 越界宁可放弃这一句，别喂给 ORT
+            }
 
             int[] inIds = new int[srcIds.Length + 1];
             for (int i = 0; i < srcIds.Length; i++) inIds[i] = srcIds[i];
@@ -754,32 +775,54 @@ namespace QRSnap
             return code;
         }
 
-        public string[] PlanFor(string src, string tgt) { return PlanFor(src, tgt, null); }
+        public string[] PlanFor(string src, string tgt) { return PlanFor(src, tgt, null, null); }
 
         // src→tgt 没有直连模型时用英语中转；preferred 是用户选中的模型目录名
         public string[] PlanFor(string src, string tgt, string preferred)
         {
+            return PlanFor(src, tgt, preferred, null);
+        }
+
+        // profile：standard / efficiency / game（null 或空 = 标准）
+        // 口径：所有翻译都是「外语 → 中文」，目标固定 zh；三件套（多语种 GGUF + en-zh + ja-zh）
+        // 缺一即整体不可用。用户明确三个模型都是必需品，不做模型切换，也就不做降级。
+        // preferred 仅保留参数位（旧调用兼容），不再参与选路。
+        public string[] PlanFor(string src, string tgt, string preferred, string profile)
+        {
             if (src == tgt) return new string[0];
-            List<MtModelInfo> all = Models();
-            // 多语种 GGUF 模型：一个模型就能覆盖所有方向，优先用它
-            MtModelInfo pick = null;
-            if (preferred != null && preferred.Length > 0)
-                foreach (MtModelInfo m in all)
-                    if (m.Multi && m.Ready && string.Equals(m.Name, preferred, StringComparison.OrdinalIgnoreCase)) { pick = m; break; }
-            if (pick == null)
-                foreach (MtModelInfo m in all)
-                    if (m.Multi && m.Ready) { pick = m; break; }
-            if (pick != null) return new string[] { "gguf", pick.Gguf };
-            if (preferred != null && preferred.Length > 0)
+            if (tgt != "zh") return new string[0];
+            if (MissingKit().Count > 0) return new string[0];
+            string prof = profile == null ? string.Empty : profile.Trim().ToLowerInvariant();
+
+            // 游戏模式：只用两个小模型，多语种大模型彻底不参与，非英/日一律不支持
+            if (prof == "game")
             {
-                foreach (MtModelInfo m in all)
-                    if (m.Ready && m.Src == src && m.Tgt == tgt && string.Equals(m.Name, preferred, StringComparison.OrdinalIgnoreCase))
-                        return new string[] { src + "-" + tgt, m.Name };
+                if (src == "en" && PairReady("en", "zh")) return new string[] { "en-zh" };
+                if (src == "ja" && PairReady("ja", "zh")) return new string[] { "ja-zh" };
+                return new string[0];
             }
-            if (PairReady(src, tgt)) return new string[] { src + "-" + tgt };
-            if (src != "en" && tgt != "en" && PairReady(src, "en") && PairReady("en", tgt))
-                return new string[] { src + "-en", "en-" + tgt };
+
+            // 效率模式：英文走 en-zh、日文走 ja-zh，其他语种交给多语种大模型
+            if (prof == "efficiency" && src == "en" && PairReady("en", "zh")) return new string[] { "en-zh" };
+            if (prof == "efficiency" && src == "ja" && PairReady("ja", "zh")) return new string[] { "ja-zh" };
+
+            foreach (MtModelInfo m in Models())
+                if (m.Multi && m.Ready) return new string[] { "gguf", m.Gguf };
             return new string[0];
+        }
+
+        // 三件套：多语种 GGUF、en-zh、ja-zh。缺任何一件，翻译功能整体禁用。
+        // 只查文件齐不齐（GGUF 看实体文件，目录包走 FolderReady），运行时能不能起来另算。
+        public List<string> MissingKit()
+        {
+            List<string> miss = new List<string>();
+            bool multi = false;
+            foreach (MtModelInfo m in Models())
+                if (m.Multi && m.Gguf != null && m.Gguf.Length > 0 && File.Exists(m.Gguf)) { multi = true; break; }
+            if (!multi) miss.Add("多语种模型 Hy-MT1.5（.gguf）");
+            if (!PairReady("en", "zh")) miss.Add("en-zh 英→中小模型");
+            if (!PairReady("ja", "zh")) miss.Add("ja-zh 日→中小模型");
+            return miss;
         }
 
         public List<string> AvailablePairs()
@@ -822,17 +865,226 @@ namespace QRSnap
             }
         }
 
+        // 日文 OCR 常见误识：片假名里的长音符被识别成半角 '-'，形近汉字被识别成 工/力/口/夕/二/八…
+        // 只在「左右紧邻都是假名」时才替换，正常汉字不碰。
+        private static bool IsKana(char c)
+        {
+            int v = (int)c;
+            // 平假名 + 片假名 + 长音符 + 小假名扩展
+            if (v >= 0x3041 && v <= 0x309F) return true;
+            if (v >= 0x30A1 && v <= 0x30FA) return true;
+            if (v == 0x30FC) return true;
+            if (v >= 0x31F0 && v <= 0x31FF) return true;
+            return false;
+        }
+
+        private static char KataFromHan(char c)
+        {
+            switch (c)
+            {
+                case '工': return '\u30A8';   // エ
+                case '力': return '\u30AB';   // カ
+                case '口': return '\u30ED';   // ロ
+                case '夕': return '\u30BF';   // タ
+                case '二': return '\u30CB';   // ニ
+                case '八': return '\u30CF';   // ハ
+                case '千': return '\u30C1';   // チ
+                case '卜': return '\u30C8';   // ト
+                case '万': return '\u30EF';   // ワ
+                case '世': return '\u30BB';   // セ
+                case '己': return '\u30B3';   // コ
+                case '山': return '\u30E4';   // ヤ
+                case '匕': return '\u30D2';   // ヒ
+                default: return '\0';
+            }
+        }
+
+        public static string FixJaOcr(string s)
+        {
+            return JaTermFix(FixJaOcrShape(s));
+        }
+
+        // 只修字形/长音符，不动词
+        public static string FixJaOcrShape(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            char[] a = s.ToCharArray();
+            for (int i = 1; i < a.Length - 1; i++)
+            {
+                char c = a[i];
+                if (!IsKana(a[i - 1]) || !IsKana(a[i + 1])) continue;
+                if (c == '-' || c == '\u2010' || c == '\u2011' || c == '\u2012' || c == '\u2013' || c == '\u2212')
+                {
+                    a[i] = '\u30FC';   // ー
+                    continue;
+                }
+                char rep = KataFromHan(c);
+                if (rep != '\0') a[i] = rep;
+            }
+            return new string(a);
+        }
+
+        // 片假名外来词在这套 ja-zh 权重里覆盖很差（フレーム / サポート 都不在词表里）。
+        // 早期做过大范围术语替换：帧生成/选项 会变准，但 ゲームパッド→“手交”、グラフィック→“表情” 这类二次翻坏的例子更多。
+        // 所以只留已验证「替换后更稳」的几个词，其余交给输出侧的 PostFixZh 纠偏。
+        private static readonly string[][] JaTerms = new string[][]
+        {
+            new string[] { "オプション", "选项" },
+            new string[] { "メニュー", "菜单" },
+            new string[] { "解像度", "分辨率" }
+        };
+
+        private static string JaTermFix(string s)
+        {
+            int kana = 0;
+            for (int i = 0; i < s.Length; i++) if (IsKana(s[i]) && s[i] != '\u30FC') kana++;
+            if (kana < 4) return s;              // 假名太少，估计是标题/术语单行，别替换
+            string r = s;
+            for (int t = 0; t < JaTerms.Length; t++)
+            {
+                if (r.IndexOf(JaTerms[t][0], StringComparison.Ordinal) >= 0)
+                    r = r.Replace(JaTerms[t][0], JaTerms[t][1]);
+            }
+            if (r == s) return s;
+            int kana2 = 0;
+            for (int i = 0; i < r.Length; i++) if (IsKana(r[i]) && r[i] != '\u30FC') kana2++;
+            if (kana2 < 2) return s;             // 换完几乎没有日文了，模型会反向翻译，退回原文
+            return r;
+        }
+
+        // 目标语言是中文时统一成简体字（模型偶尔吐繁体/日文汉字形）
+        private static readonly Dictionary<char, char> ZhT2S = BuildZhT2S();
+        private static Dictionary<char, char> BuildZhT2S()
+        {
+            char[,] pairs = new char[,] {
+                { '請','请' },{ '開','开' },{ '設','设' },{ '變','变' },{ '換','换' },{ '確','确' },
+                { '認','认' },{ '這','这' },{ '個','个' },{ '還','还' },{ '麼','么' },{ '機','机' },
+                { '關','关' },{ '記','记' },{ '錄','录' },{ '檔','档' },{ '遊','游' },{ '戲','戏' },
+                { '圖','图' },{ '數','数' },{ '據','据' },{ '錯','错' },{ '誤','误' },{ '網','网' },
+                { '絡','络' },{ '線','线' },{ '連','连' },{ '載','载' },{ '讀','读' },{ '寫','写' },
+                { '場','场' },{ '畫','画' },{ '視','视' },{ '覺','觉' },{ '聲','声' },{ '響','响' },
+                { '選','选' },{ '擇','择' },{ '預','预' },{ '覽','览' },{ '語','语' },{ '種','种' },
+                { '類','类' },{ '應','应' },{ '當','当' },{ '會','会' },{ '動','动' },{ '態','态' },
+                { '時','时' },{ '間','间' },{ '須','须' },{ '順','顺' },{ '續','续' },{ '斷','断' },
+                { '風','风' },{ '轉','转' },{ '營','营' },{ '對','对' },{ '於','于' },{ '與','与' },
+                { '為','为' },{ '無','无' },{ '產','产' },{ '業','业' },{ '務','务' },{ '員','员' },
+                { '處','处' },{ '狀','状' },{ '現','现' },{ '環','环' },{ '節','节' },{ '節','节' },
+                { '級','级' },{ '調','调' },{ '整','整' },{ '頻','频' },{ '劃','划' },{ '驗','验' },
+                { '檢','检' },{ '測','测' },{ '執','执' },{ '運','运' },{ '執','执' },{ '銷','销' },
+                { '費','费' },{ '價','价' },{ '購','购' },{ '買','买' },{ '賣','卖' },{ '貨','货' },
+                { '單','单' },{ '雙','双' },{ '臺','台' },{ '灣','湾' },{ '邊','边' },{ '靜','静' },
+                { '顯','显' },{ '螢','萤' },{ '幕','幕' },{ '憑','凭' },{ '證','证' },{ '許','许' },
+                { '壓','压' },{ '縮','缩' },{ '擴','扩' },{ '顯','显' },{ '優','优' },{ '勢','势' },
+                { '況','况' },{ '偉','伟' },{ '華','华' },{ '質','质' },{ '點','点' },{ '準','准' },
+                { '鍵','键' },{ '輸','输' },{ '項','项' },{ '啟','启' },{ '擊','击' },{ '統','统' },
+                { '體','体' },{ '衛','卫' },{ '徑','径' },{ '試','试' },{ '發','发' },{ '實','实' },
+                { '際','际' },{ '緩','缓' },{ '儲','储' },{ '憶','忆' },{ '衝','冲' },{ '慮','虑' },
+                { '條','条' },{ '顆','颗' },{ '訂','订' },{ '託','托' },{ '訊','讯' },{ '譯','译' },
+                { '刪','删' },{ '夾','夹' },{ '權','权' },{ '屬','属' },{ '參','参' },{ '數','数' },
+                { '張','张' },{ '緊','紧' },{ '鬆','松' },{ '壞','坏' },{ '際','际' },{ '稱','称' }
+            };
+            Dictionary<char, char> d = new Dictionary<char, char>();
+            for (int i = 0; i < pairs.GetLength(0); i++) d[pairs[i, 0]] = pairs[i, 1];
+            return d;
+        }
+
+        private static string ToSimplified(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            StringBuilder sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char r;
+                sb.Append(ZhT2S.TryGetValue(s[i], out r) ? r : s[i]);
+            }
+            return sb.ToString();
+        }
+
+        // 译文侧纠偏：这套 ja-zh 权重对片假名词的固定错译（经 A/B 实测确认的高频错法）
+        private static readonly string[][] ZhFixes = new string[][]
+        {
+            new string[] { "架子的生成", "帧生成" },
+            new string[] { "架子生成", "帧生成" },
+            new string[] { "镜框生成", "帧生成" },
+            new string[] { "框架生成", "帧生成" },
+            new string[] { "生成框架", "帧生成" },
+            new string[] { "生成帧框", "帧生成" },
+            new string[] { "帧速率", "帧率" },
+            new string[] { "游戏垫", "手柄" },
+            new string[] { "选择权", "选项" },
+            new string[] { "支援到", "支持到" },
+            new string[] { "变得光滑", "变得流畅" },
+            new string[] { "就会光滑", "就会流畅" },
+            new string[] { "变得滑溜", "变得流畅" },
+            new string[] { "就会滑溜", "就会流畅" },
+            new string[] { "品质", "质量" },
+            new string[] { "設定", "设置" },
+            new string[] { "解像度", "分辨率" },
+            new string[] { "遊戏", "游戏" },
+            new string[] { "起动", "启动" }
+        };
+
+        private static string PostFixZh(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            for (int i = 0; i < ZhFixes.Length; i++)
+            {
+                if (s.IndexOf(ZhFixes[i][0], StringComparison.Ordinal) >= 0)
+                    s = s.Replace(ZhFixes[i][0], ZhFixes[i][1]);
+            }
+            return DedupAdjacent(s);   // 小模型偶尔把同一个词吐两遍（「插件插件」），顺手压掉
+        }
+
+        // 相邻重复词压一次：只认纯中文 2～3 字，且排除叠字词（妈妈、爸爸、哥哥…）。
+        private static string DedupAdjacent(string s)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length < 4) return s;
+            StringBuilder sb = new StringBuilder(s.Length);
+            int i = 0;
+            while (i < s.Length)
+            {
+                bool hit = false;
+                for (int n = 2; n <= 3; n++)
+                {
+                    if (i + 2 * n > s.Length) continue;
+                    string a = s.Substring(i, n), b = s.Substring(i + n, n);
+                    if (a != b || IsAllSameChar(a)) continue;
+                    if (!IsHanChars(a)) continue;
+                    sb.Append(a); i += 2 * n; hit = true; break;
+                }
+                if (!hit) { sb.Append(s[i]); i++; }
+            }
+            return sb.ToString();
+        }
+
+        private static bool IsAllSameChar(string a)
+        {
+            for (int k = 1; k < a.Length; k++) if (a[k] != a[0]) return false;
+            return true;
+        }
+
+        private static bool IsHanChars(string a)
+        {
+            for (int k = 0; k < a.Length; k++) if (a[k] < 0x4E00 || a[k] > 0x9FA5) return false;
+            return true;
+        }
+
         public string Translate(string text, string src, string tgt, out string route)
         {
-            return Translate(text, src, tgt, null, out route);
+            return Translate(text, src, tgt, null, null, out route);
         }
 
         public string Translate(string text, string src, string tgt, string preferred, out string route)
         {
+            return Translate(text, src, tgt, preferred, null, out route);
+        }
+
+        public string Translate(string text, string src, string tgt, string preferred, string profile, out string route)
+        {
             route = "";
             if (string.IsNullOrEmpty(text)) return "";
             if (src == tgt) return text;
-            string[] plan = PlanFor(src, tgt, preferred);
+            string[] plan = PlanFor(src, tgt, preferred, profile);
             if (plan.Length == 0) { route = "缺模型"; return ""; }
             if (plan[0] == "gguf")
             {
@@ -840,16 +1092,79 @@ namespace QRSnap
                 return LlamaMt.Translate(plan[1], text, tgt);
             }
             string cur = text;
+            if (src == "ja") cur = FixJaOcr(cur);   // 日文 OCR 常见误识先修一遍，再喂模型
             for (int i = 0; i < plan.Length; i += 2)
             {
                 string pair = plan[i];
                 string model = i + 1 < plan.Length ? plan[i + 1] : null;
                 MtModel m = Get(pair, model);
-                int maxTokens = Math.Min(160, Math.Max(16, (int)(cur.Length * 1.8f)));
-                cur = m.TranslateNoCache(cur, maxTokens);
+                int maxTokens = Math.Min(220, Math.Max(24, (int)(cur.Length * 1.8f)));
+                cur = TranslateSmall(m, cur, maxTokens);
                 route += (route.Length == 0 ? "" : " → ") + pair;
             }
+            if (tgt == "zh") cur = PostFixZh(ToSimplified(cur));
             return cur;
+        }
+
+        // Opus-MT 小模型对长句很容易提前吐 EOS、只出半截（实测 130 字符的句子只给 5 个字），
+        // 所以长句先按标点切段，逐段翻完再拼起来；短句照旧整句直翻。
+        private static string TranslateSmall(MtModel m, string text, int maxTokens)
+        {
+            if (text == null) return "";
+            string s = text.Trim();
+            if (s.Length == 0) return "";
+            if (s.Length <= 40) return m.TranslateNoCache(s, maxTokens);
+            string[] segs = SplitClauses(s);
+            if (segs.Length <= 1)
+            {
+                // 没标点的长串（导航栏那种一串词）再按词切，否则整句一样会被截成几个字
+                if (s.Length > 56) segs = SplitByWords(s);
+                else return m.TranslateNoCache(s, maxTokens);
+            }
+            StringBuilder sb = new StringBuilder();
+            foreach (string seg in segs)
+            {
+                string one = seg.Trim();
+                if (one.Length == 0) continue;
+                int mt = Math.Min(200, Math.Max(24, (int)(one.Length * 1.8f)));
+                sb.Append(m.TranslateNoCache(one, mt));
+            }
+            return sb.ToString();
+        }
+
+        private static string[] SplitClauses(string text)
+        {
+            var list = new List<string>();
+            var cur = new StringBuilder();
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                cur.Append(c);
+                bool brk = c == ',' || c == ';' || c == '，' || c == '；' || c == '。' || c == '、';
+                if (!brk && (c == '.' || c == '!' || c == '?' || c == '！' || c == '？'))
+                {
+                    if (i + 1 >= text.Length || text[i + 1] == ' ' || text[i + 1] == '"' || text[i + 1] == ')') brk = true;
+                }
+                if (brk && cur.Length >= 8) { list.Add(cur.ToString()); cur.Clear(); }
+            }
+            if (cur.Length > 0) list.Add(cur.ToString());
+            return list.ToArray();
+        }
+
+        private static string[] SplitByWords(string text)
+        {
+            var list = new List<string>();
+            var cur = new StringBuilder();
+            string[] words = text.Split(' ');
+            foreach (string w in words)
+            {
+                if (w.Length == 0) continue;
+                if (cur.Length > 0 && cur.Length + 1 + w.Length > 40) { list.Add(cur.ToString()); cur.Clear(); }
+                if (cur.Length > 0) cur.Append(' ');
+                cur.Append(w);
+            }
+            if (cur.Length > 0) list.Add(cur.ToString());
+            return list.ToArray();
         }
 
         public void Dispose()
