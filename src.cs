@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace QRSnap
 {
