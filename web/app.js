@@ -145,6 +145,7 @@
       $("gameInterval").disabled = Number(g.trigger || 0) !== 1;
     }
     if ($("gameModel")) $("gameModel").value = g.profile === "standard" ? "standard" : "efficiency";
+    if ($("gameMask")) $("gameMask").value = "efficiency";
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
 
     const badge = $("gameBadge");
@@ -778,6 +779,9 @@
     });
     if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
       setConfig({ gamemerge: e.target.checked });
+    });
+    if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
+      setConfig({ gamemask: e.target.value });
     });
     if ($("gameModel")) $("gameModel").addEventListener("change", async (e) => {
       const v = e.target.value;

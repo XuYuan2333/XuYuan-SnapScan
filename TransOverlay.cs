@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -51,8 +51,16 @@ namespace QRSnap
         private const int WM_KEYDOWN = 0x0100;
         private const int WM_SYSKEYDOWN = 0x0104;
         private const int WM_MOUSEWHEEL = 0x020A;
+        private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
 
         [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        private static void PinTop(Form f)
+        {
+            if (f == null || !f.IsHandleCreated) return;
+            try { SetWindowPos(f.Handle, (IntPtr)(-1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW); }
+            catch (Exception) { }
+        }
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -131,6 +139,7 @@ namespace QRSnap
             _inst.Bounds = screenRect;
             _inst.Visible = true;
             _inst.RenderAll();
+            PinTop(_inst);
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -153,6 +162,7 @@ namespace QRSnap
             _inst.Bounds = screenRect;
             _inst.Visible = true;
             _inst.RenderAll();
+            PinTop(_inst);
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -218,6 +228,7 @@ namespace QRSnap
                 }
                 _bar.PlaceNear(rect);
                 _bar.Visible = true;
+                PinTop(_bar);
                 _bar.Commit();
                 _bar.Raise();
             }

@@ -11,13 +11,14 @@ namespace QRSnap
     // 游戏专属模式：固定多个字幕区域、变化跳帧、三种触发方式、字幕过滤/合并
     internal static class GameRuntime
     {
-        private static System.Windows.Forms.Timer _timer;
+        private static System.Threading.Timer _timer;
         private static bool _busy;
         private static int _gen;
         private static ulong _lastHash;
         private static bool _paused;
         private static bool _overlayClosed;
         private static string _prevProfile;
+        private static string _prevMask;
 
         public static bool Running { get { return AppConfig.GameOn; } }
         public static string LastError = "";
@@ -109,8 +110,11 @@ namespace QRSnap
             }
 
             _prevProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+            _prevMask = AppConfig.NormalizeMtMode(AppConfig.MtMode);
             AppConfig.MtProfile = profile;
             AppConfig.GameModel = profile;
+            AppConfig.MtMode = AppConfig.MtModeEfficiency;   // 游戏页固定效率遮罩，不提供拟真
+            AppConfig.GameMaskMode = AppConfig.MtModeEfficiency;
             AppConfig.GameOn = true;
             LastError = "";
             _overlayClosed = false;
@@ -126,7 +130,7 @@ namespace QRSnap
 
         public static void Stop()
         {
-            if (_timer != null) _timer.Stop();
+            if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
             _gen++;
             _busy = false;
             _paused = false;
@@ -134,7 +138,9 @@ namespace QRSnap
             AppConfig.GameOn = false;
             LastError = "";
             if (!string.IsNullOrEmpty(_prevProfile)) AppConfig.MtProfile = _prevProfile;
+            if (!string.IsNullOrEmpty(_prevMask)) AppConfig.MtMode = _prevMask;
             _prevProfile = null;
+            _prevMask = null;
             try { AppConfig.Save(); } catch (Exception) { }
             try { TransOverlay.HideOverlay(); } catch (Exception) { }
             try { JadeHost.ShowWindow(true); } catch (Exception) { }
@@ -157,7 +163,7 @@ namespace QRSnap
             _paused = paused;
             if (paused)
             {
-                if (_timer != null) _timer.Stop();
+                if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
             }
             else if (AppConfig.GameOn) StartTimer();
         }
@@ -194,15 +200,16 @@ namespace QRSnap
 
         private static void StartTimer()
         {
-            if (_timer == null)
-            {
-                _timer = new System.Windows.Forms.Timer();
-                _timer.Tick += delegate { Trigger(false); };
-            }
-            _timer.Stop();
+            if (_timer != null) { try { _timer.Dispose(); } catch (Exception) { } _timer = null; }
             if (AppConfig.GameTrigger == 2) return;   // 手动：不跑定时器
-            _timer.Interval = AppConfig.GameTrigger == 0 ? 250 : Math.Max(250, AppConfig.GameIntervalMs);
-            _timer.Start();
+            int due = AppConfig.GameTrigger == 0 ? 250 : Math.Max(250, AppConfig.GameIntervalMs);
+            _timer = new System.Threading.Timer(TimerTick, null, due, due);
+        }
+
+        private static void TimerTick(object state)
+        {
+            try { JadeHost.RunOnUi(delegate { Trigger(false); }); }
+            catch (Exception ex) { JadeHost.Log("[game] timer fail " + ex.Message); }
         }
 
         private static void WarmModel(string profile)
@@ -225,11 +232,19 @@ namespace QRSnap
         // force=true：手动快捷键，翻译中则中断与上一轮，开新一轮
         public static void Trigger(bool force)
         {
-            if (_paused || _overlayClosed) return;
+            if (_paused || _overlayClosed)
+            {
+                JadeHost.Log("[game] skip paused=" + (_paused ? 1 : 0) + " closed=" + (_overlayClosed ? 1 : 0));
+                return;
+            }
             if (!AppConfig.GameOn) return;
             if (_busy)
             {
-                if (!force) return;
+                if (!force)
+                {
+                    JadeHost.Log("[game] skip busy");
+                    return;
+                }
                 _gen++;
                 try { LlamaMt.Shutdown(); } catch (Exception) { }
                 _busy = false;

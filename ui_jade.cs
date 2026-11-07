@@ -1508,6 +1508,21 @@ namespace QRSnap
             try { NativeShell.Log(msg); } catch (Exception) { }
         }
 
+        internal static void RunOnUi(Action act)
+        {
+            NativeShell shell = _shell;
+            if (shell == null) { try { act(); } catch (Exception) { } return; }
+            try
+            {
+                if (shell.InvokeRequired) shell.BeginInvoke(act);
+                else act();
+            }
+            catch (Exception)
+            {
+                try { act(); } catch (Exception) { }
+            }
+        }
+
         private static IntPtr AppReady(uint win, IntPtr msg)
         {
             if (win != 1)
@@ -2033,6 +2048,7 @@ namespace QRSnap
             sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
+            sb.Append(",\"mask\":").Append(J.S(AppConfig.MtModeEfficiency));
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
             bool gready = gp == AppConfig.MtProfileEfficiency ? MtRunner.GameReady : MtRunner.Ready;
             string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
@@ -2262,6 +2278,15 @@ namespace QRSnap
                             MtRunner.Invalidate();
                             try { LlamaMt.Shutdown(); } catch (Exception) { }
                             GameRuntime.Reconfigure();
+                        }
+                    }
+                    else if (k == "gamemask")
+                    {
+                        AppConfig.GameMaskMode = AppConfig.MtModeEfficiency;   // 游戏页不接受拟真
+                        if (AppConfig.GameOn)
+                        {
+                            AppConfig.MtMode = AppConfig.MtModeEfficiency;
+                            try { TransOverlay.Repaint(); } catch (Exception) { }
                         }
                     }
                     else if (k == "gamemerge")
