@@ -699,6 +699,12 @@
       }
     });
 
+    // 快捷区的「游戏专属配置」：就地展开，不另开抽屉
+    if ($("quickGame")) $("quickGame").addEventListener("click", () => {
+      const d = $("gameDetail");
+      if (d) d.hidden = !d.hidden;
+    });
+
     // 快捷区的「翻译模式」行：切换入口在设置里，点这一行直接跳到对应分组并展开
     $("quickMtProfile").addEventListener("click", () => {
       openDrawer(true);
