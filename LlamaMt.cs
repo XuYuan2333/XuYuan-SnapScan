@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -268,13 +268,9 @@ internal static class LlamaMt
     // 这里显式要求「忠实原文、不增不减」，实测能压住这类幻觉。
     private static string Prompt(string text, string tgt)
     {
-        if (tgt == "zh")
-        {
-            if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency)
-                return "翻译成简体中文：\n\n" + text;
-            return "把下面这段文字翻译成简体中文，忠实原文，不增不减；用户名、ID、产品型号、版本号保持原文，直接给出译文：\n\n" + text;
-        }
-        return "Translate the following segment into " + langEn(tgt) + ", faithfully, without adding or omitting information, without explanation.\n\n" + text;
+        // 只保留一句提示，避免小模型把规则/术语说明当成正文吐出来
+        string lang = tgt == "zh" ? "简体中文" : langEn(tgt);
+        return "只输出译文（" + lang + "）：\n\n" + text;
     }
 
     private static string langEn(string tgt)
@@ -299,10 +295,7 @@ internal static class LlamaMt
                 StartServer(model);
             _lastUse = DateTime.UtcNow;
 
-            string sys = AppConfig.NormalizeMtProfile(AppConfig.MtProfile) == AppConfig.MtProfileEfficiency
-                ? "针对短句翻译时，若有多重意思的词尽量以游戏行业术语翻译；只输出译文，不要解释。"
-                : null;
-            string payload = BuildRequest(Prompt(text, tgt), 192, sys);
+            string payload = BuildRequest(Prompt(text, tgt), 192);
             string resp = HttpPost("http://127.0.0.1:" + _port + "/v1/chat/completions", payload, 120);
             string content = JsonField(resp, "content");
             _lastUse = DateTime.UtcNow;
@@ -344,11 +337,9 @@ internal static class LlamaMt
             StringBuilder prompt = new StringBuilder();
             int chars = 0;
             if (tgt == "zh")
-                prompt.Append("把下面 ").Append(lines.Count).Append(" 行英文逐行翻译成简体中文，保持行数和顺序，只输出译文，每行一条，不要编号、不要解释：\n");
+                prompt.Append("只输出译文（简体中文），每行对应一行：\n");
             else
-                prompt.Append("Translate the following ").Append(lines.Count)
-                      .Append(" lines into ").Append(langEn(tgt))
-                      .Append(" line by line, keep the same line count and order, output only the translations, one per line, no numbering:\n");
+                prompt.Append("Only output translations (").Append(langEn(tgt)).Append("), one per line:\n");
             for (int i = 0; i < lines.Count; i++)
             {
                 prompt.Append(lines[i]).Append('\n');
@@ -403,7 +394,7 @@ internal static class LlamaMt
             if (IsPromptEcho(t))
             {
                 // 提示词和译文同一行时，取“只输出译文：/翻译成简体中文：”后面的部分
-                int cut = t.LastIndexOf("只输出译文：", StringComparison.Ordinal);
+                int cut = t.LastIndexOf("只输出译文", StringComparison.Ordinal);
                 if (cut < 0) cut = t.LastIndexOf("翻译成简体中文：", StringComparison.Ordinal);
                 if (cut < 0) cut = t.LastIndexOf("翻译成中文：", StringComparison.Ordinal);
                 if (cut >= 0)
