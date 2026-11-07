@@ -2691,6 +2691,7 @@ namespace QRSnap
                 Thread.Sleep(150);
                 CaptureSession s = new CaptureSession();
                 s.Freehand = false;
+                s.ExistingRegions = GameRuntime.Regions();
                 s.Run();
                 bool ok = s.Confirmed && s.Selection.Width >= 16 && s.Selection.Height >= 12;
                 bool added = false;

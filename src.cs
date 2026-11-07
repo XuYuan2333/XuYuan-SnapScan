@@ -2858,6 +2858,7 @@ namespace QRSnap
         private IntPtr _escHotkeyHwnd = IntPtr.Zero;
 
         public Rectangle Selection = Rectangle.Empty;
+        public List<Rectangle> ExistingRegions = new List<Rectangle>(); // 游戏模式：已保存区域，用淡黄色提示
         public bool Done;
         public bool Confirmed;
         public Bitmap Crop;
@@ -3303,6 +3304,7 @@ namespace QRSnap
             }
 
             Rectangle sel = _session.Selection;
+            DrawExistingRegions(g);
             if (_session.Freehand)
             {
                 DrawFreehand(g);
@@ -3334,6 +3336,34 @@ namespace QRSnap
             if (_shot.Bounds.Contains(Cursor.Position))
             {
                 DrawHint(g, sel);
+            }
+        }
+
+        // 游戏模式加区域时，把已经保存的区域用淡黄色框标出来，避免重复画同一块
+        private void DrawExistingRegions(Graphics g)
+        {
+            List<Rectangle> list = _session.ExistingRegions;
+            if (list == null || list.Count == 0) return;
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(34, 255, 214, 64)))
+            using (Pen pen = new Pen(Color.FromArgb(230, 255, 216, 96), 2F))
+            {
+                pen.DashStyle = DashStyle.Dash;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    Rectangle r = list[i];
+                    Rectangle frame = new Rectangle(r.X - _shot.Bounds.X, r.Y - _shot.Bounds.Y, r.Width, r.Height);
+                    Rectangle local = Rectangle.Intersect(frame, new Rectangle(0, 0, ClientSize.Width, ClientSize.Height));
+                    if (local.Width <= 0 || local.Height <= 0) continue;
+                    g.FillRectangle(fill, local);
+                    g.DrawRectangle(pen, frame);
+                    string tag = "已选 " + (i + 1);
+                    Size ts = TextRenderer.MeasureText(tag, _sizeFont);
+                    Rectangle tr = new Rectangle(frame.X + 5, frame.Y + 4, ts.Width + 8, ts.Height + 2);
+                    using (SolidBrush tb = new SolidBrush(Color.FromArgb(190, 92, 70, 0)))
+                        g.FillRectangle(tb, tr);
+                    TextRenderer.DrawText(g, tag, _sizeFont, tr, Color.FromArgb(255, 255, 238, 180),
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                }
             }
         }
 
