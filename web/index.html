@@ -114,6 +114,14 @@
           <span class="q-text"><b>翻译模式</b><i id="mtProfileHint">标准 · HyMT1.5 全方向</i></span>
           <span class="q-badge" id="mtProfileBadge">标准</span>
         </div>
+
+        <div class="quick-row pick game" id="quickGame">
+          <span class="q-text"><b>游戏专属配置</b><i>固定字幕区域 · 低延迟 · 常驻小模型</i></span>
+          <span class="q-badge">重点</span>
+        </div>
+        <div class="game-detail" id="gameDetail" hidden>
+          <div class="group-note">游戏翻译专用：固定字幕区域 / 低延迟 / 小模型常驻 / 游戏术语。具体选项下一轮按你的清单补。</div>
+        </div>
       </div>
 
     </section>
@@ -171,11 +179,6 @@
         <div class="sub-title">翻译模式</div>
         <div class="engine-list" id="mtProfList"></div>
         <div class="group-note" id="noteMtProfile">标准：HyMT1.5全语种模型，所有语种，按需加载，空闲 60 秒释放。<br>效率：Qwen2.5-0.5B 短句/游戏字幕模型，常驻（约 0.4–0.6 GB 显存/内存），切档或退出释放。<br>AI 接管：不占用本地显存，走云端。</div>
-
-        <div class="game-inline">
-          <div class="sub-title">游戏专属配置<span class="q-badge">重点</span></div>
-          <div class="group-note">固定字幕区域 · 低延迟 · 小模型常驻 · 游戏术语。具体选项下一轮按你的清单补，先放这里，不另开抽屉。</div>
-        </div>
 
         <div class="sub-title">翻译模型（按档位）</div>
         <div class="engine-list" id="mtList"></div>
