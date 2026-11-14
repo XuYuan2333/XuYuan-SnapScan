@@ -15,6 +15,23 @@
   let S = null;            // 后端状态
   let busy = false;
 
+  /* ---------------- 状态栏：内存 / 显存占用 ---------------- */
+  // 3 秒一次轻量读取（后端读本进程 + 翻译子进程），常驻底部
+  let memTimer = null;
+  function mbText(mb) {
+    if (!mb || mb <= 0) return "—";
+    return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB";
+  }
+  async function pollMem() {
+    try {
+      const m = await api("mem", {});
+      if (!m) return;
+      const mi = $("memInfo"), vi = $("vramInfo");
+      if (mi) { mi.textContent = "内存 " + mbText(m.ws); mi.title = "本进程 + 翻译子进程工作集"; }
+      if (vi) { vi.textContent = "显存 " + (m.vram > 0 ? mbText(m.vram) : "—"); vi.title = "本进程 + 翻译子进程专用显存"; }
+    } catch (e) { /* 通道不可用时保持上一次数值 */ }
+  }
+
   /* ---------------- 状态渲染 ---------------- */
   function applyGlass(opacity, frost) {
     const root = document.documentElement;
@@ -88,6 +105,17 @@
     if ($("gameLblMtAlpha")) $("gameLblMtAlpha").textContent = p + "%";
   }
 
+  // 文案里的快捷键不写死：按后端给的实际键名回填，
+  // 用户改了热键这些说明文字自动跟着变；拿不到键名就退回功能名
+  const HK_NAME = { qr: "截图识码", ocr: "截图识字", mt: "截图翻译", hide: "隐藏译文" };
+  function fillHotkeySpans(hk) {
+    const els = document.querySelectorAll("[data-hk]");
+    for (let i = 0; i < els.length; i++) {
+      const w = els[i].getAttribute("data-hk");
+      els[i].textContent = (hk && hk[w]) || HK_NAME[w] || w;
+    }
+  }
+
   function applyState(s) {
     if (!s || typeof s !== "object") return;
     S = s;
@@ -123,7 +151,9 @@
     if ($("selMtPerf")) $("selMtPerf").value = c.mtperf || "balanced";
     if ($("selMtGpu")) $("selMtGpu").value = c.mtgpu || "auto";
     if ($("shotCacheInfo")) $("shotCacheInfo").textContent = c.cacheinfo || "—";
+    if ($("swHotStart")) $("swHotStart").checked = c.hotstart !== false;
     if ($("numMtIdle")) $("numMtIdle").value = (c.mtidle === undefined || c.mtidle === null) ? 30 : c.mtidle;
+    if ($("numShotCacheMax")) $("numShotCacheMax").value = (c.shotcachemax === undefined || c.shotcachemax === null) ? 120 : c.shotcachemax;
     applyMaskAll(c);
     applyMtProfile(c.mtprofile || "standard");
 
@@ -136,6 +166,14 @@
     if ($("swAiCheck")) $("swAiCheck").checked = !!ai.check;
     if ($("swAiMerge")) $("swAiMerge").checked = !!ai.merge;
     if ($("swAiMt")) $("swAiMt").checked = !!ai.mt;
+    if ($("swAli")) $("swAli").checked = !!ai.alimt;
+    const prov = ai.mtprov === "google" ? "google" : "ali";
+    if ($("selProv")) $("selProv").value = prov;
+    if ($("aliBox")) $("aliBox").style.display = prov === "google" ? "none" : "";
+    if ($("gooBox")) $("gooBox").style.display = prov === "google" ? "" : "none";
+    if ($("txtAliAk")) $("txtAliAk").placeholder = ai.aliHasAk ? "已保存，留空则不改" : "LTAI...";
+    if ($("txtAliSk")) $("txtAliSk").placeholder = ai.aliHasSk ? "已保存，留空则不改" : "粘贴 AccessKey Secret，留空则不改";
+    if ($("aliNote")) $("aliNote").textContent = ai.aliStatus && ai.aliStatus.length ? ai.aliStatus : "密钥只存本机 ini。开这个就不用再加载本地翻译模型。";
     if ($("txtAiKey")) $("txtAiKey").placeholder = ai.hasKey ? ((ai.keyTail || "Key") + " 已保存，留空则不改") : "粘贴你自己的 Key，留空则不改";
     applyAi(ai);
 
@@ -149,6 +187,7 @@
     $("hkQr").textContent = hk.qr || "—";
     $("hkOcr").textContent = hk.ocr || "—";
     $("hkMt").textContent = hk.mt || "—";
+    fillHotkeySpans(hk);
     if (document.activeElement !== $("hkQrInput")) $("hkQrInput").value = hk.qr || "";
     if (document.activeElement !== $("hkOcrInput")) $("hkOcrInput").value = hk.ocr || "";
     if (document.activeElement !== $("hkMtInput")) $("hkMtInput").value = hk.mt || "";
@@ -185,7 +224,15 @@
     if ($("gameModel")) $("gameModel").value = ["efficiency", "turbo", "standard"].includes(g.profile) ? g.profile : "efficiency";
     if ($("gameMask")) $("gameMask").value = normMaskMode(g.mask);
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
+    if ($("gameFontFilter")) $("gameFontFilter").checked = g.fontFilter !== false;
     if ($("gameToastOn")) $("gameToastOn").checked = g.toastOn !== false;
+    if ($("gameAuto")) $("gameAuto").checked = !!g.auto;
+    if ($("gameTriggerMode")) $("gameTriggerMode").value = g.auto ? "auto" : "manual";
+    if ($("gameAutoHint")) {
+      $("gameAutoHint").textContent = g.auto
+        ? "自适应：40ms 采样选区，画面定住 400ms 才识字；图像指纹挡重复 OCR、文本指纹挡重复翻译；字幕换了自动重译。"
+        : "手动：按「" + ((S && S.hotkeys && S.hotkeys.mt) || "") + "」翻译一次。";
+    }
 
     const badge = $("gameBadge");
     if (badge) {
@@ -303,12 +350,9 @@
 
     buildMtList(mt);
 
-    const profText = prof === "efficiency" ? "效率（PLaMo Q4_K_M）" : (prof === "turbo" ? "极速（PLaMo Q2_K）" : "标准（HyMT1.5 1.8B）");
-    const idleSec = (S && S.config && S.config.mtidle != null) ? Number(S.config.mtidle) : 60;
-    const idleText = idleSec > 0 ? ("空闲 " + idleSec + " 秒后自动释放") : "不自动释放";
     let note = ready
-      ? ("当前档位：" + profText + "。普通翻译" + idleText + "；游戏模式内常驻，关闭游戏模式或切换模型时释放。")
-      : ("当前档位缺模型：" + (missing.length ? missing.join("、") : "翻译模型") + "。可以切换档位，或导入对应的模型包。");
+      ? "同一时间只跑一个：点「加载」启动并自动释放其他档，点「释放」关掉。"
+      : ("当前档位缺模型：" + (missing.length ? missing.join("、") : "翻译模型") + "，导入或切换档位。");
     if (mt.root) note += "\n目录：" + mt.root;
     $("mtNote").textContent = note;
   }
@@ -331,17 +375,122 @@
     }
     kit.forEach((k) => {
       const row = document.createElement("div");
-      row.className = "engine-opt" + (k.ready ? " ok" : " off");
+      row.className = "engine-opt" + (k.ready ? " ok" : " off") + (k.loaded ? " on" : "");
       const tick = document.createElement("span"); tick.className = "tick";
-      tick.textContent = k.ready ? "✓" : "×";
+      tick.textContent = k.loaded ? "●" : (k.ready ? "✓" : "×");
       const name = document.createElement("span"); name.className = "e-name";
-      const extra = (k.size ? " · " + k.size : "") + (k.mem ? " · " + k.mem : "");
-      name.textContent = k.title + extra + (k.ready ? "" : "（缺）");
-      const note = document.createElement("span"); note.className = "e-note";
-      note.textContent = k.sub ? "（" + k.sub + "）" : "";
-      row.appendChild(tick); row.appendChild(name); row.appendChild(note);
+      name.textContent = k.title + (k.ready ? "" : "（缺）");
+      row.appendChild(tick); row.appendChild(name);
+      if (k.ready) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "mt-load-btn" + (k.loaded ? " rel" : "");
+        btn.textContent = k.loading ? "加载中" : (k.loaded ? "释放" : "加载");
+        btn.disabled = !!k.loading;
+        btn.title = k.loaded ? "关掉这个模型，内存/显存还回去" : "加载这个模型（会自动释放其他档）";
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (k.loading) return;
+          if (k.loaded) doMtUnload();
+          else doMtLoad(k);
+        });
+        row.appendChild(btn);
+      }
       box.appendChild(row);
     });
+  }
+
+  /* ---------------- 翻译模型加载：遮罩 + 进度 ---------------- */
+  // llama-server 只给「就绪 / 没就绪」，拿不到真实百分比，所以进度按时间估算，
+  // 后端状态里一确认这个档位 loaded 就直接跳 100%。
+  let loadFake = null, loadPoll = null, loadProfile = "", loadPct = 0, loadStart = 0, loadMode = "";
+
+  function setLoadPct(v) {
+    loadPct = Math.max(0, Math.min(100, Math.round(v)));
+    if ($("loadBar")) $("loadBar").style.width = loadPct + "%";
+    if ($("loadPct")) $("loadPct").textContent = loadPct + "%";
+  }
+
+  function stopLoadTimers() {
+    if (loadFake) { clearInterval(loadFake); loadFake = null; }
+    if (loadPoll) { clearInterval(loadPoll); loadPoll = null; }
+  }
+
+  function closeLoadMask() {
+    stopLoadTimers();
+    if ($("loadMask")) $("loadMask").hidden = true;
+    loadProfile = "";
+    loadMode = "";
+  }
+
+  function failLoad(msg) {
+    stopLoadTimers();
+    setLoadPct(100);
+    if ($("loadSub")) {
+      $("loadSub").textContent = msg || "加载失败";
+      $("loadSub").className = "load-sub fail";
+    }
+    setTimeout(closeLoadMask, 2200);
+  }
+
+  async function doMtLoad(k) {
+    loadMode = "mt";
+    loadProfile = k.profile;
+    loadStart = Date.now();
+    setLoadPct(0);
+    if ($("loadTitle")) $("loadTitle").textContent = "正在加载 " + k.title + " 模型";
+    if ($("loadSub")) {
+      $("loadSub").textContent = "加载完成后按钮会变成「释放」";
+      $("loadSub").className = "load-sub";
+    }
+    if ($("loadMask")) $("loadMask").hidden = false;
+
+    let r = null;
+    try { r = await api("mtload", { profile: k.profile }); } catch (e) { r = null; }
+    if (!r) { failLoad("后端没有响应"); return; }
+    if (r.ok === false) { failLoad(r.msg || "这一档没有装模型文件"); return; }
+
+    // 估算进度：越接近 90% 走得越慢，不会提前跑到头
+    let last = Date.now();
+    loadFake = setInterval(() => {
+      const dt = (Date.now() - last) / 1000;
+      last = Date.now();
+      if (loadPct >= 90) return;
+      const step = Math.max(0.5, (90 - loadPct) / 9) * dt;
+      setLoadPct(loadPct + step);
+    }, 500);
+    loadPoll = setInterval(pollMtLoaded, 900);
+  }
+
+  async function pollMtLoaded() {
+    let s = null;
+    try { s = await api("state"); } catch (e) { return; }
+    if (!s || !s.mt) return;
+    const mine = (s.mt.kit || []).filter((x) => x.profile === loadProfile)[0];
+    if (mine && mine.loaded) {
+      stopLoadTimers();
+      setLoadPct(100);
+      if ($("loadSub")) $("loadSub").textContent = "已就绪";
+      applyState(s);
+      setTimeout(closeLoadMask, 600);
+      return;
+    }
+    if (s.mt.loaderr && !(mine && mine.loading)) { failLoad("加载失败：" + s.mt.loaderr); return; }
+    if (Date.now() - loadStart > 90000) { failLoad("加载超时（90 秒）"); return; }
+  }
+
+  async function doMtUnload() {
+    let r = null;
+    try { r = await api("mtunload", {}); } catch (e) { return; }
+    const st = (r && r.state) ? r.state : r;
+    if (st && st.mt) applyState(st);
+  }
+
+  // 切换 OCR 引擎：只改配置，引擎在后台自己拉起。
+  // OCR 侧不再弹全屏遮罩（遮罩只留给翻译模型加载那一步），避免选引擎时整屏被盖一下。
+  async function doOcrLoad(key, name, extra) {
+    const patch = Object.assign({ engine: key }, extra || {});
+    try { await setConfig(patch); } catch (e) { }
   }
 
   // 引擎选择：竖排选项（比下拉更好读，长说明也不会被截断）
@@ -389,8 +538,8 @@
 
       if (it.ready) {
         row.addEventListener("click", () => {
-          if (fuse) { setConfig({ ocrfusion: false, engine: it.key }); return; }
-          if (it.key !== active) setConfig({ engine: it.key });
+          if (fuse) { doOcrLoad(it.key, it.name || it.key, { ocrfusion: false }); return; }
+          if (it.key !== active) doOcrLoad(it.key, it.name || it.key);
         });
       } else {
         row.title = "本机没有找到这一档模型，无法选择";
@@ -406,6 +555,7 @@
     if (e && e.modelRoot) note += "\n模型目录：" + e.modelRoot;
     $("engineNote").textContent = note;
   }
+
 
   /* ---------------- 识别 ---------------- */
   async function capture(mode) {
@@ -425,7 +575,7 @@
       toast("调用后端失败：" + e);
     } finally {
       busy = false;
-      setTimeout(() => { if (!busy) $("status").textContent = "就绪"; }, 1200);
+      setTimeout(() => { if (!busy) $("status").textContent = ""; }, 1200);
     }
   }
 
@@ -609,8 +759,11 @@
   /* ---------------- 快捷键录制 ---------------- */
   function bindHotkeyRecorder(input, which) {
     let recording = false;
-    input.addEventListener("focus", () => {
+    // 只有真去点这个框才进录音：单纯获得焦点（页面自动聚焦、Tab 走过去）不该改设置，
+    // 否则点一下就算「改热键」，随手按的键会把原来的值覆盖掉。
+    input.addEventListener("click", () => {
       recording = true;
+      input.select();
       input.value = "按下组合键…";
     });
     input.addEventListener("blur", () => {
@@ -645,7 +798,14 @@
       try {
         const s = await api("hotkey", { which, combo });
         applyState(s);
-        toast("快捷键已更新：" + combo);
+        // 后端注册被占用时会自动换键（F8/F9/F10/D9），必须说清楚，
+        // 否则用户以为设成了 combo，实际按它永远没反应。
+        const actual = (s && s.hotkeys) ? (s.hotkeys[which] || "") : "";
+        if (actual && actual.toUpperCase() !== combo.toUpperCase()) {
+          toast("「" + combo + "」被其他程序占用，已改用「" + actual + "」");
+        } else {
+          toast("快捷键已更新：" + combo);
+        }
       } catch (e) { toast("设置失败：" + e); }
     });
   }
@@ -711,7 +871,38 @@
     if ($("swAiOcr")) $("swAiOcr").addEventListener("change", (e) => setConfig({ aiocr: e.target.checked }));
     if ($("swAiCheck")) $("swAiCheck").addEventListener("change", (e) => setConfig({ aicheck: e.target.checked }));
     if ($("swAiMerge")) $("swAiMerge").addEventListener("change", (e) => setConfig({ aimerge: e.target.checked }));
-    if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => setConfig({ aimt: e.target.checked }));
+    if ($("swAiMt")) $("swAiMt").addEventListener("change", (e) => {
+      // AI 接管和在线翻译只能开一个
+      if (e.target.checked && $("swAli")) $("swAli").checked = false;
+      setConfig({ aimt: e.target.checked });
+    });
+    if ($("swAli")) $("swAli").addEventListener("change", (e) => {
+      if (e.target.checked && $("swAiMt")) $("swAiMt").checked = false;
+      setConfig({ alimt: e.target.checked });
+    });
+    if ($("selProv")) $("selProv").addEventListener("change", (e) => {
+      const v = e.target.value === "google" ? "google" : "ali";
+      if ($("aliBox")) $("aliBox").style.display = v === "google" ? "none" : "";
+      if ($("gooBox")) $("gooBox").style.display = v === "google" ? "" : "none";
+      setConfig({ mtprov: v });
+    });
+    if ($("btnAliHelp")) $("btnAliHelp").addEventListener("click", () => {
+      const b = $("aliHelpBox");
+      if (b) b.style.display = (b.style.display === "none" || !b.style.display) ? "block" : "none";
+    });
+    if ($("btnTestGoo")) $("btnTestGoo").addEventListener("click", () => {
+      setConfig({ mtest: 1 });
+    });
+    if ($("btnSaveAli")) $("btnSaveAli").addEventListener("click", async () => {
+      const patch = {};
+      const id = ($("txtAliAk") && $("txtAliAk").value || "").trim();
+      const sk = ($("txtAliSk") && $("txtAliSk").value || "").trim();
+      if (id) patch.aliak = id;
+      if (sk) patch.alisk = sk;
+      await setConfig(patch);
+      if ($("txtAliAk")) $("txtAliAk").value = "";
+      if ($("txtAliSk")) $("txtAliSk").value = "";
+    });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") { openDrawer(false); openAI(false); openGame(false); } });
 
     // 折叠分组：同一个抽屉里一次只开一组，省地方
@@ -737,6 +928,11 @@
       $("swOcrFusion").dataset.bound = "1";
       $("swOcrFusion").addEventListener("change", (e) => setConfig({ ocrfusion: e.target.checked }));
     }
+    if ($("swHotStart") && !$("swHotStart").dataset.bound) {
+      $("swHotStart").dataset.bound = "1";
+      $("swHotStart").addEventListener("change", (e) => setConfig({ hotstart: e.target.checked }));
+    }
+
 
     $("swMtBar").addEventListener("change", (e) => setConfig({ mtbar: e.target.checked }));
     $("selMtPerf").addEventListener("change", (e) => setConfig({ mtperf: e.target.value }));
@@ -776,6 +972,18 @@
       if (v > 86400) v = 86400;
       e.target.value = v;
       setConfig({ mtidle: v });
+    });
+
+    if ($("numShotCacheMax")) $("numShotCacheMax").addEventListener("change", (e) => {
+      let v = parseInt(e.target.value, 10);
+      if (isNaN(v) || v < 20) v = 120;
+      if (v > 2000) v = 2000;
+      e.target.value = v;
+      setConfig({ shotcachemax: v });
+    });
+
+    if ($("btnOpenCacheDir")) $("btnOpenCacheDir").addEventListener("click", () => {
+      try { api("win", { op: "opencachedir" }); } catch (e) { toast("打不开目录：" + e); }
     });
 
     const rngA = $("rngMtAlpha");
@@ -834,8 +1042,20 @@
     if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
       setConfig({ gamemerge: e.target.checked });
     });
+    if ($("gameFontFilter")) $("gameFontFilter").addEventListener("change", (e) => {
+      setConfig({ gamefontfilter: e.target.checked });
+    });
     if ($("gameToastOn")) $("gameToastOn").addEventListener("change", (e) => {
       setConfig({ gametoaston: e.target.checked });
+    });
+    if ($("gameTriggerMode")) $("gameTriggerMode").addEventListener("change", async (e) => {
+      const want = e.target.value === "auto";
+      const g = (S && S.game) || {};
+      if (want && !g.on) { toast("先启用游戏模式，再选自适应"); applyGameState(S.game); return; }
+      if (want && !(g.regions || []).length) { toast("先点「添加区域」，框出字幕位置"); applyGameState(S.game); return; }
+      const s = await setConfig({ gametriggermode: want ? "auto" : "manual" });
+      if (s && s.state) applyState(s.state);
+      toast(want ? "已切到自适应：定住就自动翻译" : "已切到手动：按快捷键翻译");
     });
     if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
       setConfig({ gamemask: e.target.value });
@@ -913,7 +1133,7 @@
         const s = await api("recheck", {});
         applyState(s);
         toast("引擎检测完成");
-        $("status").textContent = "就绪";
+        $("status").textContent = "";
       } catch (err) { toast("检测失败：" + err); }
     };
     $("btnRecheck").addEventListener("click", recheck);
@@ -967,7 +1187,7 @@
       // 翻译没有独立开关：只要装了模型就是可用状态
       if (s && s.mt && s.mt.on === false) setConfig({ translate: true });
       const hk = (s && s.hotkeys) || {};
-      $("status").textContent = "就绪";
+      $("status").textContent = "";
     } catch (e) {
       $("status").textContent = "与后端通信失败";
       toast("初始化失败：" + e);
@@ -980,6 +1200,17 @@
       const a = (vs && vs.config && vs.config.ai) || {};
       if (a.status === "checking" || a.status === "unknown") pollAi(20000);
     } catch (e) { /* 校验通道不可用就保持原状态 */ }
+
+    // 左下角常驻内存占用：3 秒一次，只取本进程工作集
+    pollMem();
+    if (memTimer) clearInterval(memTimer);
+    memTimer = setInterval(pollMem, 3000);
+
+    // 右下角项目地址：点一下复制，粘贴到浏览器就能打开
+    if ($("ghLink")) $("ghLink").addEventListener("click", () => {
+      try { api("clipcopy", { text: "https://github.com/XuYuan2333/XuYuan-SnapScan" }); toast("项目地址已复制"); }
+      catch (e) { toast("复制失败：" + e); }
+    });
   }
 
   if (document.readyState === "loading") {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -158,25 +158,51 @@ namespace QRSnap
         internal void GameBusy(string text)
         {
             if (_toast == null) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new MethodInvoker(delegate() { try { _toast.ShowBusy(text); } catch (Exception) { } })); }
+                catch (Exception) { }
+                return;
+            }
             try { _toast.ShowBusy(text); } catch (Exception) { }
         }
 
         internal void GameBusy(string text, string sub)
         {
             if (_toast == null) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new MethodInvoker(delegate() { try { _toast.ShowBusy(text, sub); } catch (Exception) { } })); }
+                catch (Exception) { }
+                return;
+            }
             try { _toast.ShowBusy(text, sub); } catch (Exception) { }
         }
 
+        // 游戏模式的提示是后台抓图/翻译线程发过来的，直接操作 ToastForm 会跨线程抛异常，
+        // 异常又被 catch 吞掉 —— 表现就是"提示条全不见了"。统一切回 UI 线程再显示。
         internal void GameDone(string text, bool ok)
         {
             if (_toast == null) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new MethodInvoker(delegate() { try { _toast.ShowDone(text, ok); } catch (Exception) { } })); }
+                catch (Exception) { }
+                return;
+            }
             try { _toast.ShowDone(text, ok); } catch (Exception) { }
         }
 
         internal void GameDone(string text, string sub, bool ok)
         {
             if (_toast == null) return;
-            try { _toast.ShowDone(text, sub, ok); } catch (Exception) { }
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new MethodInvoker(delegate() { try { _toast.ShowDone(text, sub, ok, 2600); } catch (Exception) { } })); }
+                catch (Exception) { }
+                return;
+            }
+            try { _toast.ShowDone(text, sub, ok, 2600); } catch (Exception) { }
         }
 
         public NativeShell()
@@ -293,10 +319,13 @@ namespace QRSnap
             {
                 int id = (int)m.WParam;
                 Log("WM_HOTKEY id=" + id);
-                // 游戏模式：Ctrl+Alt+F 作为手动翻译键；翻译中再按会强制开新一轮
+                // 游戏模式：Ctrl+Alt+F 作为手动翻译键
                 if (id == ID_MT && AppConfig.GameOn)
                 {
-                    GameRuntime.Trigger(true);
+                    // 自适应模式（自动识别）：这个键改成「关 / 开译文」的切换，
+                    // 想停的时候按一下就停，不用去别处找开关；手动模式仍然按一次抓一次。
+                    if (AppConfig.GameAutoMode) GameRuntime.ToggleOverlay();
+                    else GameRuntime.Trigger(true);
                     return;
                 }
                 // 识别期间 UI 线程在泵消息，这时再按热键会叠出一轮新截屏，直接忽略
@@ -384,12 +413,18 @@ namespace QRSnap
         private bool _pumping;
         private string _mtSkipReason;   // 这一路没出译文时的具体原因，交给结果详情
         private string _mtSkipShort;    // 原因短句，直接显示在提示条上（「未翻译」到底为什么）
+
+        internal string MtSkipShortText
+        {
+            get { return _mtSkipShort; }
+        }
         private string _mtFail;         // AI 接管真失败了（不是「不需要翻译」），提示条要变红叉
         private int _aiMtLines;         // AI 接管译出几行
         private int _aiCheckLines;      // AI 质检重翻几行
         private long _aiCheckMs;
         private int _aiMergeGroups;     // AI 短句合并几组
         private long _aiMtMs;           // AI 接管耗时
+        private long _aliMs;           // 阿里云翻译耗时
         private bool _layoutActive;     // 本轮是否走了「分栏/徽章/段落」版面强化
         private int _layoutLines;       // 版面强化后的块数
         private List<Rectangle> _layoutObstacles;   // 头像/表情等需要避让的图形
@@ -411,6 +446,8 @@ namespace QRSnap
                 parts.Add("AI 质检 " + _aiCheckLines + " 行 " + (_aiCheckMs / 1000.0).ToString("0.0") + "s");
             if (_aiMtLines > 0)
                 parts.Add("AI 接管 " + _aiMtLines + " 行 " + (_aiMtMs / 1000.0).ToString("0.0") + "s");
+            if (_aliMs > 0)
+                parts.Add((AppConfig.MtProv == "google" ? "谷歌翻译 " : "阿里云翻译 ") + (_aliMs / 1000.0).ToString("0.0") + "s");
             if (_mtFail != null)
                 parts.Add("AI 报错：" + (_mtSkipShort ?? "失败"));
             return parts.Count == 0 ? null : string.Join(" · ", parts.ToArray());
@@ -471,6 +508,9 @@ namespace QRSnap
                     Application.DoEvents();
                     Thread.Sleep(3);
                 }
+                // 后台线程对 segs / preLayout 这些局部变量的写入，要让 UI 线程看得见
+                worker.Join(50);
+                Thread.MemoryBarrier();
                 // 快到肉眼看不见结果的（比如二维码）也保证「识别中」露个面，
                 // 不然一闪而过反而像没提示
                 while ((Environment.TickCount - start) < minVisibleMs)
@@ -501,7 +541,9 @@ namespace QRSnap
             Log("capture done confirmed=" + session.Confirmed + " crop=" + (crop != null));
             if (!session.Confirmed || crop == null) 
             {
-                if (_toast != null) _toast.ShowDone("已取消", false);
+                // 取消不弹提示：这条提示会在 UI 线程上同步显示，一旦它卡住，
+                // 后面的「把窗口放回来」就永远执行不到（实测就是这么丢的窗口）。
+                Log("capture cancelled, skip toast");
                 return null; 
             }
 
@@ -523,7 +565,7 @@ namespace QRSnap
                         try { Clipboard.SetText(ce.MtText); } catch (Exception) { }
                     }
                     NativeShell.Log("[cache] hit h=" + _lastShotHash.ToString("x16") + " json=" + (ce.Json == null ? 0 : ce.Json.Length));
-                    if (_toast != null) _toast.ShowDone("翻译完成 · 缓存命中", "同一屏，直接贴上次成品", true);
+                    if (_toast != null) _toast.ShowCacheHit("同一屏，跳过 OCR 与翻译（省约 1.7 秒）");
                     crop.Dispose();
                     CaptureResult cached = new CaptureResult();
                     cached.Json = ce.Json;
@@ -558,7 +600,7 @@ namespace QRSnap
                 string busyEngine = Ocr.EffectiveName();
                 // 识字和翻译是两个独立功能：只有"截图翻译"这一路才叠译文
                 // 但行坐标两条路都建：识字也要让 AI 按段落校正文本，翻译还要拿它放遮罩
-                bool wantMt = mode == "mt" && AppConfig.Translate && (AppConfig.AiMt || MtRunner.Ready);
+                bool wantMt = mode == "mt" && AppConfig.Translate && (AppConfig.AiMt || AppConfig.AliMt || MtRunner.Ready);
                 // AI 翻译接管时，翻译提示词里已经要求「先纠 OCR 错再翻」，
                 // 不再单独跑一遍识字强化（同一张图付两次模型往返不划算）。
                 AiTextFix.Suppress = mode == "mt" && AppConfig.AiMt;
@@ -586,66 +628,74 @@ namespace QRSnap
                 // 翻译 + 版面强化：直接跑「版面识字」，不要再先跑一遍普通识字。
                 // 原来两条链路各跑一次 PP-OCR，等于同一张图识别两遍，白花 2~3 秒。
                 if (mode == "mt" && AppConfig.AiLayout && AppConfig.Translate
-                    && (AppConfig.AiMt || MtRunner.Ready))
+                    && (AppConfig.AiMt || AppConfig.AliMt || MtRunner.Ready))
                 {
-                    try
+                    // 版面识字放在后台线程跑，UI 线程泵消息：否则 PP-OCR 这 1~3 秒
+                    // 会把消息泵堵死，「识字中」提示一帧都画不出来，用户只看到卡住。
+                    RunPumped(delegate()
                     {
-                        List<Rectangle> obs;
-                        string llog;
-                        System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
-                        List<OcrSegment> ls = AppConfig.OcrFusion
-                            ? Ocr.LayoutSegmentsFused(crop, out obs, out llog)
-                            : Ocr.LayoutSegments(crop, out obs, out llog);
-                        swL.Stop();
-                        if (ls != null && ls.Count >= 3)
+                        try
                         {
-                            segs = ls;
-                            preLayout = true;
-                            didOcr = true;
-                            _layoutObstacles = obs;
-                            _layoutLines = ls.Count;
-                            recEngine = AppConfig.OcrFusion ? "PP+微信 · 融合版面" : "PP-OCR 极速 · 版面";
-                            recDetail = "layout";
-                            recMs = swL.ElapsedMilliseconds;
-                            // 离线翻译时 AI 识字强化作用在版面分段上（AI 翻译接管时由翻译提示词纠错）
-                            if (AppConfig.AiOcr && !AppConfig.AiMt)
+                            List<Rectangle> obs;
+                            string llog;
+                            System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
+                            List<OcrSegment> ls = AppConfig.OcrFusion
+                                ? Ocr.LayoutSegmentsFused(crop, out obs, out llog)
+                                : Ocr.LayoutSegments(crop, out obs, out llog);
+                            swL.Stop();
+                            if (ls != null && ls.Count >= 3)
                             {
-                                try { AiTextFix.Polish(segs); } catch (Exception) { }
+                                segs = ls;
+                                preLayout = true;
+                                didOcr = true;
+                                _layoutObstacles = obs;
+                                _layoutLines = ls.Count;
+                                recEngine = AppConfig.OcrFusion ? "PP+微信 · 融合版面" : "PP-OCR 极速 · 版面";
+                                recDetail = "layout";
+                                recMs = swL.ElapsedMilliseconds;
+                                // 离线翻译时 AI 识字强化作用在版面分段上（AI 翻译接管时由翻译提示词纠错）
+                                if (AppConfig.AiOcr && !AppConfig.AiMt)
+                                {
+                                    try { AiTextFix.Polish(segs); } catch (Exception) { }
+                                }
+                                recText = JoinSegText(segs);
                             }
-                            recText = JoinSegText(segs);
+                            else Log("prelayout skip " + OneLine(llog, 220));
                         }
-                        else Log("prelayout skip " + OneLine(llog, 220));
-                    }
-                    catch (Exception exPre)
-                    {
-                        Log("prelayout fail " + exPre.Message);
-                    }
+                        catch (Exception exPre)
+                        {
+                            Log("prelayout fail " + exPre.Message);
+                        }
+                    }, 650);
                 }
 
                 // 纯识字 + 融合：PP 出框、微信出字；会比微信单引擎慢，开关默认关
                 if (!didOcr && mode == "ocr" && AppConfig.OcrFusion)
                 {
-                    try
+                    RunPumped(delegate()
                     {
-                        List<Rectangle> obs;
-                        string llog;
-                        System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
-                        List<OcrSegment> ls = Ocr.LayoutSegmentsFused(crop, out obs, out llog);
-                        swL.Stop();
-                        if (ls != null && ls.Count > 0)
+                        try
                         {
-                            segs = ls;
-                            didOcr = true;
-                            recEngine = "PP+微信 · 融合识字";
-                            recDetail = llog;
-                            recMs = swL.ElapsedMilliseconds;
-                            recText = JoinSegText(segs);
+                            List<Rectangle> obs;
+                            string llog;
+                            System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
+                            List<OcrSegment> ls = Ocr.LayoutSegmentsFused(crop, out obs, out llog);
+                            swL.Stop();
+                            if (ls != null && ls.Count > 0)
+                            {
+                                segs = ls;
+                                didOcr = true;
+                                recEngine = "PP+微信 · 融合识字";
+                                recDetail = llog;
+                                recMs = swL.ElapsedMilliseconds;
+                                recText = JoinSegText(segs);
+                            }
                         }
-                    }
-                    catch (Exception exFuse)
-                    {
-                        Log("ocr fusion fail " + exFuse.Message);
-                    }
+                        catch (Exception exFuse)
+                        {
+                            Log("ocr fusion fail " + exFuse.Message);
+                        }
+                    }, 650);
                 }
 
                 if (!didOcr)
@@ -653,7 +703,7 @@ namespace QRSnap
                     RunPumped(delegate()
                     {
                         recText = Ocr.Recognize(crop, out recEngine, out recMs, out recDetail, segs);
-                    }, 320);
+                    }, 650);
                 }
                 text = recText;
                 engine = recEngine;
@@ -670,7 +720,7 @@ namespace QRSnap
                         if (_toast != null)
                         {
                             string sub3 = "模型 · " + JadeHost.ModelLabel(AppConfig.MtProfile);
-                            if (!AppConfig.AiMt && !LlamaMt.ServerRunning) sub3 += " · 首次加载";
+                            if (!AppConfig.AiMt && !AppConfig.AliMt && !LlamaMt.ServerRunning) sub3 += " · 首次加载";
                             _toast.ShowBusy("翻译中", sub3);
                         }
                         int shown = TranslateAndShow(segs, session.Selection, crop, preLayout);
@@ -688,6 +738,8 @@ namespace QRSnap
                     }
                 }
             }
+            // 预览图：独立的彩色流水线（只缩放，不带灰度/CLAHE/锐化），不送进 OCR
+            EmitPreview(crop, mode);
             crop.Dispose();
 
             if (ok && AppConfig.AutoCopy)
@@ -731,6 +783,45 @@ namespace QRSnap
             CaptureResult cr = new CaptureResult();
             cr.Json = json;
             return cr;
+        }
+
+        // 预览 / 上传用的彩色图：从原图独立生成，只做 Lanczos4 等比缩小，编码 WebP。
+        // 与 OCR 推理图（可能已灰度 + CLAHE + USM）是两条完全独立的流水线，避免把处理过的图当预览。
+        // 编码走后台线程，不占识别/翻译这轮的主耗时（cwebp 子进程约 60~220 ms）。
+        private void EmitPreview(Bitmap crop, string mode)
+        {
+            if (crop == null) return;
+            Bitmap shot;
+            try { shot = (Bitmap)crop.Clone(); }
+            catch (Exception) { return; }
+
+            Thread worker = new Thread(delegate()
+            {
+                Bitmap preview = null;
+                try
+                {
+                    preview = OcrImage.ForPreview(shot);
+                    string ptrace = OcrImage.PreviewTrace(shot);
+                    string note;
+                    byte[] webp = WebpCodec.Encode(preview, OcrImage.WebpQuality, true, false, out note);
+                    NativeShell.Log("[preview] " + ptrace + " · " + (webp == null ? "无 WebP" : (webp.Length + " B")) + " · " + (note == null ? "" : note));
+                    if (webp != null && webp.Length > 0 && AppConfig.ShotCacheEnabled)
+                    {
+                        try { ShotCache.SavePreview(ShotCache.Hash(shot), webp, ptrace + " | " + note); } catch (Exception) { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    NativeShell.Log("[preview] fail " + ex.Message);
+                }
+                finally
+                {
+                    if (preview != null) { try { preview.Dispose(); } catch (Exception) { } }
+                    try { shot.Dispose(); } catch (Exception) { }
+                }
+            });
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         private static Rectangle ScaleRect(Rectangle r, double kx, double ky)
@@ -817,6 +908,13 @@ namespace QRSnap
         // 逐行翻译并原地铺译文；返回画出来的行数
         internal int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp, bool layoutPre = false)
         {
+            return TranslateAndShow(segs, screenRect, bmp, layoutPre, -1);
+        }
+
+        // zoneId >= 0：游戏模式的分区绘制。只更新这一块的遮罩窗口，别的区的译文原地不动。
+        // 传进来的 segs 坐标必须是「相对 screenRect」的，不是相对所有选区的并集。
+        internal int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp, bool layoutPre, int zoneId)
+        {
             if (segs == null || segs.Count == 0) return 0;
             if (bmp != null && Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
             {
@@ -832,6 +930,7 @@ namespace QRSnap
             _aiCheckMs = 0;
             _aiMergeGroups = 0;
             _aiMtMs = 0;
+            _aliMs = 0;
             _layoutActive = layoutPre;
             _layoutLines = layoutPre ? segs.Count : 0;
             if (!layoutPre) _layoutObstacles = null;
@@ -841,32 +940,36 @@ namespace QRSnap
             // 只依赖本地 PP-OCR（默认极速档），模型缺失就静默回退原链路。
             if (!layoutPre && AppConfig.AiLayout && bmp != null)
             {
-                try
+                // 同样放后台：这一段 PP-OCR 也是秒级，堵在 UI 线程上「翻译中」提示出不来
+                RunPumped(delegate()
                 {
-                    string llog;
-                    List<Rectangle> obs;
-                    List<OcrSegment> ls = Ocr.LayoutSegments(bmp, out obs, out llog);
-                    if (ls != null && ls.Count >= 3)
+                    try
                     {
-                        segs = ls;
-                        _layoutActive = true;
-                        _layoutLines = ls.Count;
-                        _layoutObstacles = obs;
-                        NativeShell.Log("[layout] blocks=" + ls.Count + " " + OneLine(llog, 220));
-                        // 版面链路会重新识字，原来在 Ocr.Recognize 里做的 AI 纠错会被覆盖掉。
-                        // 离线翻译（AiMt=0）时在这里补一次，让 AI 识字强化真正作用到最终译文。
-                        if (AppConfig.AiOcr && !AppConfig.AiMt)
+                        string llog;
+                        List<Rectangle> obs;
+                        List<OcrSegment> ls = Ocr.LayoutSegments(bmp, out obs, out llog);
+                        if (ls != null && ls.Count >= 3)
                         {
-                            try { AiTextFix.Polish(segs); }
-                            catch (Exception exFix) { NativeShell.Log("[layout] aiocr fail " + exFix.Message); }
+                            segs = ls;
+                            _layoutActive = true;
+                            _layoutLines = ls.Count;
+                            _layoutObstacles = obs;
+                            NativeShell.Log("[layout] blocks=" + ls.Count + " " + OneLine(llog, 220));
+                            // 版面链路会重新识字，原来在 Ocr.Recognize 里做的 AI 纠错会被覆盖掉。
+                            // 离线翻译（AiMt=0）时在这里补一次，让 AI 识字强化真正作用到最终译文。
+                            if (AppConfig.AiOcr && !AppConfig.AiMt)
+                            {
+                                try { AiTextFix.Polish(segs); }
+                                catch (Exception exFix) { NativeShell.Log("[layout] aiocr fail " + exFix.Message); }
+                            }
                         }
+                        else NativeShell.Log("[layout] skip " + OneLine(llog, 160));
                     }
-                    else NativeShell.Log("[layout] skip " + OneLine(llog, 160));
-                }
-                catch (Exception exLayout)
-                {
-                    NativeShell.Log("[layout] fail " + exLayout.Message);
-                }
+                    catch (Exception exLayout)
+                    {
+                        NativeShell.Log("[layout] fail " + exLayout.Message);
+                    }
+                }, 650);
             }
 
             StringBuilder all = new StringBuilder();
@@ -933,8 +1036,60 @@ namespace QRSnap
             {
                 try
                 {
+                    // 先标出「不是内容」的行（屏幕常驻的硬件监控 OSD、状态读数条），
+                    // 这类行不送翻译，也不画底板——翻了只会把读数盖住。
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment h = segs[i];
+                        if (h == null || h.Text == null) continue;
+                        if (Ocr.LooksLikeHud(h.Text)) { h.SkipMt = true; Log("mt skip hud | " + h.Text); continue; }
+                        // 预翻译表判定「保留原文」（产品名/代码名/日期已本地化等）：
+                        // 结果和原文一样就不用再画底板，否则等于拿同样的字把原图盖一遍。
+                        string pre = LayoutBoost.PreTranslate(h.Text);
+                        if (pre != null && pre.Trim().Equals(h.Text.Trim(), StringComparison.Ordinal))
+                        {
+                            h.SkipMt = true;
+                            Log("mt keep asis | " + h.Text);
+                        }
+                    }
                     string[] trs = new string[segs.Count];
-                    if (AppConfig.AiMt)
+                    if (AppConfig.AliMt)
+                    {
+                        // 阿里云在线翻译：整屏一次批量，完全不碰本地模型
+                        long tMs = Environment.TickCount;
+                        List<int> needMs = new List<int>();
+                        List<string> textsMs = new List<string>();
+                        for (int i = 0; i < segs.Count; i++)
+                        {
+                            OcrSegment s = segs[i];
+                            if (s == null || s.Text == null || s.Text.Trim().Length == 0) continue;
+                            if (s.SkipMt) continue;
+                            string pre = LayoutBoost.PreTranslate(s.Text);
+                            if (pre != null) { trs[i] = pre; continue; }
+                            needMs.Add(i);
+                            textsMs.Add(s.Text);
+                        }
+                        _aliMs = Environment.TickCount - tMs;
+                        if (textsMs.Count > 0)
+                        {
+                            string[] got;
+                            bool isGoogle = AppConfig.MtProv == "google";
+                            if (isGoogle) got = GoogleMt.TranslateBatch(textsMs.ToArray(), src, tgt);
+                            else got = AliyunMt.TranslateBatch(textsMs.ToArray(), src, tgt);
+                            _aliMs = Environment.TickCount - tMs;
+                            if (got == null)
+                            {
+                                err = (isGoogle ? "谷歌翻译失败：" + GoogleMt.LastError : "阿里云翻译失败：" + AliyunMt.LastError)
+                                    + "。已停止，没有改用本地模型";
+                                return;
+                            }
+                            for (int i = 0; i < needMs.Count && i < got.Length; i++)
+                                if (!string.IsNullOrEmpty(got[i])) trs[needMs[i]] = LayoutBoost.PostFix(got[i]);
+                        }
+                        lastRoute = "tmt";
+                        Log("online prov=" + AppConfig.MtProv + " lines=" + textsMs.Count + " ms=" + _aliMs);
+                    }
+                    else if (AppConfig.AiMt)
                     {
                         // 接管：这一轮完全不问本地翻译模型
                         long tAi = Environment.TickCount;
@@ -967,6 +1122,7 @@ namespace QRSnap
                         {
                             OcrSegment s = segs[i];
                             if (s.Text == null || s.Text.Trim().Length == 0) continue;
+                            if (s.SkipMt) continue;
                             string pre = LayoutBoost.PreTranslate(s.Text);
                             if (pre != null) { trs[i] = pre; continue; }
                             need.Add(i);
@@ -974,15 +1130,28 @@ namespace QRSnap
 
                         if (plan[0] == "gguf")
                         {
-                            // 效率档通常只有一两行字幕：逐行翻，避免 0.5B 批量时漏行
+                            // 效率档：单句字幕逐行翻；整屏几十行就并发铺（实测 8 行 300→220ms）
                             if (profile == AppConfig.MtProfileEfficiency)
                             {
-                                for (int i = 0; i < need.Count; i++)
+                                if (need.Count > 1)
+                                {
+                                    List<string> texts = new List<string>();
+                                    for (int i = 0; i < need.Count; i++) texts.Add(segs[need[i]].Text ?? "");
+                                    List<string> got = null;
+                                    try { got = LlamaMt.TranslateMany(plan[1], texts, tgt, need.Count >= 8 ? 4 : 2); }
+                                    catch (Exception) { got = null; }
+                                    if (got != null)
+                                    {
+                                        for (int i = 0; i < need.Count && i < got.Count; i++)
+                                            if (!string.IsNullOrEmpty(got[i])) trs[need[i]] = LayoutBoost.PostFix(got[i]);
+                                    }
+                                }
+                                else
                                 {
                                     string tr = null;
-                                    try { tr = LlamaMt.Translate(plan[1], segs[need[i]].Text, tgt); }
+                                    try { tr = LlamaMt.Translate(plan[1], segs[need[0]].Text, tgt); }
                                     catch (Exception) { tr = null; }
-                                    if (!string.IsNullOrEmpty(tr)) trs[need[i]] = LayoutBoost.PostFix(tr);
+                                    if (!string.IsNullOrEmpty(tr)) trs[need[0]] = LayoutBoost.PostFix(tr);
                                 }
                             }
                             else
@@ -1066,11 +1235,27 @@ namespace QRSnap
                         }
                     }
 
+                    // 音译兜底：短 ASCII 标识被翻成一串明显更长的纯汉字（xc2fsr → 艾克西西二埃夫提埃斯阿尔），
+                    // 说明引擎只是逐字母音译、没有实际含义 —— 丢掉这条译文，保留原文。
+                    // 纯形状判断，不认识任何具体词，所以没见过的标识形态也能自动兜住。
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment fb = segs[i];
+                        if (fb == null || fb.SkipMt || string.IsNullOrEmpty(fb.Text)) continue;
+                        if (trs[i] == null) continue;
+                        if (Ocr.LookLikeTransliteration(fb.Text, trs[i]))
+                        {
+                            Log("mt asis fallback | " + fb.Text + " => " + trs[i]);
+                            trs[i] = null;
+                        }
+                    }
+
                     for (int i = 0; i < segs.Count; i++)
                     {
                         OcrSegment s = segs[i];
                         string tr = trs[i];
                         if (tr == null || tr.Trim().Length == 0) continue;
+                        if (s.SkipMt) continue;
                         TransOverlay.Item it = new TransOverlay.Item();
                         // 拟真模式不要 InkBounds：那个外扩是为「实色遮罩盖住整行」服务的，
                         // 在深色/复杂底图上极易把整行甚至整片背景都吃进来，导致一个框跨好几列文字。
@@ -1134,7 +1319,7 @@ namespace QRSnap
                 {
                     err = ex.Message;
                 }
-            }, 260);
+            }, 650);
 
             if (err != null) throw new Exception(err);
             if (items.Count == 0) return 0;
@@ -1155,70 +1340,83 @@ namespace QRSnap
             catch (Exception) { }
 
             // 拟真：擦除原字 + 回填译文，输出整块成品图铺回选区
+            // 渲染（擦除 + 逐块回填 + DPI 放大）很重，放后台线程，UI 线程继续泵消息
             if (realMode)
             {
                 if (bmp == null) throw new Exception("拟真模式拿不到原图，切回效率模式试试");
-                MtRealistic.Stats st;
-                Bitmap outImg = MtRealistic.Render(bmp, blocks, out st);
-                if (outImg != null && Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
+                MtRealistic.Stats st = new MtRealistic.Stats();
+                Bitmap outImg = null;
+                RunPumped(delegate()
                 {
-                    // 干净的成品图 + 带框的调试图，各存各的，验收看成品图
-                    try { ((Bitmap)outImg.Clone()).Save(@"E:\下载\豆包\_mt\real-overlay.png", System.Drawing.Imaging.ImageFormat.Png); } catch { }
-                    try
+                    MtRealistic.Stats got;
+                    Bitmap raw = MtRealistic.Render(bmp, blocks, out got);
+                    st = got;
+                    if (raw == null) return;
+                    if (Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
                     {
-                        using (Bitmap dbg = new Bitmap(outImg.Width, outImg.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                        try { ((Bitmap)raw.Clone()).Save(@"E:\下载\豆包\snapscan\verify\real-overlay.png", System.Drawing.Imaging.ImageFormat.Png); } catch { }
+                    }
+                    if (kx != 1.0 || ky != 1.0)
+                    {
+                        Bitmap scaled = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                        using (Graphics sg = Graphics.FromImage(scaled))
                         {
-                            using (Graphics dg = Graphics.FromImage(dbg))
-                            {
-                                dg.DrawImage(outImg, 0, 0);
-                                using (Pen pen = new Pen(Color.FromArgb(200, 255, 60, 60), 1f))
-                                    foreach (MtRealistic.Block b in blocks)
-                                        dg.DrawRectangle(pen, b.Box.X, b.Box.Y, Math.Max(1, b.Box.Width - 1), Math.Max(1, b.Box.Height - 1));
-                            }
-                            dbg.Save(@"E:\下载\豆包\_mt\real-debug.png", System.Drawing.Imaging.ImageFormat.Png);
+                            sg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            sg.DrawImage(raw, new Rectangle(0, 0, scaled.Width, scaled.Height));
                         }
+                        raw.Dispose();
+                        raw = scaled;
                     }
-                    catch { }
-                }
-
-                if (outImg != null && (kx != 1.0 || ky != 1.0))
-                {
-                    Bitmap scaled = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                    using (Graphics sg = Graphics.FromImage(scaled))
-                    {
-                        sg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                        sg.DrawImage(outImg, new Rectangle(0, 0, scaled.Width, scaled.Height));
-                    }
-                    outImg.Dispose();
-                    outImg = scaled;
-                }
-                TransOverlay.ShowImage(screenRect, outImg);
+                    outImg = raw;
+                }, 650);
+                if (outImg == null) throw new Exception("拟真模式渲染失败");
+                if (zoneId >= 0) TransOverlay.ShowZoneImage(zoneId, screenRect, outImg);
+                else TransOverlay.ShowImage(screenRect, outImg);
                 try { _lastOverlayBitmap = (Bitmap)outImg.Clone(); } catch (Exception) { }
                 Log("translate realistic lines=" + st.Lines + " hard=" + st.Hard + " wrap=" + st.Wrapped
                     + " src=" + src + " tgt=" + tgt + " prof=" + profile + " route=" + lastRoute);
                 return st.Lines;
             }
 
-            // 效率模式：顺手把「截图 + 遮罩」合成一张图，供重复截图缓存直接贴
+            // 效率模式：顺手把「截图 + 遮罩」合成一张图，供重复截图缓存直接贴（同样放后台）
             try
             {
                 if (bmp != null)
                 {
-                    using (Bitmap baseBmp = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                    Bitmap composed = null;
+                    RunPumped(delegate()
                     {
-                        using (Graphics bg = Graphics.FromImage(baseBmp))
+                        Bitmap baseBmp = null;
+                        try
                         {
-                            bg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                            bg.DrawImage(bmp, new Rectangle(0, 0, baseBmp.Width, baseBmp.Height));
+                            baseBmp = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                            using (Graphics bg = Graphics.FromImage(baseBmp))
+                            {
+                                bg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                                bg.DrawImage(bmp, new Rectangle(0, 0, baseBmp.Width, baseBmp.Height));
+                            }
+                            composed = TransOverlay.Compose(baseBmp, items);
                         }
-                        _lastOverlayBitmap = TransOverlay.Compose(baseBmp, items);
-                    }
+                        catch (Exception) { }
+                        finally { if (baseBmp != null) { try { baseBmp.Dispose(); } catch (Exception) { } } }
+                    }, 650);
+                    _lastOverlayBitmap = composed;
                 }
             }
             catch (Exception) { }
 
-            TransOverlay.Show(screenRect, items);
-            Log("translate shown lines=" + items.Count + " src=" + src + " tgt=" + tgt);
+            if (zoneId >= 0)
+            {
+                // 分区绘制：这一块没出译文就只把这一块收掉，别的区继续显示各自的译文
+                if (items.Count == 0) TransOverlay.HideZone(zoneId);
+                else TransOverlay.ShowZone(zoneId, screenRect, items);
+            }
+            else
+            {
+                TransOverlay.Show(screenRect, items);
+            }
+            Log("translate shown lines=" + items.Count + " src=" + src + " tgt=" + tgt
+                + (zoneId >= 0 ? " zone=" + zoneId : ""));
             if (items.Count == 0)
             {
                 _mtSkipReason = "翻译引擎没有产出译文（模型可能还在加载），重试一次";
@@ -1339,6 +1537,7 @@ namespace QRSnap
         private static string _uiDir;
         private static string _dllDir;
         private static Thread _uiThread;
+        private static string _aliStatus = "";   // 阿里云翻译密钥自检结果，显示在设置里
 
         private static IntPtr U(string s)
         {
@@ -1382,7 +1581,8 @@ namespace QRSnap
             _shell = new NativeShell();
             _shell.OnCaptured = delegate(string mode, string json)
             {
-                ShowWindow(RestoreToFront(mode));
+                bool cancelled = json == null || json.IndexOf("\"cancelled\":true") >= 0;
+                ShowWindow(cancelled ? _wasVisible : RestoreToFront(mode));
                 Send("capture-done", json);
             };
             _uiThread = new Thread(delegate()
@@ -1512,6 +1712,22 @@ namespace QRSnap
             Bind("win", OnWin);
             Bind("hotkey", OnHotkey);
             Bind("hidetrans", OnHideTrans);
+            Bind("mtload", OnMtLoad);
+            Bind("mtunload", OnMtUnload);
+            Bind("mem", OnMem);
+            Bind("ocrwarm", OnOcrWarm);
+
+            // 热启动只管翻译模型；识字引擎不看这个开关，启动就热加载并常驻
+            if (AppConfig.HotStart) StartMtWarmupTimer();
+            StartOcrWarmTimer();
+            // 游戏模式每次启动强制从关闭态开始：不自动恢复上次状态、不自动进。
+            // 之前做成"记住上次开着"会在启动瞬间收掉主窗口并开始抓图，不是这里要的行为；
+            // 要用的时候在界面上手动开。
+            // QRSNAP_GAME_ON=1 只是自动化测试用的钩子，正常启动不受影响。
+            AppConfig.GameOn = string.Equals(Environment.GetEnvironmentVariable("QRSNAP_GAME_ON"), "1", StringComparison.Ordinal);
+            AppConfig.GameAutoStart = false;
+            try { AppConfig.Save(); } catch (Exception) { }
+            if (AppConfig.GameOn) StartGameAutoTimer();
 
             string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XuYuan-SnapScan", "jade-data");
             Directory.CreateDirectory(dataDir);
@@ -1629,6 +1845,7 @@ namespace QRSnap
             if (e == AppConfig.EngineWeChat) return "微信 OCR";
             if (e == AppConfig.EnginePpTiny) return "PP-OCR 极速";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
+            if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
             return "Windows OCR";
         }
 
@@ -1639,6 +1856,7 @@ namespace QRSnap
             if (e == AppConfig.EngineWeChat) return "推荐";
             if (e == AppConfig.EnginePpTiny) return "轻量 · 快";
             if (e == AppConfig.EnginePpMedium) return "高精度";
+            if (e == AppConfig.EnginePpJapan) return "日文专用 · 假名";
             return "系统兜底";
         }
 
@@ -1995,6 +2213,21 @@ namespace QRSnap
             return shell.TranslateAndShow(segs, rect, bmp, true);
         }
 
+        // 分区版：只画第 zoneId 这块
+        internal static int GameTranslate(Bitmap bmp, Rectangle rect, List<OcrSegment> segs, int zoneId)
+        {
+            NativeShell shell = _shell;
+            if (shell == null) return 0;
+            return shell.TranslateAndShow(segs, rect, bmp, true, zoneId);
+        }
+
+        // 上一轮没出译文的短原因（「选区已是中文」「没识别到文字」），给游戏模式的提示条用，
+        // 免得一律显示「没有识别到字幕」把真实原因盖掉。
+        internal static string GameSkipShort
+        {
+            get { NativeShell shell = _shell; return shell != null ? shell.MtSkipShortText : null; }
+        }
+
         internal static void GameBusy(string text)
         {
             NativeShell shell = _shell;
@@ -2019,8 +2252,51 @@ namespace QRSnap
             if (shell != null && AppConfig.GameToastOn) shell.GameDone(text, sub, ok);
         }
 
+        // 开在线翻译后本地模型就没用了：先标记失效，再后台把进程杀掉，内存/显存立刻还回去
+        private static void ReleaseLocalMt(string why)
+        {
+            try { MtRunner.Invalidate(); } catch (Exception) { }
+            Thread th = new Thread(delegate()
+            {
+                try { LlamaMt.Shutdown(); } catch (Exception) { }
+                NativeShell.Log("[mt] release " + why);
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+        // 密钥 / 服务商改完就跑一次真请求，设置里能看到通不通
+        private static void CheckAliKey()
+        {
+            CheckOnlineKey();
+        }
+
+        private static void CheckOnlineKey()
+        {
+            _aliStatus = "检测中…";
+            bool isGoogle = AppConfig.MtProv == "google";
+            Thread th = new Thread(delegate()
+            {
+                string msg;
+                try
+                {
+                    string t = isGoogle ? GoogleMt.SelfTest() : AliyunMt.SelfTest();
+                    msg = t != null
+                        ? ("连接正常：" + t)
+                        : ("失败：" + (isGoogle ? GoogleMt.LastError : AliyunMt.LastError));
+                }
+                catch (Exception ex) { msg = "失败：" + ex.Message; }
+                _aliStatus = msg;
+                NativeShell.Log("[ali] check " + msg);
+                try { RunOnUi(delegate { Send("state-refresh", BuildState()); }); } catch (Exception) { }
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
         internal static string ModelLabel(string profile)
         {
+            if (AppConfig.AliMt) return (AppConfig.MtProv == "google" ? "谷歌翻译 · 在线" : "阿里云翻译 · 在线");
             if (AppConfig.AiMt) return "AI · " + AppConfig.AiModel;
             string p = AppConfig.NormalizeMtProfile(profile);
             if (p == AppConfig.MtProfileEfficiency) return "PLaMo 3 Translate Q4_K_M";
@@ -2061,7 +2337,7 @@ namespace QRSnap
             sb.Append(",\"list\":[");
             bool firstOpt = true;
             string[] keys = new string[] {
-                AppConfig.EngineWeChat, AppConfig.EnginePpTiny, AppConfig.EngineSystem };
+                AppConfig.EngineWeChat, AppConfig.EnginePpTiny, AppConfig.EnginePpJapan, AppConfig.EngineSystem };
             for (int i = 0; i < keys.Length; i++)
             {
                 string k = keys[i];
@@ -2091,7 +2367,10 @@ namespace QRSnap
             sb.Append(",\"ocrgpu\":").Append(J.B(AppConfig.OcrGpu));
             sb.Append(",\"ocrfusion\":").Append(J.B(AppConfig.OcrFusion));
             sb.Append(",\"shotcache\":").Append(J.B(AppConfig.ShotCacheEnabled));
+            sb.Append(",\"hotstart\":").Append(J.B(AppConfig.HotStart));
+            sb.Append(",\"ocrwarming\":").Append(J.B(Ocr.Warming));
             sb.Append(",\"cacheinfo\":").Append(J.S(ShotCache.Info()));
+            sb.Append(",\"shotcachemax\":").Append(AppConfig.ShotCacheMax);
             sb.Append(",\"mtidle\":").Append(AppConfig.MtIdle);
             sb.Append(",\"mtalpha\":").Append(AppConfig.MtMaskAlpha);
             sb.Append(",\"mtmode\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
@@ -2107,6 +2386,11 @@ namespace QRSnap
             sb.Append(",\"check\":").Append(J.B(AppConfig.AiCheck));
             sb.Append(",\"merge\":").Append(J.B(AppConfig.AiMerge));
             sb.Append(",\"mt\":").Append(J.B(AppConfig.AiMt));
+            sb.Append(",\"alimt\":").Append(J.B(AppConfig.AliMt));
+            sb.Append(",\"mtprov\":").Append(J.S(AppConfig.MtProv));
+            sb.Append(",\"aliHasAk\":").Append(J.B(!string.IsNullOrEmpty(AppConfig.AliAk)));
+            sb.Append(",\"aliHasSk\":").Append(J.B(!string.IsNullOrEmpty(AppConfig.AliSk)));
+            sb.Append(",\"aliStatus\":").Append(J.S(_aliStatus));
             string aiSt, aiMsg, aiAt;
             AiStatusPick(out aiSt, out aiMsg, out aiAt);
             sb.Append(",\"status\":").Append(J.S(aiSt));
@@ -2121,13 +2405,18 @@ namespace QRSnap
             sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
             sb.Append(",\"sens\":").Append(AppConfig.GameSensitivity);
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
+            sb.Append(",\"fontFilter\":").Append(J.B(AppConfig.GameFontFilter));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             sb.Append(",\"toastOn\":").Append(J.B(AppConfig.GameToastOn));
+            sb.Append(",\"auto\":").Append(J.B(AppConfig.GameAutoMode));
+            sb.Append(",\"autoHold\":").Append(AppConfig.GameAutoHoldMs);
+            sb.Append(",\"autoSample\":").Append(AppConfig.GameAutoSampleMs);
+            sb.Append(",\"autoWatch\":").Append(AppConfig.GameAutoWatchMs);
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
             bool gready = (gp == AppConfig.MtProfileEfficiency || gp == AppConfig.MtProfileTurbo) ? MtRunner.GameReadyFor(gp) : MtRunner.Ready;
             string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
-                : (!gready ? "缺少对应翻译模型" : (AppConfig.GameTrigger == 2 ? "手动快捷键：Ctrl+Alt+F" : "就绪"));
+                : (!gready ? "缺少对应翻译模型" : (AppConfig.GameTrigger == 2 ? "手动快捷键：" + AppConfig.HotkeyMt : "就绪"));
             if (!string.IsNullOrEmpty(GameRuntime.LastError)) gmsg = GameRuntime.LastError;
             sb.Append(",\"ready\":").Append(J.B(gready));
             sb.Append(",\"msg\":").Append(J.S(gmsg));
@@ -2183,6 +2472,7 @@ namespace QRSnap
             if (profNow == AppConfig.MtProfileEfficiency || profNow == AppConfig.MtProfileTurbo) profReady = MtRunner.GameReadyFor(profNow);
             else profReady = multiName.Length > 0;
             if (AppConfig.AiMt) profReady = true;   // AI 接管不依赖本地模型
+            if (AppConfig.AliMt) profReady = true;   // 阿里云在线翻译也不依赖本地模型
             string active = "", shortTag = "";
             if (profReady)
             {
@@ -2196,21 +2486,44 @@ namespace QRSnap
             sb.Append(",\"ready\":").Append(J.B(profReady));
             sb.Append(",\"missing\":[");
             for (int i = 0; i < miss.Count; i++) { if (i > 0) sb.Append(','); sb.Append(J.S(miss[i])); }
-            sb.Append("],\"kit\":[");
+            // 当前翻译服务状态：哪个档位真在跑 / 哪个档位正在加载
+            bool mtOn = LlamaMt.ServerRunning;
+            string mtLoadedPath = mtOn ? LlamaMt.LoadedModelPath : null;
+            string mtLoadingProf = LlamaMt.LoadingProfile;
+            string pStd = null, pQ4 = null, pQ2 = null;
+            try
+            {
+                pStd = MtRunner.Router.PathForProfile(AppConfig.MtProfileStandard);
+                pQ4 = MtRunner.Router.PathForProfile(AppConfig.MtProfileEfficiency);
+                pQ2 = MtRunner.Router.PathForProfile(AppConfig.MtProfileTurbo);
+            }
+            catch (Exception) { }
+            bool lStd = mtOn && pStd != null && string.Equals(mtLoadedPath, pStd, StringComparison.OrdinalIgnoreCase);
+            bool lQ4 = mtOn && pQ4 != null && string.Equals(mtLoadedPath, pQ4, StringComparison.OrdinalIgnoreCase);
+            bool lQ2 = mtOn && pQ2 != null && string.Equals(mtLoadedPath, pQ2, StringComparison.OrdinalIgnoreCase);
+            sb.Append("],\"running\":").Append(J.B(mtOn));
+            sb.Append(",\"loaderr\":").Append(J.S(LlamaMt.LastLoadError));
+            sb.Append(",\"kit\":[");
             sb.Append("{\"key\":\"gguf\",\"title\":\"HyMT1.5-1.8B-Q4_K_M\",\"sub\":")
               .Append(J.S(multiFile.Length > 0 ? "标准档" : "未装"))
               .Append(",\"size\":").Append(J.S(multiFile.Length > 0 ? ((multiSize / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(multiFile.Length > 0 ? "占用约 2.0 GB" : ""))
+              .Append(",\"profile\":\"standard\",\"loaded\":").Append(J.B(lStd))
+              .Append(",\"loading\":").Append(J.B(mtLoadingProf == AppConfig.MtProfileStandard))
               .Append(",\"ready\":").Append(J.B(multiName.Length > 0)).Append("}");
             sb.Append(",{\"key\":\"plamo-q4\",\"title\":\"PLaMo-3-Translate-0.8B-Q4_K_M\",\"sub\":")
               .Append(J.S(q4File.Length > 0 ? "效率档" : "未装"))
               .Append(",\"size\":").Append(J.S(q4File.Length > 0 ? ((q4Size / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(q4File.Length > 0 ? "占用约 1.0 GB" : ""))
+              .Append(",\"profile\":\"efficiency\",\"loaded\":").Append(J.B(lQ4))
+              .Append(",\"loading\":").Append(J.B(mtLoadingProf == AppConfig.MtProfileEfficiency))
               .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("efficiency"))).Append("}");
             sb.Append(",{\"key\":\"plamo-q2\",\"title\":\"PLaMo-3-Translate-0.8B-Q2_K\",\"sub\":")
               .Append(J.S(q2File.Length > 0 ? "极速档" : "未装"))
               .Append(",\"size\":").Append(J.S(q2File.Length > 0 ? ((q2Size / (1024L * 1024L)) + " MB") : "未装"))
               .Append(",\"mem\":").Append(J.S(q2File.Length > 0 ? "占用约 0.8 GB" : ""))
+              .Append(",\"profile\":\"turbo\",\"loaded\":").Append(J.B(lQ2))
+              .Append(",\"loading\":").Append(J.B(mtLoadingProf == AppConfig.MtProfileTurbo))
               .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("turbo"))).Append("}");
             sb.Append("]}");
             sb.Append("}");
@@ -2265,7 +2578,37 @@ namespace QRSnap
                 {
                     string k = pair.Key.ToLowerInvariant();
                     string v = pair.Value;
-                    if (k == "engine") AppConfig.Engine = AppConfig.NormalizeEngine(v);
+                    if (k == "engine")
+                    {
+                        string old = AppConfig.NormalizeEngine(AppConfig.Engine);
+                        AppConfig.Engine = AppConfig.NormalizeEngine(v);
+                        // OCR：选哪个引擎就自动拉起哪个，跟「热启动」开关无关
+                        if (AppConfig.Engine != old)
+                        {
+                            string target = AppConfig.Engine;
+                            Ocr.Warming = true;
+                            System.Threading.Thread th = new System.Threading.Thread(delegate()
+                            {
+                                try { Ocr.Shutdown(); Ocr.Warmup(target); }
+                                catch (Exception) { }
+                                finally { Ocr.Warming = false; }
+                            });
+                            th.IsBackground = true;
+                            th.Start();
+                        }
+                    }
+                    else if (k == "hotstart")
+                    {
+                        AppConfig.HotStart = v == "true" || v == "1";
+                        // 热启动只管翻译：勾上就把当前档位的模型拉起来，取消就什么都不做（下次手动加载）
+                        if (AppConfig.HotStart) StartMtWarmupTimer();
+                        else { try { if (_mtWarmTimer != null) { _mtWarmTimer.Dispose(); _mtWarmTimer = null; } } catch (Exception) { } }
+                    }
+                    else if (k == "shotcachemax")
+                    {
+                        int cm;
+                        if (int.TryParse(v, out cm)) AppConfig.ShotCacheMax = AppConfig.NormalizeShotCacheMax(cm);
+                    }
                     else if (k == "freehand") AppConfig.Freehand = v == "true" || v == "1";
                     else if (k == "restorewin") AppConfig.RestoreWin = v == "true" || v == "1";
                     else if (k == "restoreqr") AppConfig.RestoreAfterQr = v == "true" || v == "1";
@@ -2323,10 +2666,19 @@ namespace QRSnap
                     }
                     else if (k == "mtprofile")
                     {
+                        string oldProf = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
                         AppConfig.MtProfile = AppConfig.NormalizeMtProfile(v);
                         MtRunner.Invalidate();   // 换模式要重挑模型
-                        // 标准和效率用不同 GGUF，切档时立刻释放旧模型
-                        try { LlamaMt.Shutdown(); } catch (Exception) { }
+                        // 标准和效率用不同 GGUF，切档时释放旧模型；放后台做，不让界面等进程退出
+                        bool changed = !string.Equals(oldProf, AppConfig.MtProfile, StringComparison.OrdinalIgnoreCase);
+                        System.Threading.Thread th = new System.Threading.Thread(delegate()
+                        {
+                            try { LlamaMt.Shutdown(); } catch (Exception) { }
+                            // 热启动开着：切完档直接把新档载进来，不用再手动点「加载」
+                            try { if (changed && AppConfig.HotStart) StartMtLoad(AppConfig.MtProfile); } catch (Exception) { }
+                        });
+                        th.IsBackground = true;
+                        th.Start();
                     }
                     else if (k == "mtlang") { /* 已取消目标语言设置：整套只做外语 → 中文 */ }
                     else if (k == "mtpair") { /* 已取消手动选模型：三个模型都是必需品，不做切换 */ }
@@ -2353,7 +2705,60 @@ namespace QRSnap
                     else if (k == "aiocr") { AppConfig.AiOcr = v == "true" || v == "1"; }
                     else if (k == "aicheck") { AppConfig.AiCheck = v == "true" || v == "1"; }
                     else if (k == "aimerge") { AppConfig.AiMerge = v == "true" || v == "1"; }
-                    else if (k == "aimt") { AppConfig.AiMt = v == "true" || v == "1"; }
+                    else if (k == "aimt")
+                    {
+                        bool onAi = v == "true" || v == "1";
+                        AppConfig.AiMt = onAi;
+                        // AI 接管和阿里云在线翻译只能开一个：开这个就把那个关掉
+                        if (onAi) AppConfig.AliMt = false;
+                    }
+                    else if (k == "alimt")
+                    {
+                        bool onMs = v == "true" || v == "1";
+                        bool needKey = AppConfig.MtProv != "google";
+                        if (onMs && needKey && (string.IsNullOrEmpty(AppConfig.AliAk) || string.IsNullOrEmpty(AppConfig.AliSk)))
+                        {
+                            AppConfig.AliMt = false;
+                            _aliStatus = "没填 AccessKey ID / Secret，阿里云翻译没打开";
+                            Reply("{\"ok\":false,\"msg\":" + J.S("先填阿里云 AccessKey，再打开这个开关") + ",\"state\":" + BuildState() + "}");
+                            continue;
+                        }
+                        AppConfig.AliMt = onMs;
+                        if (onMs)
+                        {
+                            // 开在线翻译：AI 接管让位，本地模型立刻释放，内存/显存还回去
+                            AppConfig.AiMt = false;
+                            ReleaseLocalMt("在线翻译接管");
+                            _aliStatus = AppConfig.MtProv == "google" ? "已接管翻译（谷歌，跟随系统代理），本地模型已释放" : "已接管翻译，本地模型已释放";
+                        }
+                        else if (AppConfig.HotStart) StartMtLoad(AppConfig.MtProfile);
+                    }
+                    else if (k == "mtprov")
+                    {
+                        AppConfig.MtProv = AppConfig.NormalizeProv(v);
+                        _aliStatus = "";
+                        if (AppConfig.AliMt) CheckOnlineKey();
+                    }
+                    else if (k == "mtest")
+                    {
+                        CheckOnlineKey();
+                    }
+                    else if (k == "aliak")
+                    {
+                        string mk = (v ?? "").Trim();
+                        AppConfig.AliAk = mk;
+                        if (mk.Length == 0 && string.IsNullOrEmpty(AppConfig.AliSk))
+                        {
+                            AppConfig.AliMt = false;
+                            _aliStatus = "";
+                        }
+                        else CheckAliKey();
+                    }
+                    else if (k == "alisk")
+                    {
+                        AppConfig.AliSk = (v ?? "").Trim();
+                        if (!string.IsNullOrEmpty(AppConfig.AliAk)) CheckAliKey();
+                    }
                     else if (k == "gameon")
                     {
                         bool on = v == "true" || v == "1";
@@ -2363,6 +2768,13 @@ namespace QRSnap
                             if (!GameRuntime.Start(out gerr)) NativeShell.Log("[game] start fail " + gerr);
                         }
                         else GameRuntime.Stop();
+                    }
+                    else if (k == "gameauto" || k == "gametriggermode")
+                    {
+                        bool on = (k == "gameauto") ? (v == "true" || v == "1") : (v == "auto");
+                        AppConfig.GameAutoMode = on;
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
                     }
                     else if (k == "gametrigger")
                     {
@@ -2409,6 +2821,10 @@ namespace QRSnap
                     else if (k == "gamemerge")
                     {
                         AppConfig.GameMerge = v == "true" || v == "1";
+                    }
+                    else if (k == "gamefontfilter")
+                    {
+                        AppConfig.GameFontFilter = v == "true" || v == "1";
                     }
                     else if (k == "opacity")
                     {
@@ -2785,7 +3201,9 @@ namespace QRSnap
             bool cancelled;
             string json = _shell.CaptureSync(mode, false, out cancelled);
 
-            ShowWindow(restore);
+            // 取消（右键 / Esc）时按原样还回去：原来窗口开着就回前台，
+            // 不然「框选右键取消」会把软件丢到最底层，等于消失了
+            ShowWindow(cancelled ? _wasVisible : restore);
             if (json == null) json = "{\"ok\":false,\"cancelled\":true,\"mode\":" + J.S(mode) + "}";
             return Reply(json);
         }
@@ -2829,6 +3247,247 @@ namespace QRSnap
             }
         }
 
+        private static System.Threading.Timer _mtWarmTimer;
+
+        // 热启动：延后一点在后台把当前档位的翻译模型拉起来，别跟窗口初始化抢 CPU
+        private static void StartMtWarmupTimer()
+        {
+            try { if (_mtWarmTimer != null) { _mtWarmTimer.Dispose(); _mtWarmTimer = null; } } catch (Exception) { }
+            string prof = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+            _mtWarmTimer = new System.Threading.Timer(delegate(object state)
+            {
+                if (!AppConfig.HotStart) return;
+                if (AppConfig.AliMt || AppConfig.AiMt) return;   // 在线翻译接管时不用本地模型
+                if (!string.Equals(AppConfig.NormalizeMtProfile(AppConfig.MtProfile), prof, StringComparison.OrdinalIgnoreCase)) return;
+                try { if (StartMtLoad(prof)) Log("[mtwarm] start " + prof); } catch (Exception) { }
+            }, null, 1800, System.Threading.Timeout.Infinite);
+        }
+
+        private static System.Threading.Timer _ocrWarmTimer;
+
+        // 游戏模式自动恢复：等主窗口句柄都就绪再进，避免 HideWindow 抢在窗体创建之前
+        private static void StartGameAutoTimer()
+        {
+            System.Threading.Timer t = null;
+            t = new System.Threading.Timer(delegate(object state)
+            {
+                try { t.Dispose(); } catch (Exception) { }
+                try
+                {
+                    RunOnUi(delegate
+                    {
+                        string err;
+                        if (!GameRuntime.Start(out err)) Log("[game] autostart fail " + err);
+                        else Log("[game] autostart ok");
+                    });
+                }
+                catch (Exception ex) { Log("[game] autostart crash " + ex.Message); }
+            }, null, 2500, 0);
+        }
+
+        // 识字引擎启动就热加载，加载完常驻：Ocr 侧没有空闲卸载逻辑，
+        // 只有切换引擎或退出程序才释放，所以这里不用再挂回收定时器。
+        private static void StartOcrWarmTimer()
+        {
+            try { if (_ocrWarmTimer != null) { _ocrWarmTimer.Dispose(); _ocrWarmTimer = null; } } catch (Exception) { }
+            _ocrWarmTimer = new System.Threading.Timer(delegate(object state)
+            {
+                try { if (_ocrWarmTimer != null) { _ocrWarmTimer.Dispose(); _ocrWarmTimer = null; } } catch (Exception) { }
+                System.Threading.Thread t = new System.Threading.Thread(delegate()
+                {
+                    Ocr.Warming = true;
+                    try
+                    {
+                        Ocr.Warmup(AppConfig.Engine);
+                        // 融合识字还要 PP-OCR 的检测模型，一起提前拉起
+                        if (AppConfig.OcrFusion) Ocr.Warmup(AppConfig.EnginePpTiny);
+                        Log("[ocrwarm] " + AppConfig.Engine);
+                    }
+                    catch (Exception) { }
+                    finally { Ocr.Warming = false; NotifyState(); }
+                });
+                t.IsBackground = true;
+                t.Start();
+            }, null, 1200, System.Threading.Timeout.Infinite);
+        }
+
+        // 按档位把翻译模型拉起来（热启动 / 切档复用）。没装模型就静默跳过
+        private static bool StartMtLoad(string profile)
+        {
+            string prof = AppConfig.NormalizeMtProfile(profile);
+            string path = null;
+            try { path = MtRunner.Router.PathForProfile(prof); } catch (Exception) { }
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+            if (LlamaMt.ServerRunning && string.Equals(LlamaMt.LoadedModelPath, path, StringComparison.OrdinalIgnoreCase)) return true;
+            System.Threading.Thread t = new System.Threading.Thread(delegate()
+            {
+                try { LlamaMt.Preload(path, prof); }
+                catch (Exception ex) { Log("[mtwarm] " + prof + " 失败：" + ex.Message); }
+                // 载完推一把状态：底部「翻译 未加载」能就地变成已加载
+                try { RunOnUi(delegate { Send("state-refresh", BuildState()); }); }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.Start();
+            return true;
+        }
+
+        // 点「加载」：后台线程起服务，立刻返回；前端靠轮询 state 判断完成
+        // 手动预热：打开热启动开关、打开融合模式时用，前端据此显示进度遮罩
+        private static IntPtr OnOcrWarm(uint win, IntPtr msg)
+        {
+            if (Ocr.Warming) return Reply("{\"ok\":true,\"already\":true,\"state\":" + BuildState() + "}");
+            Ocr.Warming = true;
+            System.Threading.Thread t = new System.Threading.Thread(delegate()
+            {
+                try
+                {
+                    // 融合模式要两套引擎都起来（PP 出框 + 微信出字）
+                    if (AppConfig.OcrFusion)
+                    {
+                        Ocr.Warmup(AppConfig.EngineWeChat);
+                        Ocr.Warmup(AppConfig.EnginePpTiny);
+                    }
+                    else Ocr.Warmup(AppConfig.Engine);
+                }
+                catch (Exception) { }
+                finally { Ocr.Warming = false; }
+            });
+            t.IsBackground = true;
+            t.Start();
+            Log("[ocrwarm] fusion=" + (AppConfig.OcrFusion ? "1" : "0") + " engine=" + AppConfig.Engine);
+            return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");
+        }
+
+        private static IntPtr OnMtLoad(uint win, IntPtr msg)
+        {
+            string profile = AppConfig.NormalizeMtProfile(MiniJson.GetString(ReadUtf8(msg), "profile"));
+            string path = null;
+            try { path = MtRunner.Router.PathForProfile(profile); } catch (Exception) { }
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return Reply("{\"ok\":false,\"msg\":" + J.S("这一档没有装模型文件") + ",\"state\":" + BuildState() + "}");
+            if (LlamaMt.ServerRunning && string.Equals(LlamaMt.LoadedModelPath, path, StringComparison.OrdinalIgnoreCase))
+                return Reply("{\"ok\":true,\"msg\":" + J.S("已经在运行") + ",\"state\":" + BuildState() + "}");
+            // 点「加载」= 同时把当前档位切到这一档，避免翻译时又去换模型
+            if (AppConfig.NormalizeMtProfile(AppConfig.MtProfile) != profile)
+            {
+                AppConfig.MtProfile = profile;
+                MtRunner.Invalidate();
+                try { AppConfig.Save(); } catch (Exception) { }
+            }
+            System.Threading.Thread t = new System.Threading.Thread(delegate()
+            {
+                try { LlamaMt.Preload(path, profile); }
+                catch (Exception ex) { Log("[mtload] " + profile + " 失败：" + ex.Message); }
+                try { RunOnUi(delegate { Send("state-refresh", BuildState()); }); }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.Start();
+            Log("[mtload] 加载 " + profile + " → " + Path.GetFileName(path));
+            return Reply("{\"ok\":true,\"loading\":true,\"profile\":" + J.S(profile) + ",\"state\":" + BuildState() + "}");
+        }
+
+        // 点「释放」：把翻译服务整个关掉，内存/显存还回去
+        private static IntPtr OnMtUnload(uint win, IntPtr msg)
+        {
+            try { LlamaMt.Shutdown(); } catch (Exception) { }
+            Log("[mtload] 已释放");
+            NotifyState();
+            return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");
+        }
+
+        // 状态栏资源占用：本进程 + llama-server 子进程的工作集 / 专用显存之和，
+        // 前端 3 秒拉一次；显存计数器实例列表 20 秒才重建一次，平时只读当前值
+        private static System.Diagnostics.Process _selfProc;
+        private static System.Collections.Generic.Dictionary<string, System.Diagnostics.PerformanceCounter> _vramCtrs;
+        private static DateTime _vramNext = DateTime.MinValue;
+
+        private static IntPtr OnMem(uint win, IntPtr msg)
+        {
+            long ws = 0, priv = 0, vram = -1;
+            try
+            {
+                if (_selfProc == null) _selfProc = System.Diagnostics.Process.GetCurrentProcess();
+                _selfProc.Refresh();
+                ws = _selfProc.WorkingSet64;
+                priv = _selfProc.PrivateMemorySize64;
+            }
+            catch (Exception) { }
+            try
+            {
+                System.Diagnostics.Process[] ls = System.Diagnostics.Process.GetProcessesByName("llama-server");
+                foreach (System.Diagnostics.Process p in ls)
+                {
+                    try { ws += p.WorkingSet64; } catch (Exception) { }
+                    finally { try { p.Dispose(); } catch (Exception) { } }
+                }
+            }
+            catch (Exception) { }
+            vram = SumVramMb();
+            return Reply("{\"ok\":true,\"ws\":" + (ws / 1048576) + ",\"priv\":" + (priv / 1048576) + ",\"vram\":" + vram + "}");
+        }
+
+        // 专用显存（MB）：QRSnap 自身 + llama-server 进程，取不到返回 -1
+        private static string _vramSig = "";
+        private static long SumVramMb()
+        {
+            try
+            {
+                // 先拿到当前要统计的 pid 集合：进程一变（模型刚起来 / 刚退出）就立刻重建计数器缓存，
+                // 不然要等 20 秒刷新周期，加载完显存会一直显示「—」
+                System.Collections.Generic.HashSet<int> pids = new System.Collections.Generic.HashSet<int>();
+                pids.Add(System.Diagnostics.Process.GetCurrentProcess().Id);
+                System.Diagnostics.Process[] ls = System.Diagnostics.Process.GetProcessesByName("llama-server");
+                foreach (System.Diagnostics.Process p in ls)
+                {
+                    try { pids.Add(p.Id); } catch (Exception) { }
+                    finally { try { p.Dispose(); } catch (Exception) { } }
+                }
+                string sig = "";
+                foreach (int pidv in pids) sig += pidv + ",";
+                bool rebuild = DateTime.Now >= _vramNext || !string.Equals(sig, _vramSig);
+                if (rebuild)
+                {
+                    _vramNext = DateTime.Now.AddSeconds(20);
+                    _vramSig = sig;
+                    System.Diagnostics.PerformanceCounterCategory cat =
+                        new System.Diagnostics.PerformanceCounterCategory("GPU Process Memory");
+                    System.Collections.Generic.Dictionary<string, System.Diagnostics.PerformanceCounter> map =
+                        new System.Collections.Generic.Dictionary<string, System.Diagnostics.PerformanceCounter>();
+                    foreach (string inst in cat.GetInstanceNames())
+                    {
+                        int pid = ParsePidFromInstance(inst);
+                        if (pid <= 0 || !pids.Contains(pid)) continue;
+                        try { map[inst] = new System.Diagnostics.PerformanceCounter("GPU Process Memory", "Dedicated Usage", inst, true); }
+                        catch (Exception) { }
+                    }
+                    _vramCtrs = map;
+                    // 计数器还没出现（显存刚分配）就推迟到下一次再建
+                    if (map.Count == 0) _vramNext = DateTime.MinValue;
+                }
+                if (_vramCtrs == null || _vramCtrs.Count == 0) return -1;
+                double sum = 0;
+                foreach (System.Collections.Generic.KeyValuePair<string, System.Diagnostics.PerformanceCounter> kv in _vramCtrs)
+                {
+                    try { sum += kv.Value.NextValue(); } catch (Exception) { }
+                }
+                return (long)(sum / 1048576.0);
+            }
+            catch (Exception) { return -1; }
+        }
+
+        // 计数器实例名形如 pid_1234_luid_0x0_0x0_phys_0
+        private static int ParsePidFromInstance(string inst)
+        {
+            if (inst == null || !inst.StartsWith("pid_", StringComparison.OrdinalIgnoreCase)) return 0;
+            int end = inst.IndexOf('_', 4);
+            if (end <= 4) return 0;
+            int pid = 0;
+            if (int.TryParse(inst.Substring(4, end - 4), out pid)) return pid;
+            return 0;
+        }
+
         private static IntPtr OnGameHover(uint win, IntPtr msg)
         {
             int index = -1;
@@ -2867,6 +3526,15 @@ namespace QRSnap
             string op = MiniJson.GetString(ReadUtf8(msg), "op");
             if (op == "hide") HideWindow(false);
             else if (op == "show") ShowWindow(true);
+            else if (op == "opencachedir")
+            {
+                try
+                {
+                    Directory.CreateDirectory(ShotCache.Dir);
+                    System.Diagnostics.Process.Start("explorer.exe", ShotCache.Dir);
+                }
+                catch (Exception) { }
+            }
             return Reply("{\"ok\":true}");
         }
 
@@ -2900,7 +3568,17 @@ namespace QRSnap
             catch (Exception) { }
         }
 
+        // 翻译服务状态一变（手动加载 / 释放 / 空闲自动释放）就推一次状态，
+        // 前端据此把档位后面的「加载 / 释放」按钮换成对应状态
+        internal static void NotifyState()
+        {
+            try { Log("[state] push"); } catch (Exception) { }
+            try { RunOnUi(delegate { Send("state-refresh", BuildState()); }); }
+            catch (Exception) { }
+        }
+
         private static bool _wasMinimized;
+        private static bool _wasVisible;      // 截图前窗口本来是否可见：取消时按这个还回去
 
         // 截屏开始：默认压到最底层（不隐藏），需要真隐藏的入口（前端"隐藏窗口"）传 false。
         // 藏之前先记住它原来是"最小化"还是"在桌面上"。
@@ -2910,6 +3588,7 @@ namespace QRSnap
             {
                 IntPtr h = Native.OwnMainWindow();
                 _wasMinimized = Native.IsMinimizedHandle(h);
+                _wasVisible = Native.IsVisibleHandle(h);
                 if (toBottom)
                 {
                     // 已经最小化就不用动；否则保证可见后压到最底层。
@@ -2923,9 +3602,9 @@ namespace QRSnap
                     }
                 }
                 JadeNative.set_window_visible(WindowId, 0);
-                Log("hide: wasMin=" + _wasMinimized + " visibleNow=" + JadeNative.is_window_visible(WindowId));
+                Log("hide: wasMin=" + _wasMinimized + " visibleNow=" + Native.IsVisibleHandle(h));
             }
-            catch (Exception) { }
+            catch (Exception ex) { Log("hide fail " + ex.Message); }
         }
 
         // 截屏结束回哪一层：
@@ -2944,12 +3623,16 @@ namespace QRSnap
         {
             try
             {
-                JadeNative.set_window_visible(WindowId, 1);
                 IntPtr h = Native.OwnMainWindow();
+                if (h == IntPtr.Zero) { Log("restore: no main hwnd"); return; }
+
+                // 顺序很重要：先用 Win32 把窗口真正显出来，Jade 的接口只当补充。
+                // 之前 set_window_visible / set_window_focus 在前面，一旦抛异常就被
+                // 空 catch 吞掉，后面一句都不执行 —— 取消后窗口就再也回不来。
+                Native.ShowNoActivate(h);
                 if (toFront)
                 {
                     Native.BringFront(h);              // 勾了"显示本软件窗口"：强制提到最前（最小化的也会展开）
-                    JadeNative.set_window_focus(WindowId);
                 }
                 else if (Native.IsMinimizedHandle(h) || _wasMinimized)
                 {
@@ -2957,14 +3640,21 @@ namespace QRSnap
                 }
                 else
                 {
-                    Native.ShowNoActivate(h);          // 不抢焦点、不抬到最前，原来被挡住就仍被挡住
                     Native.SendToBottom(h);            // 截完仍留在最底层：不挡目标，也随时能切回来
                 }
-                Log("restore: toFront=" + toFront + " wasMin=" + _wasMinimized + " iconic=" + Native.IsMinimizedHandle(h) + " visible=" + JadeNative.is_window_visible(WindowId));
+
+                try { JadeNative.set_window_visible(WindowId, 1); } catch (Exception) { }
+                if (toFront) { try { JadeNative.set_window_focus(WindowId); } catch (Exception) { } }
+
+                Log("restore: toFront=" + toFront + " wasMin=" + _wasMinimized
+                    + " iconic=" + Native.IsMinimizedHandle(h) + " visible=" + Native.IsVisibleHandle(h));
                 _wasMinimized = false;
-                Send("state-refresh", BuildState());
+                try { Send("state-refresh", BuildState()); } catch (Exception) { }
             }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                Log("restore fail " + ex.Message);
+            }
         }
 
         internal static void Quit()
@@ -2986,10 +3676,11 @@ namespace QRSnap
             }
             finally
             {
+                Log("run-capture finally cancelled=" + cancelled + " wasVisible=" + _wasVisible);
                 // 关键：无论成功、失败、Esc 取消还是中途异常，都必须把主窗口放回来。
-                // 原来这里先 if (json == null) return null; 再 ShowWindow，取消时直接返回，
-                // 窗口就永远留在隐藏状态——用户只能去杀进程。
-                ShowWindow(RestoreToFront(mode));
+                // 取消时按截图前的可见状态还原：原来开着就回前台，别把软件藏到最底层。
+                ShowWindow(cancelled ? _wasVisible : RestoreToFront(mode));
+                Log("run-capture restored");
             }
 
             if (json == null) return null;

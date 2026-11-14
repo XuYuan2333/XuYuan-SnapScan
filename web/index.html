@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -45,7 +45,7 @@
         <em id="resultMeta">等待识别</em>
       </div>
       <div class="panel-actions">
-        <button class="btn ghost" id="btnHideTrans" title="关闭当前所有译文遮罩（也可以按 Ctrl+Alt+G）">隐藏译文</button>
+        <button class="btn ghost" id="btnHideTrans" title="关闭当前所有译文遮罩（也能用「隐藏译文」快捷键）">隐藏译文</button>
         <button class="btn ghost" id="btnClear">清空</button>
         <button class="btn ghost" id="btnCopy">复制</button>
       </div>
@@ -125,7 +125,15 @@
 </main>
 
 <footer class="statusbar">
-  <span class="status" id="status">就绪</span>
+  <span class="stat-left">
+    <span class="stat" id="memInfo">内存 —</span>
+    <span class="dot">·</span>
+    <span class="stat" id="vramInfo">显存 —</span>
+  </span>
+  <span class="stat-right">
+    <span class="gh" id="ghLink" title="点击复制项目地址">github.com/XuYuan2333/XuYuan-SnapScan</span>
+    <span id="status" style="display:none"></span>
+  </span>
 </footer>
 
 <!-- 设置抽屉 -->
@@ -157,6 +165,7 @@
         <div class="engine-list" id="engineList"></div>
         <div class="engine-desc" id="engineDesc">—</div>
         <div class="group-note" id="engineNote">只读取本软件自己的「OCR Model」目录；灰掉的是该目录里没找到模型的。</div>
+        <div class="group-note">截图按彩色原尺寸直接送识别，不做缩放或灰度预处理（检测端自己会把长边统一到 1280，外面再缩一遍只会多插值一次）。</div>
         <label class="switch-row">
           <div><b>融合模式（PP 框 + 微信字）</b><i>PP 出更细的框、微信出文字；纯识字会慢一点，翻译链路基本不增加时间。需要两个引擎都装好。</i></div>
           <input type="checkbox" id="swOcrFusion"><span class="sw"></span>
@@ -174,15 +183,53 @@
       <div class="acc-body">
         <div class="sub-title">翻译模式</div>
         <div class="engine-list" id="mtProfList"></div>
-        <div class="group-note" id="noteMtProfile">标准：HyMT1.5 1.8B，所有语种，质量优先。<br>效率：PLaMo 3 Translate 0.8B Q4_K_M，质量和速度平衡。<br>极速：PLaMo 3 Translate 0.8B Q2_K，速度/低配优先。<br>普通翻译超过设定空闲时间自动释放；游戏模式内常驻，关闭游戏模式或切换模型时释放。</div>
+        <div class="group-note" id="noteMtProfile">标准：HyMT1.5 全语种；效率：PLaMo Q4；极速：PLaMo Q2。档位决定用哪个，占内存按下面各档的「加载」。</div>
 
         <div class="sub-title">翻译模型（按档位）</div>
         <div class="engine-list" id="mtList"></div>
-        <div class="group-note" id="mtNote">按档位取模型；普通翻译按空闲时间自动释放，游戏模式内常驻，关闭游戏模式或切换模型时释放。</div>
+        <div class="group-note" id="mtNote">按档位取模型；同一时间只跑一个，点「加载」会自动释放其他档。</div>
         <div class="row-btns">
-          <button class="btn" id="btnImportMt">导入翻译模型包</button>
+          <button class="btn" id="btnImportMt" type="button">导入翻译模型包</button>
         </div>
         <div class="group-note">只支持含 .gguf 单文件的模型包（HyMT1.5 1.8B / PLaMo 3 Translate 0.8B）。en-zh / ja-zh 目录包已不再支持。模型包从 GitHub 发布页分别下载，导入后自动放到「MT Model」。</div>
+
+        <div class="sub-title">在线翻译</div>
+        <label class="switch-row">
+          <div><b>用在线翻译代替本地模型</b><i>整屏直接走接口，全程不加载本地模型；打开后会立刻释放已加载的模型，并关掉「AI 翻译接管」</i></div>
+          <input type="checkbox" id="swAli"><span class="sw"></span>
+        </label>
+        <label class="field">
+          <span>服务商</span>
+          <select id="selProv">
+            <option value="ali">阿里云 · 每月 100 万字符免费</option>
+            <option value="google">谷歌 · 免注册，需能访问 Google</option>
+          </select>
+        </label>
+
+        <div id="aliBox">
+          <label class="field">
+            <span>AccessKey ID</span>
+            <input type="password" id="txtAliAk" placeholder="LTAI..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>AccessKey Secret</span>
+            <input type="password" id="txtAliSk" placeholder="粘贴 AccessKey Secret，留空则不改" spellcheck="false" autocomplete="off">
+          </label>
+          <div class="row-btns">
+            <button class="btn" id="btnSaveAli" type="button">保存并测一次</button>
+            <button class="btn" id="btnAliHelp" type="button">注册教程</button>
+          </div>
+          <div class="group-note" id="aliHelpBox" style="display:none">1. 打开阿里云官网注册，实名认证（个人支付宝扫码最快）；<br>2. 控制台搜「机器翻译」→ 点「立即开通」，免费额度每月 100 万字符，超额按 50 元/百万字符；<br>3. 右上角头像 →「AccessKey 管理」→ 创建 AccessKey，把 ID 和 Secret 复制进来；<br>4. 点「保存并测一次」，出现「连接正常」就通了。</div>
+        </div>
+
+        <div id="gooBox" style="display:none">
+          <div class="group-note">谷歌这条不用注册、不用密钥，填好就能用。前提是能访问 translate.googleapis.com —— <b>国内需要自备网络通道（魔法）</b>，程序会自动跟随系统代理，代理软件开着系统代理就行。</div>
+          <div class="row-btns">
+            <button class="btn" id="btnTestGoo" type="button">测一次连通</button>
+          </div>
+        </div>
+
+        <div class="group-note" id="aliNote">密钥只存本机 ini。开这个就不用再加载本地翻译模型。</div>
 
         <div class="sub-title">译文遮罩</div>
         <label class="field">
@@ -203,7 +250,7 @@
         </label>
         <div class="group-note" id="noteMtAlpha">拖上面的滑杆，彩虹底图上那块遮罩会跟着变淡变实，所见即所得（100% 完全不透明，原字彻底看不到；越低越透出原文）。</div>
         <label class="switch-row">
-          <div><b>显示「✕ 关闭译文」控制条</b><i>关掉后翻译只画译文、不留浮动控制条，用 Esc / 滚轮 / Ctrl+Alt+G 关</i></div>
+          <div><b>显示「✕ 关闭译文」控制条</b><i>关掉后翻译只画译文、不留浮动控制条，用 Esc、鼠标滚轮，或按「<span data-hk="hide"></span>」关闭</i></div>
           <input type="checkbox" id="swMtBar"><span class="sw"></span>
         </label>
       </div>
@@ -213,6 +260,13 @@
       <button class="acc-head" type="button">性能与缓存<span class="acc-note">GPU / 线程 / 内存 / 缓存</span><span class="chev"></span></button>
       <div class="acc-body">
         <div class="group-note">这一组都是「跑得快不快、占多少资源」的开关：GPU 加速、CPU 线程档位、空闲释放、重复截图缓存。</div>
+
+        <div class="sub-title">热启动</div>
+        <label class="switch-row">
+          <div><b>自动加载当前翻译模型</b><i>勾选后启动 / 切换档位就自动加载选中的那一档，并释放其他档；不勾选就自己点「加载」</i></div>
+          <input type="checkbox" id="swHotStart"><span class="sw"></span>
+        </label>
+        <div class="group-note">只管翻译模型。OCR 引擎不受这里影响：选哪个引擎就自动拉起哪个。</div>
 
         <div class="sub-title">GPU 加速</div>
         <label class="field">
@@ -250,8 +304,16 @@
           <span>重复截图</span>
           <span class="val" id="shotCacheInfo">—</span>
         </label>
-        <button class="btn ghost" id="btnClearShotCache" type="button">清理截图缓存</button>
-        <div class="group-note">同一屏（允许轻微差异）再翻一次直接贴上次成品，不再 OCR / 翻译；引擎、翻译模式、GPU 等设置变化后自动隔离。缓存目录在程序当前文件夹的 <code>shotcache</code>。</div>
+        <label class="field">
+          <span>上限</span>
+          <input type="number" id="numShotCacheMax" min="20" max="2000" step="10" value="120" inputmode="numeric">
+          <span class="val" style="width:auto;">张，超出先删最早的</span>
+        </label>
+        <div class="btn-row">
+          <button class="btn ghost" id="btnClearShotCache" type="button">清理截图缓存</button>
+          <button class="btn ghost" id="btnOpenCacheDir" type="button">打开缓存文件夹</button>
+        </div>
+        <div class="group-note">同一屏再翻直接贴上次成品，不再 OCR / 翻译。</div>
       </div>
     </div>
 
@@ -332,6 +394,15 @@
     </label>
     <div class="group-note" id="gameMsg">先添加固定字幕区域</div>
 
+    <label class="field">
+      <span>触发方式</span>
+      <select id="gameTriggerMode">
+        <option value="manual">手动 · 按快捷键翻译一次</option>
+        <option value="auto">自适应 · 定住 400ms 自动识字，字幕变了自动重译</option>
+      </select>
+    </label>
+    <div class="group-note" id="gameAutoHint">手动：按「<span data-hk="mt"></span>」翻译一次。自适应：40ms 采样选区，画面定住 400ms 才识字，图像指纹挡重复 OCR、文本指纹挡重复翻译。</div>
+
     <div class="sub-title">固定字幕区域</div>
     <div class="game-regions" id="gameRegions"></div>
     <div class="row-btns">
@@ -340,7 +411,7 @@
     </div>
 
     <div class="sub-title">手动翻译</div>
-    <div class="group-note">按 Ctrl+Alt+F 翻译一次；翻译中再按会强制开新一轮。</div>
+    <div class="group-note">按「<span data-hk="mt"></span>」翻译一次；翻译中再按会强制开新一轮。</div>
     <div class="field-grid">
       <label class="field">
         <span>游戏模型</span>
@@ -372,11 +443,15 @@
       <div><b>显示识别提示</b><i>游戏模式在右下角显示「正在识别 / 翻译完成」提示；关闭后游戏仍会正常翻译和显示遮罩。</i></div>
       <input type="checkbox" id="gameToastOn"><span class="sw"></span>
     </label>
-    <div class="group-note" id="gameMaskHint">游戏遮罩只在游戏模式启用、按 Ctrl+Alt+F 翻译后显示。游戏建议使用无边框窗口；独占全屏可能看不到遮罩。</div>
+    <div class="group-note" id="gameMaskHint">游戏遮罩只在游戏模式启用、按「<span data-hk="mt"></span>」翻译后显示。游戏建议使用无边框窗口；独占全屏可能看不到遮罩。</div>
 
     <label class="switch-row">
       <div><b>合并被拆成两行的字幕</b><i>同一区域、上一行没句末标点、下一行是续行时，先合并再翻译。</i></div>
       <input type="checkbox" id="gameMerge"><span class="sw"></span>
+    </label>
+    <label class="switch-row">
+      <div><b>只翻大字号（滤掉 UI 小字）</b><i>框选偏大时，任务列表、技能格那类小字不翻译，只留最大的那几行字幕。</i></div>
+      <input type="checkbox" id="gameFontFilter"><span class="sw"></span>
     </label>
     <div class="group-note">建议游戏使用「无边框窗口」；独占全屏可能截到黑屏。</div>
   </div>
@@ -460,6 +535,15 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<div class="load-mask" id="loadMask" hidden>
+  <div class="load-card">
+    <div class="load-title" id="loadTitle">正在加载模型</div>
+    <div class="load-track"><i id="loadBar"></i></div>
+    <div class="load-pct" id="loadPct">0%</div>
+    <div class="load-sub" id="loadSub">加载完成后按钮会变成「释放」</div>
   </div>
 </div>
 

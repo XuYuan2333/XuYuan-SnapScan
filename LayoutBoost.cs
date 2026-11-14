@@ -521,6 +521,10 @@ namespace QRSnap
                     // 排版区域从「第一行的左边界」开始，到本栏右边界结束：
                     // 标题首行被徽章顶到右边时，译文也从徽章右侧起排，不会盖住徽章。
                     int right = ColumnRight(firstLeft, gutters, imgW);
+                    // 栏缝可能被误判在段落文字中间（正文跨过它时），这时按栏缝切会把块腰斩：
+                    // 框只剩左半 → 右半原文擦不掉（看着像位置对不上）、译文还被压成小字。
+                    // 原文实际右边界是可靠的下限，取两者较大的。
+                    if (cur.Box.Right > right) right = cur.Box.Right;
                     int width = Math.Max(40, right - firstLeft);
                     cur.Box = new Rectangle(firstLeft, top, width, bottom - top);
                     cur.SourceBoxes = sources;
@@ -678,13 +682,17 @@ namespace QRSnap
             string s = t.Trim();
             if (s.Length == 0) return true;
 
-            int letters = 0, cjk = 0, digits = 0, other = 0;
+            int letters = 0, cjk = 0, digits = 0, other = 0, kana = 0;
             for (int i = 0; i < s.Length; i++)
             {
                 char c = s[i];
                 if (c >= '0' && c <= '9') digits++;
                 else if (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') letters++;
                 else if (c >= 0x4e00 && c <= 0x9fff) cjk++;
+                // 假名（含半角片假名）：日文句子里假名占大半，但既不是拉丁字母也不是汉字，
+                // 旧判据只看 letters+digits，整句日文会被当成噪声全部丢掉。
+                else if (c >= 0x3040 && c <= 0x30ff) kana++;
+                else if (c >= 0xff66 && c <= 0xff9d) kana++;
                 else if (!char.IsWhiteSpace(c)) other++;
             }
 
@@ -695,7 +703,7 @@ namespace QRSnap
                 if (letters + digits < 8) return true;
                 if (cjk * 2 > letters) return true;
             }
-            if (letters + digits == 0) return true;
+            if (letters + digits == 0 && cjk == 0 && kana == 0) return true;
 
             string compact = s.Replace(" ", string.Empty);
             if (compact.Length <= 2 && digits == 0)
@@ -1004,7 +1012,42 @@ namespace QRSnap
             string d;
             if (TryLocalizeDate(t, out d)) return d;
 
+            // 产品名 / 代码名 / 版本号这类标识（xc2fsr、FSR3、v1.4.2、RTX5060、SnapScan）：
+            // 翻过去只是串无意义音译（「艾克西西二埃夫提埃斯阿尔」），原样留着反而好读。
+            if (LooksLikeTechToken(t)) return t;
+
             return null;
+        }
+
+        // 技术标识判定：只看形状，不认任何具体词。只吃两类：
+        //   ① 纯字母 + 中间夹数字 + 没有空格（xc2fsr、RTX5060）—— 产品名/代码名/型号
+        //   ② 驼峰（SnapScan、macOS、iPhone）—— 专有名词，逐字母音译同样没意义
+        // 其余（全大写缩写 GPU/HP、v1.4.2 这种带点的版本号、FSR 3.1 这种带空格的）都不算，
+        // 照常送翻译：这类词引擎本来就处理得不错，硬保留反而挡住正常翻译。
+        private static bool LooksLikeTechToken(string t)
+        {
+            string s = t.Trim();
+            if (s.IndexOf(' ') >= 0 || s.IndexOf('\t') >= 0) return false;   // 有空格就不是这类
+            if (s.Length < 3 || s.Length > 24) return false;
+            int letters = 0, digits = 0;
+            bool camel = false, hasLower = false;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c >= 0x3040) return false;                               // 中日韩文字不算标识
+                if (c >= '0' && c <= '9') { digits++; continue; }
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+                {
+                    letters++;
+                    if (char.IsUpper(c)) { if (i > 0) camel = true; }
+                    else hasLower = true;
+                    continue;
+                }
+                return false;                                                // 出了字母数字就不是这一类
+            }
+            if (letters > 0 && digits > 0) return true;                      // ① 字母夹数字
+            if (camel && hasLower && digits == 0) return true;               // ② 驼峰（必须混着小写，全大写缩写不算）
+            return false;
         }
 
         private static readonly Regex ReYesterday = new Regex(

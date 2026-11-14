@@ -1,0 +1,21 @@
+XuYuan-SnapScan 启动说明
+========================
+
+系统要求
+- Windows 10 21H2 / Windows 11，64 位。
+- 本包已带 ONNX Runtime、CPU llama、Vulkan llama、VC++ 运行库。
+- WebView2 Runtime 是界面必需项：如果启动提示缺少 WebView2，请先运行本目录的 MicrosoftEdgeWebview2Setup.exe。
+- 建议 .NET Framework 4.8（Win10 21H2 / Win11 一般自带）。
+
+模型包（按需导入，光本体不会翻译）
+- OCR 包：微信 OCR + PP-OCR 极速，导入后识字可用。
+- PLaMo Q4 包：效率档 PLaMo Q4_K_M。
+- PLaMo Q2 包：极速档 PLaMo Q2_K，按需单独导入。
+- 标准包：HyMT1.5 1.8B，导入后标准档可用（所有语种）。
+导入方式：设置 → 识别引擎 / 翻译 → 导入模型包，选择 zip 即可。
+
+提示
+- 有 Vulkan 显卡驱动会自动用 GPU；没有则自动回 CPU。
+- 截图管理员窗口需要以管理员身份运行本程序。
+- 独占全屏游戏可能截到黑屏，建议无边框窗口。
+- 首次运行若被 SmartScreen 拦截，选择“更多信息 → 仍要运行”。

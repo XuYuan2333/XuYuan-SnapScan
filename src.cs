@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -219,6 +219,15 @@ namespace QRSnap
             return IsIconic(h);
         }
 
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        public static bool IsVisibleHandle(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return false;
+            return IsWindowVisible(h);
+        }
+
         // 显示但不抢焦点、不抬到最前（还原后该多大就多大、该被谁盖住就盖住）
         public static void ShowNoActivate(IntPtr h)
         {
@@ -356,6 +365,9 @@ namespace QRSnap
         public const string EnginePpTiny = "pptiny";
         public const string EnginePpSmall = "ppsmall";
         public const string EnginePpMedium = "ppmed";
+        // 日文专用识别模型：PP-OCR 的中文模型字典里没有假名（keys.txt 6904 项、假名为 0），
+        // 日文只会被强行映射成汉字再判成中文。这一档换成 japan_PP-OCRv4 的 rec + 日文字典。
+        public const string EnginePpJapan = "ppjapan";
         public const string ModelFolderName = "OCR Model";
         public const string MtFolderName = "MT Model";
 
@@ -387,7 +399,8 @@ namespace QRSnap
         public static string ModelTierDir(string engine)
         {
             string tier = "tiny";
-            if (engine == EnginePpMedium) tier = "medium";
+            if (engine == EnginePpJapan) tier = "japan";
+            else if (engine == EnginePpMedium) tier = "medium";
             return Path.Combine(Path.Combine(ModelRoot(), "PP-OCR"), tier);
         }
         public const string FileName = "XuYuan-SnapScan_config.ini";
@@ -428,8 +441,14 @@ namespace QRSnap
         public static bool OcrGpu;
         // PP 检测 + 微信识字融合：默认关（纯识字保持微信极速）；翻译链路可开
         public static bool OcrFusion;
+        // 预览图 WebP 质量见 OcrImage.WebpQuality
         // 重复截图缓存：同一屏（允许轻微差异）直接贴上次成品，不再 OCR/翻译
         public static bool ShotCacheEnabled = true;
+        // 截图缓存上限（张）：超过就按最早写入的淘汰，避免目录无限长
+        public const int DefaultShotCacheMax = 120;
+        public static int ShotCacheMax = DefaultShotCacheMax;
+        // 热启动：切到哪个 OCR 引擎就提前把它的模型/宿主加载好，第一次识字不用再等
+        public static bool HotStart = true;
         public const int DefaultMtIdle = 30;             // 闲置多少秒没翻译就卸载翻译服务（0 = 不自动卸载）
         public static int MtIdle = DefaultMtIdle;
         public const int DefaultMtMaskAlpha = 100;       // 译文遮罩不透明度（0-100，100=完全不透明）
@@ -455,7 +474,17 @@ namespace QRSnap
         public static bool AiMerge;                                      // AI 短句合并：窄栏续行先合并再翻
         public static bool AiMt;                                         // AI 翻译接管：只用大模型翻，不走本地模型
         public static bool AiLayout = true;                              // AI 版面强化：分栏/徽章/段落切分后再翻译、回填
+        // ---------- 在线翻译：阿里云 / 谷歌，开它就不用本地模型 ----------
+        public static bool AliMt;                                        // 在线翻译接管（两家共用这个开关），与 AiMt 互斥
+        public static string AliAk = "";                                 // 阿里云 AccessKey ID
+        public static string AliSk = "";                                 // 阿里云 AccessKey Secret
+        public static string MtProv = "ali";                             // 服务商：ali = 阿里云，google = 谷歌（免密钥）
         // 游戏专属模式
+        public static string NormalizeProv(string v)
+        {
+            string s = (v ?? "").Trim().ToLowerInvariant();
+            return s == "google" ? "google" : "ali";
+        }
         public static bool GameOn;                                       // 游戏模式是否运行
         public static string GameRegions = "";                           // 多个固定区域：x,y,w,h;x,y,w,h
         public static int GameTrigger;                                   // 0=变化即翻 1=固定间隔 2=手动快捷键
@@ -465,6 +494,20 @@ namespace QRSnap
         public static string GameMaskMode = MtModeEfficiency;            // 游戏遮罩独立控制；仅效率，游戏页不提供拟真
         public static bool GameToastOn = true;                           // 游戏模式是否显示右下角识别提示
         public static bool GameMerge = true;                             // 合并被拆开的字幕行
+        public static bool GameFontFilter = true;                        // 框选得大时按字号滤掉 UI 小字，只翻最大的那几行
+        public static bool GameAutoClose = true;                         // 遮罩期自动收遮罩（字幕消失/被替换）
+        // 日文兜底：中文模型一个假名都吐不出来，日文会被判成中文直接跳过。
+        // 开这个之后，识别结果「全是汉字、没有假名也没有拉丁字母」时自动用日文模型复跑一次，
+        // 复跑结果假名足够多就认定这个选区是日文，之后固定用日文模型。
+        public static bool GameJpAuto = true;
+        public static int GameWatchMs = 2500;                            // 遮罩期「抓图比对」间隔（800~5000ms，越短越灵敏，但每次抓图要短暂掐掉遮罩）
+        public static int GameHoldMs = 350;                              // 画面稳定多久后做一次空字幕判定
+        public static int GameMaskDist = 12;                             // dHash 差异阈值（64 位里差几位算换内容）
+        public static bool GameAutoStart;                                // 启动即进游戏模式（已停用：启动一律关闭态）
+        public static bool GameAutoMode;                                 // 自适应模式：自动识别到文字就翻译，字幕换了自动重译
+        public static int GameAutoHoldMs = 400;                          // 自适应：画面定住多久才开始识字（100~2000ms）
+        public static int GameAutoSampleMs = 40;                         // 自适应：采样间隔（20~500ms）
+        public static int GameAutoWatchMs = 800;                         // 自适应：遮罩在屏时的比对间隔（400~3000ms）
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -504,6 +547,7 @@ namespace QRSnap
             if (v == EngineSystem || v == "win" || v == "windows") return EngineSystem;
             if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
             if (v == EnginePpSmall || v == "small" || v == "standard") return EnginePpTiny;
+            if (v == EnginePpJapan || v == "japan" || v == "jp" || v == "日文") return EnginePpJapan;
             if (v == EnginePpMedium || v == "medium" || v == "med" || v == "高精") return EnginePpTiny;
             return EngineWeChat;
         }
@@ -511,7 +555,7 @@ namespace QRSnap
         public static bool IsLocalEngine(string engine)
         {
             string e = NormalizeEngine(engine);
-            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium;
+            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium || e == EnginePpJapan;
         }
 
         private static bool ToBool(string v)
@@ -548,6 +592,14 @@ namespace QRSnap
             if (v <= 0) return 0;
             if (v < 5) return 5;
             if (v > 86400) return 86400;
+            return v;
+        }
+
+        // 截图缓存上限：太少会频繁失效，太多占目录，夹在 20~2000 张
+        public static int NormalizeShotCacheMax(int v)
+        {
+            if (v < 20) return DefaultShotCacheMax;
+            if (v > 2000) return 2000;
             return v;
         }
 
@@ -611,6 +663,8 @@ namespace QRSnap
             MtMaskAlpha = DefaultMtMaskAlpha;
             MtMode = MtModeEfficiency;
             MtProfile = MtProfileStandard;
+            HotStart = true;
+            ShotCacheMax = DefaultShotCacheMax;
             AiProvider = AiProviderDeepSeek;
             AiModel = "deepseek-flash";
             AiBase = "https://api.deepseek.com";
@@ -620,6 +674,10 @@ namespace QRSnap
             AiMerge = false;
             AiMt = false;
             AiLayout = true;
+            AliMt = false;
+            AliAk = "";
+            AliSk = "";
+            MtProv = "ali";
             GameOn = false;
             GameRegions = "";
             GameTrigger = 2;
@@ -629,6 +687,15 @@ namespace QRSnap
             GameMaskMode = MtModeEfficiency;
             GameToastOn = true;
             GameMerge = true;
+            GameFontFilter = true;
+            GameAutoClose = true;
+            GameWatchMs = 2500;
+            GameHoldMs = 350;
+            GameMaskDist = 12;
+            GameAutoMode = false;
+            GameAutoHoldMs = 400;
+            GameAutoSampleMs = 40;
+            GameAutoWatchMs = 800;
             Legacy = false;
             try
             {
@@ -676,6 +743,13 @@ namespace QRSnap
                     else if (k.Equals("ocrgpu", StringComparison.OrdinalIgnoreCase)) OcrGpu = ToBool(v);
                     else if (k.Equals("ocrfusion", StringComparison.OrdinalIgnoreCase)) OcrFusion = ToBool(v);
                     else if (k.Equals("shotcache", StringComparison.OrdinalIgnoreCase)) ShotCacheEnabled = ToBool(v);
+                    else if (k.Equals("shotcache", StringComparison.OrdinalIgnoreCase)) ShotCacheEnabled = ToBool(v);
+                    else if (k.Equals("hotstart", StringComparison.OrdinalIgnoreCase)) HotStart = ToBool(v);
+                    else if (k.Equals("shotcachemax", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int cm;
+                        if (int.TryParse(v, out cm)) ShotCacheMax = NormalizeShotCacheMax(cm);
+                    }
                     else if (k.Equals("mtidle", StringComparison.OrdinalIgnoreCase))
                     {
                         int iv;
@@ -697,7 +771,11 @@ namespace QRSnap
                     else if (k.Equals("aimerge", StringComparison.OrdinalIgnoreCase)) AiMerge = ToBool(v);
                     else if (k.Equals("aimt", StringComparison.OrdinalIgnoreCase)) AiMt = ToBool(v);
                     else if (k.Equals("ailayout", StringComparison.OrdinalIgnoreCase)) AiLayout = ToBool(v);
+                    else if (k.Equals("alimt", StringComparison.OrdinalIgnoreCase)) AliMt = ToBool(v);
+                    else if (k.Equals("aliak", StringComparison.OrdinalIgnoreCase)) AliAk = v;
+                    else if (k.Equals("alisk", StringComparison.OrdinalIgnoreCase)) AliSk = v;
                     else if (k.Equals("gameon", StringComparison.OrdinalIgnoreCase)) GameOn = ToBool(v);
+                    else if (k.Equals("mtprov", StringComparison.OrdinalIgnoreCase)) MtProv = NormalizeProv(v);
                     else if (k.Equals("gameregions", StringComparison.OrdinalIgnoreCase)) GameRegions = v;
                     else if (k.Equals("gametrigger", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameTrigger = Math.Max(0, Math.Min(2, n)); }
                     else if (k.Equals("gameinterval", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameIntervalMs = Math.Max(250, Math.Min(5000, n)); }
@@ -706,9 +784,22 @@ namespace QRSnap
                     else if (k.Equals("gamemask", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameMaskMode = NormalizeMtMode(v);
                     else if (k.Equals("gametoaston", StringComparison.OrdinalIgnoreCase)) GameToastOn = ToBool(v);
                     else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
+                    else if (k.Equals("gamefontfilter", StringComparison.OrdinalIgnoreCase)) GameFontFilter = ToBool(v);
+                    else if (k.Equals("gameautoclose", StringComparison.OrdinalIgnoreCase)) GameAutoClose = ToBool(v);
+                    else if (k.Equals("gamejpauto", StringComparison.OrdinalIgnoreCase)) GameJpAuto = ToBool(v);
+                    else if (k.Equals("gamewatch", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameWatchMs = Math.Max(800, Math.Min(5000, n)); }
+                    else if (k.Equals("gamehold", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameHoldMs = Math.Max(150, Math.Min(2000, n)); }
+                    else if (k.Equals("gamemaskdist", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameMaskDist = Math.Max(4, Math.Min(32, n)); }
+                    else if (k.Equals("gameautostart", StringComparison.OrdinalIgnoreCase)) GameAutoStart = ToBool(v);
+                    else if (k.Equals("gameauto", StringComparison.OrdinalIgnoreCase)) GameAutoMode = ToBool(v);
+                    else if (k.Equals("gameautohold", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoHoldMs = Math.Max(100, Math.Min(2000, n)); }
+                    else if (k.Equals("gameautosample", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoSampleMs = Math.Max(20, Math.Min(500, n)); }
+                    else if (k.Equals("gameautowatch", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoWatchMs = Math.Max(400, Math.Min(3000, n)); }
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
-                GameOn = false;   // 游戏循环必须在本次启动里手动开启
+                // gameon 本身就是「游戏模式开着」的记录，写进去就该算数；
+                // 以前这里还要求 gameautostart=1 才保留，结果 ini 里明明 gameon=1，
+                // 启动后却被抹成 false，按热键落到普通截图框选，看着像游戏模式不出翻译。
                 GameTrigger = 2;  // 只保留手动快捷键翻译
                 Legacy = !string.Equals(ver, ConfigVersion, StringComparison.OrdinalIgnoreCase);
             }
@@ -744,6 +835,8 @@ namespace QRSnap
             sb.Append("ocrgpu=").Append(OcrGpu ? "1" : "0").Append("\r\n");
             sb.Append("ocrfusion=").Append(OcrFusion ? "1" : "0").Append("\r\n");
             sb.Append("shotcache=").Append(ShotCacheEnabled ? "1" : "0").Append("\r\n");
+            sb.Append("hotstart=").Append(HotStart ? "1" : "0").Append("\r\n");
+            sb.Append("shotcachemax=").Append(ShotCacheMax).Append("\r\n");
             sb.Append("mtidle=").Append(MtIdle).Append("\r\n");
             sb.Append("mtalpha=").Append(MtMaskAlpha).Append("\r\n");
             sb.Append("mtmode=").Append(MtMode).Append("\r\n");
@@ -756,16 +849,31 @@ namespace QRSnap
             sb.Append("aicheck=").Append(AiCheck ? "1" : "0").Append("\r\n");
             sb.Append("aimerge=").Append(AiMerge ? "1" : "0").Append("\r\n");
             sb.Append("aimt=").Append(AiMt ? "1" : "0").Append("\r\n");
+            sb.Append("alimt=").Append(AliMt ? "1" : "0").Append("\r\n");
+            sb.Append("aliak=").Append(AliAk).Append("\r\n");
+            sb.Append("alisk=").Append(AliSk).Append("\r\n");
+            sb.Append("mtprov=").Append(MtProv).Append("\r\n");
             sb.Append("ailayout=").Append(AiLayout ? "1" : "0").Append("\r\n");
             sb.Append("gameon=").Append(GameOn ? "1" : "0").Append("\r\n");
             sb.Append("gameregions=").Append(GameRegions ?? "").Append("\r\n");
             sb.Append("gametrigger=").Append(GameTrigger).Append("\r\n");
             sb.Append("gameinterval=").Append(GameIntervalMs).Append("\r\n");
+            sb.Append("gameautoclose=").Append(GameAutoClose ? "1" : "0").Append("\r\n");
+            sb.Append("gamejpauto=").Append(GameJpAuto ? "1" : "0").Append("\r\n");
+            sb.Append("gamewatch=").Append(GameWatchMs).Append("\r\n");
+            sb.Append("gamehold=").Append(GameHoldMs).Append("\r\n");
+            sb.Append("gamemaskdist=").Append(GameMaskDist).Append("\r\n");
+            sb.Append("gameautostart=").Append(GameAutoStart ? "1" : "0").Append("\r\n");
+            sb.Append("gameauto=").Append(GameAutoMode ? "1" : "0").Append("\r\n");
+            sb.Append("gameautohold=").Append(GameAutoHoldMs).Append("\r\n");
+            sb.Append("gameautosample=").Append(GameAutoSampleMs).Append("\r\n");
+            sb.Append("gameautowatch=").Append(GameAutoWatchMs).Append("\r\n");
             sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
             sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
             sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
             sb.Append("gametoaston=").Append(GameToastOn ? "1" : "0").Append("\r\n");
             sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");
+            sb.Append("gamefontfilter=").Append(GameFontFilter ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();
             string primary = PrimaryConfigPath;
@@ -2135,6 +2243,8 @@ namespace QRSnap
         // 多行被聚成一段时，这里保留每一行原来的框：擦除只擦这些行，
         // 不会把行间的徽章/头像/空白一起抹掉（Box 此时是排版用的整段区域）
         public List<Rectangle> SourceBoxes;
+        // 判成硬件监控 OSD / 数值仪表这类「不是内容」的行：不送翻译、也不画遮罩
+        public bool SkipMt;
     }
 
     internal static class Ocr
@@ -2146,6 +2256,65 @@ namespace QRSnap
         private static EngineProbe _probe;
 
         public static string SystemEngineName = "Windows 内置 OCR";
+
+        // 屏幕上的硬件监控 OSD / 数值仪表（「FPS 0 CPU 5287MHz 12% 32°C 45W」这类常驻浮层）
+        // 不是要读的内容，翻过来只会盖住读数。判据只看字符构成，不认具体词：
+        //   · 有成片假名/汉字 → 正常文本
+        //   · 字母占 55% 以上 → 正常文本（英文句子、罗马字都在这档）
+        //   · 剩下数字+符号占 40% 以上、且数字本身占 12% 以上 → 判为仪表
+        public static bool LooksLikeHud(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            int total = 0, letters = 0, digits = 0, syms = 0, cjk = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+                total++;
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) letters++;
+                else if (c >= '0' && c <= '9') digits++;
+                else if (c >= 0x3040) cjk++;
+                else syms++;
+            }
+            // 短读数（「412 / 900」「4121 90日」这类）去掉空格只有 6-7 个字符，
+            // 原来 total<8 直接把它们放过去了。门槛降到 6，另加「至少 3 个数字」，
+            // 才不会误伤「Lv 10」这种只有两个数字的正文
+            if (total < 6) return false;
+            if (digits < 3) return false;
+            if (cjk * 5 >= total) return false;
+            if (letters * 20 >= total * 11) return false;
+            if ((digits + syms) * 5 < total * 2) return false;
+            if (digits * 8 < total) return false;
+            return true;
+        }
+
+        // 逐字母音译判定：原文是单 token 的短 ASCII 串，译文却是明显更长的纯汉字串
+        // （xc2fsr 6 个字符 → 「艾克西西二埃夫提埃斯阿尔」11 个汉字）。这种译文没有信息量，
+        // 退回原文比音译好读。纯形状判断，不认识任何具体词，没见过的标识形态也能兜住。
+        public static bool LookLikeTransliteration(string src, string dst)
+        {
+            if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(dst)) return false;
+            string s = src.Trim();
+            if (s.Length < 3 || s.Length > 24) return false;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                    || c == '.' || c == '-' || c == '_';
+                if (!ok) return false;              // 带空格或别的符号：当正常句子处理
+            }
+            int han = 0;
+            for (int i = 0; i < dst.Length; i++)
+            {
+                char c = dst[i];
+                if (c >= 0x4e00 && c <= 0x9fff) { han++; continue; }
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) return false;
+                // 标点、空格忽略
+            }
+            if (han == 0) return false;
+            return han * 2 >= s.Length * 3;          // 汉字数 ≥ 原文长度的 1.5 倍 = 在逐字母拆
+        }
+
 
         // 探测（只查文件/注册表，不启动进程）；结果缓存，避免每次刷新界面都扫盘
         public static EngineProbe Probe()
@@ -2199,6 +2368,28 @@ namespace QRSnap
             ShutdownLocal();
         }
 
+        // 后台正在加载 / 预热引擎（前端用它显示进度遮罩）
+        public static volatile bool Warming;
+
+        // 热启动：对一张小图跑一次真实识别，把选中引擎的模型 / 宿主进程提前拉起来。
+        // 目的是把「第一次识字才付的加载成本」挪到切换引擎的那一刻，返回是否成功。
+        public static bool Warmup(string engine)
+        {
+            try
+            {
+                string e = AppConfig.NormalizeEngine(engine);
+                if (AppConfig.IsLocalEngine(e)) return LocalFor(e) != null;
+                using (Bitmap bmp = new Bitmap(24, 24))
+                {
+                    using (Graphics g = Graphics.FromImage(bmp)) { g.Clear(Color.White); }
+                    string eng; long ms; string detail;
+                    Recognize(bmp, out eng, out ms, out detail, null, e);
+                }
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
         // ---------- 本地 PP-OCR（离线，模型在 "OCR Model" 目录） ----------
         private static readonly object LocalLock = new object();
         private static PpOcr _local;
@@ -2207,6 +2398,7 @@ namespace QRSnap
         public static string LocalName(string engine)
         {
             string e = AppConfig.NormalizeEngine(engine);
+            if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
             return "PP-OCR 极速";
         }
@@ -2275,8 +2467,10 @@ namespace QRSnap
         {
             try
             {
-                string tier = AppConfig.EnginePpTiny;
+                string tier = AppConfig.NormalizeEngine(AppConfig.Engine);
                 string dir = AppConfig.ModelTierDir(tier);
+                if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpTiny;
+                dir = AppConfig.ModelTierDir(tier);
                 if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
                 if (!PpOcr.FolderReady(dir)) return;
                 lock (LocalLock)
@@ -2290,12 +2484,119 @@ namespace QRSnap
             catch (Exception) { }
         }
 
-        public static List<OcrSegment> LayoutSegments(Bitmap bmp, out List<Rectangle> obstacles, out string log)        {
+        // 版面识字同样走 OCR 预处理：PP-OCR 在推理图上跑，返回前把框和避让障碍换算回原图坐标。
+        // 日文兜底用单独一份识别器：中文画面还是走上面那份，两边互不顶掉
+        private static PpOcr _layoutJp;
+        private static string _layoutJpDir = string.Empty;
+
+        public static bool JapanReady()
+        {
+            return PpOcr.FolderReady(AppConfig.ModelTierDir(AppConfig.EnginePpJapan));
+        }
+
+        // 日文模型整块识字。中文模型字典里没有假名，日文会被强行映射成汉字再判成中文，
+        // 所以「看着像中文、其实一个假名都没出来」的时候用这一份复跑一次。
+        public static List<OcrSegment> LayoutSegmentsJapan(Bitmap bmp, out List<Rectangle> obstacles, out string log)
+        {
             obstacles = null;
             log = null;
             if (bmp == null) return null;
-            string tier = AppConfig.EnginePpTiny;
+            string dir = AppConfig.ModelTierDir(AppConfig.EnginePpJapan);
+            if (!PpOcr.FolderReady(dir)) { log = "日文模型缺失"; return null; }
+            lock (LocalLock)
+            {
+                if (_layoutJp == null || _layoutJpDir != dir)
+                {
+                    try { if (_layoutJp != null) _layoutJp.Dispose(); } catch (Exception) { }
+                    _layoutJp = null;
+                    _layoutJp = new PpOcr(dir, LocalName(AppConfig.EnginePpJapan));
+                    _layoutJpDir = dir;
+                }
+            }
+            PreparedImage prep = OcrImage.ForOcr(bmp);
+            try
+            {
+                List<OcrSegment> segs = LayoutBoost.Recognize(prep.Bitmap, _layoutJp, out log, out obstacles);
+                if (prep.Scaled)
+                {
+                    if (segs != null)
+                    {
+                        for (int i = 0; i < segs.Count; i++)
+                        {
+                            OcrSegment s = segs[i];
+                            s.Box = prep.MapBack(s.Box);
+                            if (s.SourceBoxes != null)
+                            {
+                                for (int k = 0; k < s.SourceBoxes.Count; k++)
+                                    s.SourceBoxes[k] = prep.MapBack(s.SourceBoxes[k]);
+                            }
+                        }
+                    }
+                    if (obstacles != null)
+                    {
+                        for (int i = 0; i < obstacles.Count; i++) obstacles[i] = prep.MapBack(obstacles[i]);
+                    }
+                }
+                log = (string.IsNullOrEmpty(log) ? prep.Trace : (log + " · " + prep.Trace));
+                return segs;
+            }
+            finally
+            {
+                prep.Dispose();
+            }
+        }
+
+        public static List<OcrSegment> LayoutSegments(Bitmap bmp, out List<Rectangle> obstacles, out string log)
+        {
+            obstacles = null;
+            log = null;
+            if (bmp == null) return null;
+
+            PreparedImage prep = OcrImage.ForOcr(bmp);
+            try
+            {
+                List<OcrSegment> segs = LayoutSegmentsCore(prep.Bitmap, out obstacles, out log);
+                if (prep.Scaled)
+                {
+                    if (segs != null)
+                    {
+                        for (int i = 0; i < segs.Count; i++)
+                        {
+                            OcrSegment s = segs[i];
+                            s.Box = prep.MapBack(s.Box);
+                            // 遮罩擦除走的是 SourceBoxes，必须一起换算，否则缩放后底框会缩在左上角
+                            if (s.SourceBoxes != null)
+                            {
+                                for (int k = 0; k < s.SourceBoxes.Count; k++)
+                                    s.SourceBoxes[k] = prep.MapBack(s.SourceBoxes[k]);
+                            }
+                        }
+                    }
+                    if (obstacles != null)
+                    {
+                        for (int i = 0; i < obstacles.Count; i++) obstacles[i] = prep.MapBack(obstacles[i]);
+                    }
+                }
+                log = (string.IsNullOrEmpty(log) ? prep.Trace : (log + " · " + prep.Trace));
+                return segs;
+            }
+            finally
+            {
+                prep.Dispose();
+            }
+        }
+
+        private static List<OcrSegment> LayoutSegmentsCore(Bitmap bmp, out List<Rectangle> obstacles, out string log)
+        {
+            obstacles = null;
+            log = null;
+            if (bmp == null) return null;
+            // 版面识字优先跟用户当前选的本地引擎走：选了日文档位就必须用日文模型，
+            // 否则这一层still用中文 tiny，日文会被强行映射成汉字再判成中文，上层翻译直接跳过。
+            string tier = AppConfig.NormalizeEngine(AppConfig.Engine);
             string dir = AppConfig.ModelTierDir(tier);
+            if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpTiny;
+            dir = AppConfig.ModelTierDir(tier);
             if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
             if (!PpOcr.FolderReady(dir)) { log = "PP-OCR 模型缺失，版面强化跳过"; return null; }
 
@@ -2403,7 +2704,43 @@ namespace QRSnap
         }
 
         // segs 非空时顺便把每行的位置填进去（原地显示译文要用）
+        // 入口统一走 OCR 预处理：推理图按模式生成（灰度/CLAHE/USM/缩放），算完把坐标换算回原图坐标。
         public static string Recognize(Bitmap bitmap, out string engine, out long ms, out string detail, List<OcrSegment> segs, string forceEngine = null)
+        {
+            engine = SystemEngineName;
+            ms = 0;
+            detail = string.Empty;
+            if (segs != null) segs.Clear();
+            if (bitmap == null) return null;
+
+            PreparedImage prep = OcrImage.ForOcr(bitmap);
+            try
+            {
+                string text = RecognizeCore(prep.Bitmap, out engine, out ms, out detail, segs, forceEngine);
+                if (segs != null && prep.Scaled)
+                {
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment s = segs[i];
+                        s.Box = prep.MapBack(s.Box);
+                        // 每行原始框也换算回原图：遮罩擦除只用这些框，漏了就整体错位
+                        if (s.SourceBoxes != null)
+                        {
+                            for (int k = 0; k < s.SourceBoxes.Count; k++)
+                                s.SourceBoxes[k] = prep.MapBack(s.SourceBoxes[k]);
+                        }
+                    }
+                }
+                detail = (string.IsNullOrEmpty(detail) ? prep.Trace : (detail + " · " + prep.Trace));
+                return text;
+            }
+            finally
+            {
+                prep.Dispose();
+            }
+        }
+
+        private static string RecognizeCore(Bitmap bitmap, out string engine, out long ms, out string detail, List<OcrSegment> segs, string forceEngine)
         {
             engine = SystemEngineName;
             ms = 0;
@@ -3581,6 +3918,9 @@ namespace QRSnap
             }
             _down = false;
 
+            // 记住截图松手的位置，译文控制条会跟着它摆
+            try { TransOverlay.SetBarAnchor(PointToScreen(e.Location)); } catch (Exception) { }
+
             if (_session.Freehand)
             {
                 _session.ConfirmPolygon(_pts);
@@ -3630,24 +3970,19 @@ namespace QRSnap
         private const int BOX_H = 54;
         private const int SUB_H = 18;        // 有明细行时额外的高度（96 dpi 逻辑值）
 
-        private const int TICK_MS = 30;      // 30ms 一帧，比原来的 60ms 顺滑
-        private const int SLIDE_PX = 10;     // 进场时从下方 10px 滑上来
-        private const float TOAST_OPACITY = 0.85f;   // 整体再透一点
+        private const int TICK_MS = 200;     // 只用于完成后倒计时收起，不做动画
+        private const float TOAST_OPACITY = 0.96f;
 
         private readonly System.Windows.Forms.Timer _timer;
-        private float _angle;
         private int _state;
         private string _text = string.Empty;
-        private int _textW;                  // 文字区最大宽度，绘制时用来居中
+        private int _textW;                  // 文字区测量宽度，用于定窗口尺寸
         private string _sub;                 // 第二行明细（AI 过程 / 战果），null 表示只有一行
         private Font _title;                 // 主行字体，稍粗一点
         private Font _small;                 // 明细行字体，缓存起来别每帧 new
         private bool _ok = true;
         private int _holdMs;
-        private int _anim;                   // 0 静止 / 1 进场 / 2 出场
-        private float _animT;
         private int _restTop;                // 静止时的最终 Top
-        private Bitmap _blurBg;              // 截屏后做的高斯/盒式模糊背景
 
         // 布局常量都是按 96 dpi 写的，而字体会按系统缩放渲染（150% 下 9.5pt 会画成 1.5 倍高）。
         // 不换算的话，框子还是 96 dpi 的尺寸，字却变大了，尾巴就被裁掉。统一按 DPI 比例缩放。
@@ -3712,6 +4047,18 @@ namespace QRSnap
             Present(text, sub, STATE_DONE, ok, 1700);
         }
 
+        // 游戏模式的结果提示多停一会儿：屏幕大、视线在画面上，1.7s 往往还没看过去就没了
+        public void ShowDone(string text, string sub, bool ok, int holdMs)
+        {
+            Present(text, sub, STATE_DONE, ok, holdMs);
+        }
+
+        // 命中截图缓存：这条路径没走 OCR 也没走翻译，提示要说清楚是"贴的旧成品"
+        public void ShowCacheHit(string sub)
+        {
+            Present("缓存命中 · 直接贴译文", sub, STATE_DONE, true, 2300);
+        }
+
         private Font SmallFont()
         {
             if (_small == null)
@@ -3720,38 +4067,39 @@ namespace QRSnap
             return _small;
         }
 
-        // 统一入口：第一次出现走「淡入 + 上滑」；已经在屏幕上（比如 识别中 → 识别完成）就地换内容，不重播动画
+        // 统一入口：不截屏、不模糊、不滑入。内容没变就完全不重绘，只续计时。
         private void Present(string text, string sub, int state, bool ok, int holdMs)
         {
+            bool dbg = Environment.GetEnvironmentVariable("QRSNAP_DBG_TOAST") == "1";
+            if (dbg) NativeShell.Log("[toast] enter " + text);
+            if (dbg) NativeShell.Log("[toast] flag=" + AppConfig.ShowToast);
             if (!AppConfig.ShowToast) { HideToast(); return; }
-            bool wasVisible = Visible;
-            SetText(text, sub);
+            bool same = Visible && _state == state && _ok == ok
+                && string.Equals(_text, text)
+                && string.Equals(_sub == null ? "" : _sub, sub == null ? "" : sub);
+            if (dbg) NativeShell.Log("[toast] same=" + same + " visible=" + Visible);
             _state = state;
             _ok = ok;
             _holdMs = holdMs;
-            _angle = 0f;
-            PlaceToast();
+            if (same) { if (_holdMs > 0) _timer.Start(); return; }
 
-            if (!wasVisible)
-            {
-                CaptureBackdrop();
-                Opacity = 0.0;
-                Top = _restTop + SLIDE_PX;
-                Show();
-                _anim = 1;
-                _animT = 0f;
-            }
-            else
+            SetText(text, sub);
+            if (dbg) NativeShell.Log("[toast] settext " + Width + "x" + Height);
+            PlaceToast();
+            if (dbg) NativeShell.Log("[toast] place " + Left + "," + Top + " visible=" + Visible);
+            if (!Visible)
             {
                 Opacity = TOAST_OPACITY;
-                Top = _restTop;
-                _anim = 0;
-                _animT = 0f;
+                Show();
+                if (dbg) NativeShell.Log("[toast] show visible=" + Visible);
             }
-
+            else Top = _restTop;
             BringToFront();
-            _timer.Start();
+            if (dbg) NativeShell.Log("[toast] front");
+            // busy 状态不需要任何定时器：只有「完成」才有倒计时收起
+            if (_holdMs > 0) _timer.Start(); else _timer.Stop();
             Invalidate();
+            if (dbg) NativeShell.Log("[toast] invalidate");
         }
 
         // 把自己画进 PNG：自检时不受别的窗口遮挡影响
@@ -3767,14 +4115,14 @@ namespace QRSnap
         public void HideToast()
         {
             _state = STATE_IDLE;
-            _anim = 0;
-            _animT = 0f;
             _holdMs = 0;
             _timer.Stop();
-            Opacity = TOAST_OPACITY;                  // 复位，下次 Present 再从 0 淡入
-            if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
             if (Visible) Hide();
         }
+
+        // 注意：不要在这里提前访问 Handle 做「预热」。
+        // ToastForm 是在 Jade 主线程 new 出来的，提前建句柄会把窗口绑到没有消息循环的线程上，
+        // 之后 UI 线程 Show 它就会卡死/崩溃（实测表现为截图后主窗口消失、进程直接退出）。
 
         private void SetText(string text, string sub)
         {
@@ -3783,27 +4131,19 @@ namespace QRSnap
             // 以前用 TextRenderer（GDI）量宽度、用 Graphics.DrawString（GDI+）画字，
             // 两种度量对同一条字符串给出不同宽度，GDI+ 更宽，尾巴就被裁掉了
             // （“正在识字…  Windows 内置 OCR” 的 OCR 看不到）。这里统一按 GDI+ 量。
-            int textW;
-            using (Graphics g = CreateGraphics())
+            // 量宽度用 GDI（TextRenderer），比 CreateGraphics+MeasureString 快得多，
+            // 这段每次换文案都会跑，之前卡一下就是它的句柄创建开销
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                _scale = g.DpiX / 96f;
+            int textW = TextRenderer.MeasureText(text, _title).Width;
+            if (_sub != null)
             {
-                if (g != null)
-                {
-                    _scale = g.DpiX / 96f;
-                    textW = (int)Math.Ceiling(g.MeasureString(text, _title).Width);
-                    if (_sub != null)
-                    {
-                        int sw = (int)Math.Ceiling(g.MeasureString(_sub, SmallFont()).Width);
-                        if (sw > textW) textW = sw;
-                    }
-                }
-                else
-                {
-                    _scale = 1f;
-                    textW = TextRenderer.MeasureText(text, _title).Width;
-                }
+                int sw = TextRenderer.MeasureText(_sub, SmallFont()).Width;
+                if (sw > textW) textW = sw;
             }
             _textW = textW;
-            int w = S(PAD_X) * 2 + S(28) + S(GAP) + textW;
+            // 没有图标了：左右只留同样 padding。GDI 量宽、GDI+ 绘制之间有差，右侧多留余量
+            int w = S(PAD_X) * 2 + textW + S(14);
             if (w < S(170)) w = S(170);
             int padY = S(15);
             int contentH = _title.Height + (_sub != null ? S(3) + SmallFont().Height : 0);
@@ -3822,251 +4162,47 @@ namespace QRSnap
             Top = _restTop;
         }
 
-        private void CaptureBackdrop()
-        {
-            try
-            {
-                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
-                Rectangle r = new Rectangle(Left, Top, Width, Height);
-                if (r.Width <= 0 || r.Height <= 0) return;
-
-                using (Bitmap full = new Bitmap(r.Width, r.Height))
-                {
-                    using (Graphics g = Graphics.FromImage(full))
-                        g.CopyFromScreen(r.Left, r.Top, 0, 0, r.Size);
-
-                    // 先缩小再模糊，效果接近高斯，速度也快
-                    int sw = Math.Max(1, r.Width / 4);
-                    int sh = Math.Max(1, r.Height / 4);
-                    Bitmap small = new Bitmap(sw, sh);
-                    using (Graphics g = Graphics.FromImage(small))
-                    {
-                        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                        g.DrawImage(full, new Rectangle(0, 0, sw, sh));
-                    }
-                    BoxBlur(small, 2, 3);
-                    _blurBg = small;
-                }
-            }
-            catch (Exception)
-            {
-                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
-            }
-        }
-
-        // 盒式模糊跑 3 遍，足够接近高斯；只处理缩小后的小图
-        private static void BoxBlur(Bitmap bmp, int radius, int passes)
-        {
-            int w = bmp.Width, h = bmp.Height;
-            if (w < 2 || h < 2) return;
-            Color[] cur = new Color[w * h];
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    cur[y * w + x] = bmp.GetPixel(x, y);
-
-            Color[] tmp = new Color[w * h];
-            for (int p = 0; p < passes; p++)
-            {
-                for (int y = 0; y < h; y++)
-                {
-                    for (int x = 0; x < w; x++)
-                    {
-                        int r = 0, g = 0, b = 0, n = 0;
-                        for (int dy = -radius; dy <= radius; dy++)
-                        {
-                            int yy = y + dy;
-                            if (yy < 0 || yy >= h) continue;
-                            for (int dx = -radius; dx <= radius; dx++)
-                            {
-                                int xx = x + dx;
-                                if (xx < 0 || xx >= w) continue;
-                                Color c = cur[yy * w + xx];
-                                r += c.R; g += c.G; b += c.B; n++;
-                            }
-                        }
-                        tmp[y * w + x] = Color.FromArgb(255, r / n, g / n, b / n);
-                    }
-                }
-                Color[] swap = cur; cur = tmp; tmp = swap;
-            }
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    bmp.SetPixel(x, y, cur[y * w + x]);
-        }
-
-        private static float EaseOut(float t)
-        {
-            float u = 1f - t;
-            return 1f - u * u * u;           // 先快后慢，收尾柔和
-        }
-
+        // 定时器只负责「完成后停留一会儿再收起」，不再驱动任何动画
         private void OnTick(object sender, EventArgs e)
         {
-            if (_anim == 1)
-            {
-                _animT += 0.12f;
-                if (_animT >= 1f) { _animT = 1f; _anim = 0; }
-                float t = EaseOut(_animT);
-                Opacity = TOAST_OPACITY * t;
-                Top = _restTop + (int)(S(SLIDE_PX) * (1f - t));
-            }
-            else if (_anim == 2)
-            {
-                _animT += 0.10f;
-                if (_animT >= 1f) { HideToast(); return; }
-                Opacity = TOAST_OPACITY * (1f - _animT);
-                Top = _restTop + (int)(S(8) * _animT);
-            }
-
-            if (_state == STATE_BUSY)
-            {
-                _angle += 9f;
-                if (_angle > 360f) _angle -= 360f;
-                Invalidate();
-                return;
-            }
-            if (_state == STATE_DONE && _anim == 0)
-            {
-                _holdMs -= TICK_MS;
-                if (_holdMs <= 0) { _anim = 2; _animT = 0f; }
-            }
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            int r = S(18);
-            using (GraphicsPath path = Rounded(0, 0, Width, Height, r))
-            {
-                Region = new Region(path);
-            }
-        }
-
-        private static GraphicsPath Rounded(int x, int y, int w, int h, int r)
-        {
-            GraphicsPath path = new GraphicsPath();
-            int d = r * 2;
-            path.AddArc(x, y, d, d, 180, 90);
-            path.AddArc(x + w - d - 1, y, d, d, 270, 90);
-            path.AddArc(x + w - d - 1, y + h - d - 1, d, d, 0, 90);
-            path.AddArc(x, y + h - d - 1, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
+            if (_state != STATE_DONE) return;
+            _holdMs -= _timer.Interval;
+            if (_holdMs <= 0) HideToast();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+            using (SolidBrush bg = new SolidBrush(Color.FromArgb(26, 31, 42)))
+                g.FillRectangle(bg, ClientRectangle);
 
             Color accent = _state == STATE_BUSY ? Color.FromArgb(96, 165, 250)
                 : (_ok ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113));
 
-            // 圆角裁剪：背景模糊 + 一层轻微黑遮罩，不加边框
-            using (GraphicsPath clip = Rounded(0, 0, Width, Height, S(18)))
-            {
-                GraphicsState cs = g.Save();
-                g.SetClip(clip);
-                if (_blurBg != null)
-                {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(_blurBg, new Rectangle(0, 0, Width, Height));
-                }
-                else
-                {
-                    using (SolidBrush fallback = new SolidBrush(Color.FromArgb(24, 28, 36)))
-                        g.FillRectangle(fallback, ClientRectangle);
-                }
-                using (SolidBrush shade = new SolidBrush(Color.FromArgb(62, 5, 8, 12)))
-                    g.FillRectangle(shade, ClientRectangle);
-                g.Restore(cs);
-            }
+            int left = S(PAD_X);
+            int w = Width - S(PAD_X) - left;
+            if (w < S(40)) w = S(40);
 
-            // 内容整体水平居中：徽章 + 文字块；文字在自己的块里再水平居中
-            int badge = S(28);
-            int box = S(ICON_SIZE);
             int gapY = S(3);
             int subH = _sub != null ? SmallFont().Height : 0;
             int contentH = _title.Height + (_sub != null ? gapY + subH : 0);
-            int contentW = badge + S(GAP) + _textW;
-            int bx = (Width - contentW) / 2;
-            if (bx < S(8)) bx = S(8);
-            int by = (Height - badge) / 2;
-            // 图标直接画，不加圆底/描边
-
-            int ix = bx + (badge - box) / 2;
-            int iy = by + (badge - box) / 2;
-
-            // 图标按 96 dpi 的逻辑尺寸画，再整体缩放到当前 DPI，免得 150% 缩放时图标歪掉
-            GraphicsState gs = g.Save();
-            g.TranslateTransform((float)ix, (float)iy);
-            g.ScaleTransform(_scale, _scale);
-
-            if (_state == STATE_BUSY)
-            {
-                using (Pen track = new Pen(Color.FromArgb(64, 78, 96), 2F))
-                {
-                    g.DrawEllipse(track, 0f, 0f, ICON_SIZE - 2, ICON_SIZE - 2);
-                }
-                using (Pen arc = new Pen(accent, 2.2F))
-                {
-                    arc.StartCap = LineCap.Round;
-                    arc.EndCap = LineCap.Round;
-                    g.DrawArc(arc, 0f, 0f, ICON_SIZE - 2, ICON_SIZE - 2, _angle, 110f);
-                }
-            }
-            else
-            {
-                using (Pen pen = new Pen(accent, 2.2F))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    if (_ok)
-                    {
-                        g.DrawLines(pen, new PointF[]
-                        {
-                            new PointF(2f, 9f),
-                            new PointF(6.5f, 13.5f),
-                            new PointF(14f, 4f)
-                        });
-                    }
-                    else
-                    {
-                        g.DrawLines(pen, new PointF[]
-                        {
-                            new PointF(4f, 4f),
-                            new PointF(13f, 14f)
-                        });
-                        g.DrawLines(pen, new PointF[]
-                        {
-                            new PointF(13f, 4f),
-                            new PointF(4f, 14f)
-                        });
-                    }
-                }
-            }
-            g.Restore(gs);
-
-            int tx = bx + badge + S(GAP);
             int ty = (Height - contentH) / 2;
+
             using (StringFormat sf = new StringFormat())
             {
-                sf.Alignment = StringAlignment.Center;
+                sf.Alignment = StringAlignment.Near;
                 sf.LineAlignment = StringAlignment.Near;
                 sf.FormatFlags = StringFormatFlags.NoWrap;
-                using (SolidBrush fg = new SolidBrush(Color.FromArgb(244, 247, 252)))
-                {
-                    g.DrawString(_text, _title, fg,
-                        new RectangleF(tx, ty, _textW, _title.Height + 1), sf);
-                }
+                sf.Trimming = StringTrimming.EllipsisCharacter;
+                // 状态只靠标题颜色区分，背景保持纯色，没有任何装饰条
+                using (SolidBrush fg = new SolidBrush(accent))
+                    g.DrawString(_text, _title, fg, new RectangleF(left, ty, w, _title.Height + 1), sf);
                 if (_sub != null)
                 {
-                    using (SolidBrush dim = new SolidBrush(Color.FromArgb(158, 169, 188)))
-                    {
+                    using (SolidBrush dim = new SolidBrush(Color.FromArgb(168, 180, 198)))
                         g.DrawString(_sub, SmallFont(), dim,
-                            new RectangleF(tx, ty + _title.Height + gapY, _textW, subH + 1), sf);
-                    }
+                            new RectangleF(left, ty + _title.Height + gapY, w, subH + 1), sf);
                 }
             }
         }
@@ -4080,7 +4216,6 @@ namespace QRSnap
                 Font.Dispose();
                 if (_title != null) { _title.Dispose(); _title = null; }
                 if (_small != null) { _small.Dispose(); _small = null; }
-                if (_blurBg != null) { _blurBg.Dispose(); _blurBg = null; }
                 if (Current == this) Current = null;
             }
             base.Dispose(disposing);
@@ -6237,9 +6372,9 @@ namespace QRSnap
                     step++;
                     if (step == 1) toast.ShowBusy("正在识字…  微信 OCR", "AI 识字强化已开：认错的符号交给大模型修，每张图多几秒");
                     if (step == 5) toast.ShowBusy("正在翻译…", "AI 接管：整段交给大模型翻，不用本地模型");
-                    if (step == 8) toast.SaveShot(@"E:\下载\豆包\_mt\toast-busy.png");
+                    if (step == 8) toast.SaveShot(@"E:\下载\豆包\snapscan\verify\toast-busy.png");
                     if (step == 9) toast.ShowDone("翻译完成", "AI 修字 2/12 行 · AI 分段 2 段 · AI 接管 19 行 3.9s", true);
-                    if (step == 12) toast.SaveShot(@"E:\下载\豆包\_mt\toast-done.png");
+                    if (step == 12) toast.SaveShot(@"E:\下载\豆包\snapscan\verify\toast-done.png");
                     if (step == 16)
                     {
                         seq.Stop();

@@ -66,6 +66,38 @@ OCR 引擎：
 - 有 Vulkan 显卡驱动会自动用 GPU，没有则回 CPU
 - 游戏建议无边框窗口；独占全屏可能截黑屏或挡遮罩
 
+## 截图 OCR 预处理
+
+预处理不再提供模式选择，固定一套策略，界面上只留一行说明：
+
+| 环节 | 规则 |
+|---|---|
+| OCR 推理图 | 长边超过 1600 时等比缩小到 1600，再转灰度；长边 ≤ 640 一律不缩放 |
+| 预览 / 上传图 | 另起一张彩色图，只做同样的 Lanczos4 缩小，编码为 WebP 90 |
+| 增强 | 不做 CLAHE、不做锐化（实测对微信 OCR 无收益，已移除） |
+
+- 缩放两边共用一个系数，禁止拉伸变形；所有缩小统一用自实现的 Lanczos4（a=4，可分离，14 bit 定点权重）。
+- 灰度与 Lanczos 都是线性运算，先转灰度再缩放与「先彩色缩放再转灰度」结果等价，但计算量约 1/3。
+- **两条独立流水线**：`OcrImage.ForOcr()` 产出推理图，`OcrImage.ForPreview()` 从原图另起一张彩色图。预览图绝不送进 OCR，OCR 结果坐标在 `Ocr.Recognize` / `Ocr.LayoutSegments` 出口按 `PreparedImage.MapBack()` 换算回原图，遮罩对齐不受影响。
+- 预览 WebP 由 `cwebp.exe`（libwebp 1.6.0，随包附带）在后台线程编码，落在 `shotcache\preview\*.webp`。WebP 有损（VP8）固定 4:2:0，`-sharp_yuv` 只是让色度更锐，不是真 4:4:4。
+
+构建与验收：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build19.ps1      # 产物落到 out\
+powershell -ExecutionPolicy Bypass -File build-local.ps1  # 同上，带依赖复制
+out\QRSnap.exe --ocrselftest 图片.png 结果.txt wechat       # 端到端自检，detail 里会带 pre 预处理轨迹
+tools\PreprocessDemo.exe 图片.png 输出目录                   # 推理图 / 预览图 / 耗时
+```
+
+发布打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File pack.ps1            # 本体 + 全部模型包，输出到 dist\
+powershell -ExecutionPolicy Bypass -File pack.ps1 -Only body  # 只打本体
+powershell -ExecutionPolicy Bypass -File pack.ps1 -Only models # 只打模型包
+```
+
 ## 模型与许可
 
 - HyMT1.5：使用对应模型许可证，商用前请确认。

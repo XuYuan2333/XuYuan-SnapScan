@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace QRSnap
@@ -52,16 +53,37 @@ namespace QRSnap
         private const int WM_SYSKEYDOWN = 0x0104;
         private const int WM_MOUSEWHEEL = 0x020A;
         private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
-        private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+        private const uint WDA_NONE = 0x00000000;
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
 
         // 遮罩从截图里排除后，游戏模式不用每帧隐藏/恢复遮罩，避免闪屏
         public static bool CaptureExcluded { get; private set; }
 
+        // QRSNAP_DBG_ZONE=1：分区遮罩的建窗/显隐/推图全过程都落日志，排查「第二次不出现」用
+        internal static bool DbgZone
+        {
+            get { return Environment.GetEnvironmentVariable("QRSNAP_DBG_ZONE") == "1"; }
+        }
+
         [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
+
+        // 句柄死了就说明这个 Form 对象已经废了（建它的线程退出了，系统把窗口销毁了）：
+        // 这种对象再 Visible=true / UpdateLayeredWindow 都只会静默失败（实测 1400），必须换一个新的。
+        private static bool Dead(Form f)
+        {
+            if (f == null || f.IsDisposed) return true;
+            try
+            {
+                if (!f.IsHandleCreated) return false;
+                return !IsWindow(f.Handle);
+            }
+            catch (Exception) { return true; }
+        }
+
         private static void PinTop(Form f)
         {
             if (f == null || !f.IsHandleCreated) return;
@@ -69,11 +91,56 @@ namespace QRSnap
             catch (Exception) { }
         }
 
+        // 注意：WDA_EXCLUDEFROMCAPTURE 对 UpdateLayeredWindow 的分层窗口会连屏幕合成一起剔除，
+        // 遮罩会彻底看不见（实测踩过）。所以这里只清成 WDA_NONE，
+        // 采样改成「短暂隐藏再抓」的轻量方式，隐藏时长压到个位数毫秒。
         private static void ExcludeCapture(Form f)
         {
             if (f == null || !f.IsHandleCreated) return;
-            try { CaptureExcluded = SetWindowDisplayAffinity(f.Handle, WDA_EXCLUDEFROMCAPTURE); }
-            catch (Exception) { CaptureExcluded = false; }
+            int err = 0;
+            try { SetWindowDisplayAffinity(f.Handle, WDA_NONE); }
+            catch (Exception) { err = 1; }
+            CaptureExcluded = false;
+            try { JadeHost.Log("[overlay] affinity=none err=" + err); } catch (Exception) { }
+        }
+
+        // 采样专用：只把可见性掐掉，不重绘不拆钩子，抓完立刻恢复
+        private static bool _samplingHidden;
+        private static readonly List<Form> _sampledVisible = new List<Form>();
+
+        public static void HideForSample()
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { HideForSample(); }); return; }
+            int hidden = 0;
+            _samplingHidden = true;
+            _sampledVisible.Clear();
+            if (_inst != null && !_inst.IsDisposed && _inst.Visible)
+            {
+                try { _inst.Visible = false; _sampledVisible.Add(_inst); hidden++; } catch (Exception) { }
+            }
+            lock (_zoneLock)
+            {
+                foreach (TransOverlay f in _zones.Values)
+                {
+                    if (f == null || f.IsDisposed || !f.Visible) continue;
+                    try { f.Visible = false; _sampledVisible.Add(f); hidden++; } catch (Exception) { }
+                }
+            }
+            if (hidden > 0) _samplingHidden = true;
+        }
+
+        public static void ShowForSample()
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { ShowForSample(); }); return; }
+            if (!_samplingHidden) return;
+            _samplingHidden = false;
+            for (int i = 0; i < _sampledVisible.Count; i++)
+            {
+                Form f = _sampledVisible[i];
+                if (f == null || f.IsDisposed) continue;
+                try { f.Visible = true; } catch (Exception) { }
+            }
+            _sampledVisible.Clear();
         }
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -94,6 +161,13 @@ namespace QRSnap
         private static LowLevelKeyboardProc _hookProc;
         private static IntPtr _mouseHook;
         private static LowLevelKeyboardProc _mouseProc;
+
+        // 分区模式：游戏模式每个选区一个独立的遮罩窗口，各自 Bounds / items / 重绘，
+        // 一个区变了只重画那一个窗口，别的区的译文原地不动（原来是单实例整块 replace，一个区变整块闪）
+        private static readonly Dictionary<int, TransOverlay> _zones = new Dictionary<int, TransOverlay>();
+        private static readonly Dictionary<int, Rectangle> _zoneRects = new Dictionary<int, Rectangle>();
+        private static readonly Dictionary<int, List<Item>> _zoneItems = new Dictionary<int, List<Item>>();
+        private static readonly object _zoneLock = new object();
 
         // 记住上一次的译文，Ctrl+Alt+G 才能在关掉之后再打开
         private static Rectangle _lastRect;
@@ -131,13 +205,284 @@ namespace QRSnap
 
         public static bool IsShowing
         {
-            get { return _inst != null && _inst.Visible; }
+            get
+            {
+                if (_inst != null && !_inst.IsDisposed && _inst.Visible) return true;
+                lock (_zoneLock)
+                {
+                    foreach (TransOverlay f in _zones.Values)
+                        if (f != null && !f.IsDisposed && f.Visible) return true;
+                }
+                return false;
+            }
+        }
+
+        // 分区显示：只动第 id 块，别的区的遮罩窗口一律不碰。
+        // rect 是这块在屏幕上的矩形，items 的坐标统统相对这块（不是相对全部选区的并集）。
+        public static void ShowZone(int id, Rectangle screenRect, List<Item> items)
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { ShowZone(id, screenRect, items); }); return; }
+            ShowZoneCore(id, screenRect, items, null);
+        }
+
+        // 分区拟真：这块自己渲染好的成品图，同样只铺这一块
+        public static void ShowZoneImage(int id, Rectangle screenRect, Bitmap img)
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { ShowZoneImage(id, screenRect, img); }); return; }
+            ShowZoneCore(id, screenRect, null, img);
+        }
+
+        private static void ShowZoneCore(int id, Rectangle screenRect, List<Item> items, Bitmap img)
+        {
+            if (screenRect.Width < 8 || screenRect.Height < 8) return;
+            if (DbgZone) JadeHost.Log("[zone] enter id=" + id + " rect=" + screenRect.X + "," + screenRect.Y + ","
+                + screenRect.Width + "x" + screenRect.Height + " items=" + (items == null ? 0 : items.Count)
+                + " tid=" + Thread.CurrentThread.ManagedThreadId);
+            lock (_zoneLock)
+            {
+                TransOverlay f;
+                if (!_zones.TryGetValue(id, out f) || Dead(f))
+                {
+                    f = new TransOverlay();
+                    f.CreateControl();
+                    _zones[id] = f;
+                    if (DbgZone) JadeHost.Log("[zone] create id=" + id + " handle=" + f.Handle.ToInt64()
+                        + " tid=" + Thread.CurrentThread.ManagedThreadId);
+                }
+                f._items.Clear();
+                if (items != null) f._items.AddRange(items);
+                List<Item> keep = new List<Item>();
+                if (items != null) keep.AddRange(items);
+                _zoneItems[id] = keep;
+                _zoneRects[id] = screenRect;
+                f.SetImage(img);
+                f._closing = false;
+                if (f.Bounds != screenRect) f.Bounds = screenRect;
+                bool wasVisible = f.Visible;
+                f.Visible = true;
+                f.RenderAll();
+                PinTop(f);
+                if (!wasVisible) ExcludeCapture(f);
+                f.HookOn();
+                if (DbgZone) JadeHost.Log("[zone] shown id=" + id + " wasVis=" + (wasVisible ? 1 : 0)
+                    + " vis=" + (f.Visible ? 1 : 0) + " created=" + (f.IsHandleCreated ? 1 : 0)
+                    + " handle=" + f.Handle.ToInt64() + " bounds=" + f.Left + "," + f.Top + ","
+                    + f.Width + "x" + f.Height + " tid=" + Thread.CurrentThread.ManagedThreadId);
+            }
+            if (Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
+            {
+                // 调试：每块渲染结果单独落盘（遮罩抓不到屏，只能这样离线核对字号/位置）
+                try
+                {
+                    TransOverlay f2;
+                    lock (_zoneLock) { f2 = _zones.ContainsKey(id) ? _zones[id] : null; }
+                    if (f2 != null) f2.SaveRender(@"E:\下载\豆包\snapscan\verify\zone-" + id + ".png");
+                }
+                catch (Exception) { }
+            }
+            BarShow(UnionOfZones());
+        }
+
+        private void SaveRender(string path)
+        {
+            try
+            {
+                int w = Width, h = Height;
+                if (w < 8 || h < 8) return;
+                Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.Clear(Color.Transparent);
+                    if (_image != null)
+                    {
+                        g.DrawImage(_image, new Rectangle(0, 0, w, h));
+                    }
+                    else
+                    {
+                        for (int i = 0; i < _items.Count; i++) DrawItemCore(g, _items[i], w, h);
+                    }
+                }
+                bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                bmp.Dispose();
+            }
+            catch (Exception) { }
+        }
+
+        // ---------- 遮罩专用线程 ----------
+        // Win32 的窗口句柄归创建它的线程所有：线程一退出，系统就把这条线程上建的窗口销毁。
+        // 游戏模式一轮识字/翻译是在临时线程上跑的（AutoTick 每轮 new 一条线程，跑完就结束），
+        // 第一轮的遮罩能看见只因为那条线程当时还活着；线程一结束遮罩就跟着消失，
+        // 之后的每一轮 ShowZone 都拿着同一个已经失效的句柄调 UpdateLayeredWindow
+        // （实测返回 1400 = ERROR_INVALID_WINDOW_HANDLE），于是「第二次死活不出现」。
+        // 所以所有覆盖层窗口都统一挂到这条常驻线程上，任何线程都通过 RunOverlay 派过来。
+        private static Thread _ovThread;
+        private static Form _ovHost;
+        private static readonly object _ovStartLock = new object();
+        private static volatile bool _ovReady;
+
+        private static void EnsureOverlayThread()
+        {
+            if (_ovReady) return;
+            lock (_ovStartLock)
+            {
+                if (_ovReady) return;
+                if (_ovThread != null && _ovThread.IsAlive)
+                {
+                    for (int i = 0; i < 200 && !_ovReady; i++) Thread.Sleep(5);
+                    if (_ovReady) return;
+                }
+                _ovThread = new Thread(delegate()
+                {
+                    try
+                    {
+                        _ovHost = new Form();
+                        _ovHost.FormBorderStyle = FormBorderStyle.None;
+                        _ovHost.ShowInTaskbar = false;
+                        _ovHost.StartPosition = FormStartPosition.Manual;
+                        _ovHost.Bounds = new Rectangle(-32000, -32000, 8, 8);   // 屏幕外，只用来跑消息循环
+                        _ovHost.Show();
+                        _ovReady = true;
+                        Application.Run(_ovHost);
+                    }
+                    catch (Exception ex)
+                    {
+                        try { JadeHost.Log("[overlay] thread fail " + ex.Message); } catch (Exception) { }
+                    }
+                    finally { _ovReady = false; }
+                });
+                try { _ovThread.SetApartmentState(ApartmentState.STA); } catch (Exception) { }
+                _ovThread.IsBackground = true;
+                _ovThread.Name = "qrsnap-overlay";
+                try { _ovThread.Start(); } catch (Exception) { }
+                for (int i = 0; i < 200 && !_ovReady; i++) Thread.Sleep(5);
+            }
+        }
+
+        private static bool OnOverlayThread
+        {
+            get { return _ovThread != null && Thread.CurrentThread == _ovThread; }
+        }
+
+        // 所有会碰窗口的调用都从这里过：在遮罩线程上顺序执行。
+        // 「隐藏 → 抓图 → 恢复」这种时序必须同步，所以用 Invoke 而不是 BeginInvoke。
+        private static void RunOverlay(Action act)
+        {
+            if (act == null) return;
+            EnsureOverlayThread();
+            if (OnOverlayThread) { act(); return; }
+            Form host = _ovHost;
+            if (host == null || !host.IsHandleCreated) { act(); return; }
+            try { host.Invoke(act); }
+            catch (Exception)
+            {
+                try { act(); } catch (Exception) { }
+            }
+        }
+
+        // 这块的遮罩现在到底在不在屏上。游戏模式一轮里判断「这块译文能不能原地留着」全靠它：
+        // 遮罩被整块收掉（自动收遮罩 / 换页 / 抓到空帧）之后，光比文本指纹会误以为「旧译文还在」，
+        // 于是这一轮干脆不画，屏幕上就永远空着了——第一次有、第二次死活不出现就是这么来的。
+        public static bool IsZoneShowing(int id)
+        {
+            lock (_zoneLock)
+            {
+                TransOverlay f = _zones.ContainsKey(id) ? _zones[id] : null;
+                return f != null && !f.IsDisposed && f.Visible && !Dead(f);
+            }
+        }
+
+        // 遮罩被收掉、但这一块的译文本身没变时：把窗口里还留着的上一轮内容原样再铺一次。
+        // 不重新翻译、不重新 OCR，纯粹是一次上屏动作（几十毫秒），保证「该显示的始终显示」。
+        // 返回 false 表示这块没有可复用的内容，调用方应该老实重翻一遍。
+        public static bool ReshowZone(int id)
+        {
+            if (!OnOverlayThread)
+            {
+                bool got = false;
+                RunOverlay(delegate { got = ReshowZone(id); });
+                return got;
+            }
+            bool shown = false;
+            Rectangle rect = Rectangle.Empty;
+            lock (_zoneLock)
+            {
+                TransOverlay f = _zones.ContainsKey(id) ? _zones[id] : null;
+                if (Dead(f)) return false;
+                if (!_zoneRects.ContainsKey(id) && !_zoneItems.ContainsKey(id)) return false;
+                rect = _zoneRects.ContainsKey(id) ? _zoneRects[id] : f.Bounds;
+                if (rect.Width < 8 || rect.Height < 8) return false;
+                f._closing = false;
+                bool wasVisible = f.Visible;
+                if (f.Bounds != rect) f.Bounds = rect;
+                f.Visible = true;
+                f.RenderAll();
+                PinTop(f);
+                if (!wasVisible) ExcludeCapture(f);
+                f.HookOn();
+                shown = f.Visible;
+            }
+            if (shown)
+            {
+                try { BarShow(UnionOfZones()); } catch (Exception) { }
+                if (DbgZone) JadeHost.Log("[zone] reshow id=" + id + " rect=" + rect.X + "," + rect.Y
+                    + "," + rect.Width + "x" + rect.Height + " tid=" + Thread.CurrentThread.ManagedThreadId);
+            }
+            return shown;
+        }
+
+        // 这一块没内容了就把它撤掉（别的区不动）
+        public static void HideZone(int id)
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { HideZone(id); }); return; }
+            lock (_zoneLock)
+            {
+                TransOverlay f;
+                if (_zones.TryGetValue(id, out f) && f != null)
+                {
+                    try { f.Visible = false; } catch (Exception) { }
+                }
+                _zoneItems.Remove(id);
+                _zoneRects.Remove(id);
+            }
+        }
+
+        // 把分区遮罩全部收掉（退出游戏模式、或切回单块模式时用）
+        public static void ClearZones()
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { ClearZones(); }); return; }
+            lock (_zoneLock)
+            {
+                foreach (TransOverlay f in _zones.Values)
+                {
+                    if (f == null || f.IsDisposed) continue;
+                    try { f.Visible = false; } catch (Exception) { }
+                }
+                _zoneItems.Clear();
+                _zoneRects.Clear();
+            }
+        }
+
+        // 全部可见区的并集：控制条只挂一根，挂在整个游戏字幕区上
+        private static Rectangle UnionOfZones()
+        {
+            Rectangle u = Rectangle.Empty;
+            lock (_zoneLock)
+            {
+                foreach (Rectangle r in _zoneRects.Values)
+                    u = u.IsEmpty ? r : Rectangle.Union(u, r);
+            }
+            return u;
         }
 
         public static void Show(Rectangle screenRect, List<Item> items)
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { Show(screenRect, items); }); return; }
             if (screenRect.Width < 8 || screenRect.Height < 8) return;
-            if (_inst == null || _inst.IsDisposed)
+            ClearZones();   // 单块模式接管：先把分区遮罩收掉，免得两套同时挂屏
+            if (_inst == null || Dead(_inst))
             {
                 _inst = new TransOverlay();
                 _inst.CreateControl();
@@ -154,7 +499,8 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
-            CaptureExcluded = false;
+            // 把遮罩从截图里排除掉：游戏模式的连续采样才能不隐藏遮罩也不截到自己
+            ExcludeCapture(_inst);
             _inst.HookOn();
             BarShow(screenRect);
         }
@@ -162,8 +508,10 @@ namespace QRSnap
         // 拟真模式：整块成品图（原图擦掉原字 + 回填译文）直接铺在选区上
         public static void ShowImage(Rectangle screenRect, Bitmap img)
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { ShowImage(screenRect, img); }); return; }
             if (img == null || screenRect.Width < 8 || screenRect.Height < 8) return;
-            if (_inst == null || _inst.IsDisposed)
+            ClearZones();
+            if (_inst == null || Dead(_inst))
             {
                 _inst = new TransOverlay();
                 _inst.CreateControl();
@@ -178,9 +526,20 @@ namespace QRSnap
             _inst.Visible = true;
             _inst.RenderAll();
             PinTop(_inst);
-            CaptureExcluded = false;
+            // 把遮罩从截图里排除掉：游戏模式的连续采样才能不隐藏遮罩也不截到自己
+            ExcludeCapture(_inst);
             _inst.HookOn();
             BarShow(screenRect);
+            if (Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
+            {
+                // 调试：成品图落盘，离线核对字号/位置（遮罩窗口本身抓不到屏）
+                try
+                {
+                    img.Save(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "qrsnap-overlay.png"),
+                        System.Drawing.Imaging.ImageFormat.Png);
+                }
+                catch (Exception) { }
+            }
         }
 
         private void SetImage(Bitmap img)
@@ -191,15 +550,31 @@ namespace QRSnap
         // 改了遮罩透明度等外观参数后立刻重画（不用关掉再重开）
         public static void Repaint()
         {
-            if (!IsShowing) return;
-            _inst._items.Clear();
-            if (_lastItems != null) _inst._items.AddRange(_lastItems);
-            _inst.RenderAll();
+            if (!OnOverlayThread) { RunOverlay(delegate { Repaint(); }); return; }
+            if (_inst != null && !_inst.IsDisposed && _inst.Visible)
+            {
+                _inst._items.Clear();
+                if (_lastItems != null) _inst._items.AddRange(_lastItems);
+                _inst.RenderAll();
+            }
+            lock (_zoneLock)
+            {
+                foreach (int id in new List<int>(_zoneItems.Keys))
+                {
+                    TransOverlay f = _zones.ContainsKey(id) ? _zones[id] : null;
+                    if (f == null || f.IsDisposed || !f.Visible) continue;
+                    f._items.Clear();
+                    List<Item> keep = _zoneItems[id];
+                    if (keep != null) f._items.AddRange(keep);
+                    f.RenderAll();
+                }
+            }
         }
 
         // Ctrl+Alt+G：整层译文显示 / 隐藏
         public static void Toggle()
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { Toggle(); }); return; }
             if (IsShowing) { HideOverlay(); return; }
             if (_lastImage != null) { ShowImage(_lastRect, _lastImage); return; }
             if (_lastItems.Count == 0) return;
@@ -208,28 +583,52 @@ namespace QRSnap
 
         public static void Restore()
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { Restore(); }); return; }
             try { if (!IsShowing) Toggle(); } catch (Exception) { }
         }
 
         // 用户点遮罩上的「关闭译文」或滚轮关闭：游戏模式下要记住“用户关的”，不能下一轮又弹出来
         public static void HideByUser()
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { HideByUser(); }); return; }
             try { GameRuntime.SetOverlayClosed(true); } catch (Exception) { }
             HideOverlay();
         }
 
         public static void HideOverlay()
         {
+            if (!OnOverlayThread) { RunOverlay(delegate { HideOverlay(); }); return; }
+            _samplingHidden = false;
+            _sampledVisible.Clear();
             if (_inst != null)
             {
-                try
-                {
-                    _inst.Unhook();
-                    _inst.Visible = false;
-                }
+                try { _inst.Visible = false; }
                 catch (Exception) { }
             }
+            lock (_zoneLock)
+            {
+                foreach (TransOverlay f in _zones.Values)
+                {
+                    if (f == null || f.IsDisposed) continue;
+                    try { f.Visible = false; } catch (Exception) { }
+                }
+            }
+            UnhookGlobal();
             BarHide();
+        }
+
+        private static void UnhookGlobal()
+        {
+            if (_hook != IntPtr.Zero)
+            {
+                try { UnhookWindowsHookEx(_hook); } catch (Exception) { }
+                _hook = IntPtr.Zero;
+            }
+            if (_mouseHook != IntPtr.Zero)
+            {
+                try { UnhookWindowsHookEx(_mouseHook); } catch (Exception) { }
+                _mouseHook = IntPtr.Zero;
+            }
         }
 
         private static void BarShow(Rectangle rect)
@@ -237,18 +636,32 @@ namespace QRSnap
             if (!AppConfig.MtBar) return;   // 设置里关掉控制条时不弹
             try
             {
-                if (_bar == null || _bar.IsDisposed)
+                if (Dead(_bar))
                 {
                     _bar = new TransBar();
                     _bar.CreateControl();
                 }
-                _bar.PlaceNear(rect);
+                // 截图抬手的位置只对紧接着的这次显示有效，用完就清，免得下一次（比如游戏模式）串位
+                bool hasAnchor = _hasBarAnchor;
+                Point anchor = _barAnchor;
+                _hasBarAnchor = false;
+                _bar.PlaceNear(rect, hasAnchor, anchor);
                 _bar.Visible = true;
                 PinTop(_bar);
                 _bar.Commit();
                 _bar.Raise();
             }
             catch (Exception) { }
+        }
+
+        private static Point _barAnchor;
+        private static bool _hasBarAnchor;
+
+        // 截图松手的位置：控制条跟着它走
+        public static void SetBarAnchor(Point p)
+        {
+            _barAnchor = p;
+            _hasBarAnchor = true;
         }
 
         private static void BarHide()
@@ -258,7 +671,11 @@ namespace QRSnap
         }
 
         // 设置里关掉控制条时，把已经画出来的那条收掉
-        public static void HideBar() { BarHide(); }
+        public static void HideBar()
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { HideBar(); }); return; }
+            BarHide();
+        }
 
         private void HookOn()
         {
@@ -347,6 +764,16 @@ namespace QRSnap
                 {
                     for (int i = 0; i < _items.Count; i++) DrawItemCore(g, _items[i], w, h);
                 }
+            }
+            if (Environment.GetEnvironmentVariable("QRSNAP_DBG_REAL") == "1")
+            {
+                // 调试：把这一层实际画出来的样子落盘（分层窗口抓不到屏，只能从这里看）
+                try
+                {
+                    bmp.Save(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "qrsnap-layer.png"),
+                        System.Drawing.Imaging.ImageFormat.Png);
+                }
+                catch (Exception) { }
             }
             Commit(bmp);
             bmp.Dispose();
@@ -665,7 +1092,7 @@ namespace QRSnap
         [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
 
-        private const int BarW = 150, BarH = 32;
+        private const int BarW = 128, BarH = 28;
 
         public TransBar()
         {
@@ -691,17 +1118,36 @@ namespace QRSnap
             }
         }
 
-        // 放在选区右下角内侧；选区太小时挪到选区下方
-        public void PlaceNear(Rectangle rect)
+        // 优先贴截图松手的位置；没有松手点才退回选区右上角外侧
+        public void PlaceNear(Rectangle rect, bool hasAnchor, Point anchor)
         {
-            int x = rect.Right - BarW - 8;
-            int y = rect.Bottom - BarH - 8;
-            if (y < rect.Top + 4) y = rect.Bottom + 6;
             Rectangle screen = Screen.FromRectangle(rect).WorkingArea;
+            int x, y;
+            if (hasAnchor)
+            {
+                // 松手点右下方一点，出界就往回翻，始终不压住选区中心
+                x = anchor.X + 10;
+                y = anchor.Y + 10;
+                if (x + BarW > screen.Right - 4) x = anchor.X - BarW - 10;
+                if (y + BarH > screen.Bottom - 4) y = anchor.Y - BarH - 10;
+            }
+            else
+            {
+                x = rect.Right - BarW;
+                y = rect.Top - BarH - 6;
+                if (y < screen.Top + 4)
+                {
+                    y = rect.Top + 6;
+                    if (rect.Height < BarH + 14) y = rect.Bottom + 6;
+                }
+            }
             if (x < screen.Left + 4) x = screen.Left + 4;
+            if (x + BarW > screen.Right - 4) x = screen.Right - BarW - 4;
+            if (y < screen.Top + 4) y = screen.Top + 4;
             if (y + BarH > screen.Bottom - 4) y = screen.Bottom - BarH - 4;
             Bounds = new Rectangle(x, y, BarW, BarH);
-            NativeShell.Log("trans bar place " + x + "," + y + " " + BarW + "x" + BarH);
+            NativeShell.Log("trans bar place " + x + "," + y + " " + BarW + "x" + BarH
+                + (hasAnchor ? " at " + anchor.X + "," + anchor.Y : " by rect"));
         }
 
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, int flags);
@@ -727,20 +1173,20 @@ namespace QRSnap
                 g.Clear(Color.Transparent);
 
                 RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1f, Height - 1f);
-                using (GraphicsPath path = Round(r, 15f))
+                using (GraphicsPath path = Round(r, 12f))
                 {
-                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(232, 16, 20, 28)))
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(205, 16, 20, 28)))
                         g.FillPath(fill, path);
-                    using (Pen edge = new Pen(Color.FromArgb(120, 96, 165, 250), 1f))
+                    using (Pen edge = new Pen(Color.FromArgb(110, 96, 165, 250), 1f))
                         g.DrawPath(edge, path);
                 }
 
-                using (Font f = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point))
+                using (Font f = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular, GraphicsUnit.Point))
                 using (SolidBrush close = new SolidBrush(Color.FromArgb(245, 255, 236, 240)))
-                using (SolidBrush hint = new SolidBrush(Color.FromArgb(150, 214, 224, 240)))
+                using (SolidBrush hint = new SolidBrush(Color.FromArgb(160, 214, 224, 240)))
                 {
-                    g.DrawString("✕", f, close, 10f, 5f);
-                    g.DrawString("关闭译文", f, hint, 34f, 5f);
+                    g.DrawString("✕", f, close, 9f, 3f);
+                    g.DrawString("关闭译文", f, hint, 28f, 3f);
                 }
             }
             CommitBitmap(bmp);

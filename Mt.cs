@@ -25,7 +25,10 @@ namespace QRSnap
                 else if (c >= 0x0400 && c <= 0x04FF) cyr++;
                 else if (char.IsLetter(c)) other++;
             }
-            if (kana > 0 && (kana + han) > 0 && kana * 4 >= han) return "ja";
+            // 只要有假名就是日文：中文正文里不会出现平假名/片假名。
+            // 以前还要求假名数量达到汉字的 1/4，日文里汉字密集的句子（「装備変更」这类菜单）
+            // 会被判成中文，接着因「选区已是中文」直接跳过翻译。
+            if (kana > 0) return "ja";
             // 判「这段已经是中文」要严格：以前只要出现一个汉字就判中文，
             // 英文页面里混进一个汉字（或 OCR 把一个汉字认进来）就整段不再翻译。
             // 现在要求汉字占（汉字+拉丁字母）的 75% 以上、且至少 4 个汉字。
@@ -874,6 +877,15 @@ namespace QRSnap
                 return m.Gguf;
             }
             return null;
+        }
+
+        // 档位 → 该档位实际使用的 gguf 文件（standard 用多语种大模型，效率/极速用 PLaMo）
+        public string PathForProfile(string profile)
+        {
+            string p = (profile ?? string.Empty).Trim().ToLowerInvariant();
+            if (p == AppConfig.MtProfileTurbo) return GameGgufPath(AppConfig.MtProfileTurbo);
+            if (p == AppConfig.MtProfileEfficiency || p == AppConfig.MtProfileGame) return GameGgufPath(AppConfig.MtProfileEfficiency);
+            return GgufPath();
         }
 
         public static bool IsGameModelPath(string path)
