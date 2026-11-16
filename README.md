@@ -1,4 +1,4 @@
-﻿# XuYuan-SnapScan v1.4.9
+# XuYuan-SnapScan v1.4.9
 
 Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻译、手动游戏字幕翻译。
 界面为 JadeView 2 + WebView2，模型按需导入，本体不内置大模型。
@@ -17,30 +17,21 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 ## 下载
 
-全部发布包都在 **发行版页** 里，点进去按需下载。
+本体在每个版本的 Releases 里，模型包统一在 v1.4.2 那一版：
 
-- **Gitee（主站）**：<https://gitee.com/xuyuan233/SnapScan/releases> —— 本体、OCR、Q4 分卷都在这里
-- **GitHub（镜像）**：<https://github.com/XuYuan2333/XuYuan-SnapScan/releases> —— v1.4.9 起每版只发本体；模型自 v1.4.2 起没变，仍挂在 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases#release-v1.4.2>（OCR v1.4.1 / PLaMo Q4_K_M v1.4.2 / PLaMo Q2_K v1.4.2 / HyMT1.5 v1.4.1），不再重复上传
+**<https://github.com/XuYuan2333/XuYuan-SnapScan/releases>**
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.9-Body.zip` | 74 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
+| `SnapScan-v1.4.9-Body.zip` | 74 MB | 本体，放在本版附件里 |
 | `SnapScan-Model-OCR-v1.4.1.zip` | 38 MB | 微信 OCR + PP-OCR 极速 |
-| `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part01` ~ `part07` | 共 573 MB | 效率档 PLaMo Q4_K_M，7 个分卷 |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 573 MB | 效率档 PLaMo Q4_K_M |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 410 MB | 极速档 PLaMo Q2_K |
+| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 1.1 GB | 标准档 HyMT1.5 1.8B |
 
-本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4 分卷，就是日常游戏字幕那一套。**
+模型包自 v1.4.2 起没有变化，仍在 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases#release-v1.4.2>（OCR v1.4.1 / Q4_K_M v1.4.2 / Q2_K v1.4.2 / HyMT1.5 v1.4.1），不重复上传。
 
-> Gitee 社区版限制单个附件 ≤ 100 MB、单仓库附件总量 1 GB，所以 Q4 包切成了 7 个 95 MB 分卷。极速档 PLaMo Q2_K（430 MB）和标准档 HyMT1.5（1.1 GB）塞不进这个配额，改去 GitHub 的 [v1.4.2 发行版](https://github.com/XuYuan2333/XuYuan-SnapScan/releases#release-v1.4.2) 下载（OCR v1.4.1 / Q4_K_M v1.4.2 / Q2_K v1.4.2 / HyMT1.5 v1.4.1），或本地 `pack.ps1 -Only models` 打包。
-
-### 分卷怎么合并
-
-七个分卷放在同一个文件夹，打开 cmd 执行：
-
-```bat
-copy /b "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part*" "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip"
-```
-
-合并出来的 zip 直接拿去「导入模型包」。校验：`600,846,383` 字节，SHA256 `375c1888905dbdf4367abf564260e645aeaa93d25b7896657622317df7cccf20`。
+本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4，就是日常游戏字幕那一套。**
 
 ## 翻译模型选择
 
