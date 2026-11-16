@@ -23,23 +23,30 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.9-Body.zip` | 74 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
-| `SnapScan-Model-OCR-v1.4.1.zip` | 38 MB | 微信 OCR + PP-OCR 极速 |
+| `SnapScan-v1.4.9-Body.zip.part01` ~ `part02` | 共 112 MB | 本体 + 微信 OCR + PP-OCR（日文 / 极速），装着就能识字 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part01` ~ `part07` | 共 573 MB | 效率档 PLaMo Q4_K_M，7 个分卷 |
 
-本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4 分卷，就是日常游戏字幕那一套。**
+本体已经自带全部 OCR 模型（微信 OCR + PP-OCR 的日文、极速两套），装完直接能识字，**不需要再导入 OCR 包**。装本体 + Q4，就是日常游戏字幕那一套。
 
-> Gitee 社区版限制单个附件 ≤ 100 MB、单仓库附件总量 1 GB，所以 Q4 包切成了 7 个 95 MB 分卷。本页只放这三类包；极速档 PLaMo Q2_K（430 MB）和标准档 HyMT1.5（1.1 GB）不在这里分发，需要时用 `pack.ps1 -Only models` 本地打包。
+> Gitee 社区版限制单个附件 ≤ 100 MB、单仓库附件总量 1 GB，本体 112 MB、Q4 573 MB 都超了单文件上限，所以都切了卷。极速档 PLaMo Q2_K（430 MB）和标准档 HyMT1.5（1.1 GB）不在这里分发，需要时用 `pack.ps1 -Only models` 本地打包。
 
 ### 分卷怎么合并
 
-七个分卷放在同一个文件夹，打开 cmd 执行：
+**本体**：两个分卷放同一目录，cmd 执行
+
+```bat
+copy /b "SnapScan-v1.4.9-Body.zip.part*" "SnapScan-v1.4.9-Body.zip"
+```
+
+校验：`117,736,467` 字节，SHA256 `ec0d4f832dc1e7bcec3488c08a11a72c1869c781320d1d668ee0dce70f1514bd`。
+
+**Q4 翻译模型**：七个分卷放同一目录，cmd 执行
 
 ```bat
 copy /b "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part*" "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip"
 ```
 
-合并出来的 zip 直接拿去「导入模型包」。校验：`600,846,383` 字节，SHA256 `375c1888905dbdf4367abf564260e645aeaa93d25b7896657622317df7cccf20`。
+校验：`600,846,383` 字节，SHA256 `375c1888905dbdf4367abf564260e645aeaa93d25b7896657622317df7cccf20`。
 
 ## 翻译模型选择
 
