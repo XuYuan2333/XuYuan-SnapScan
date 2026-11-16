@@ -17,21 +17,20 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 ## 下载
 
-本体在每个版本的 Releases 里，模型包统一在 v1.4.2 那一版：
+本体在每个版本的 Releases 里，翻译模型统一在 v1.4.2 那一版：
 
 **<https://github.com/XuYuan2333/XuYuan-SnapScan/releases>**
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.9-Body.zip` | 74 MB | 本体，放在本版附件里 |
-| `SnapScan-Model-OCR-v1.4.1.zip` | 38 MB | 微信 OCR + PP-OCR 极速 |
+| `SnapScan-v1.4.9-Body.zip` | 112 MB | 本体 + 微信 OCR + PP-OCR（日文 / 极速），装着就能识字 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 573 MB | 效率档 PLaMo Q4_K_M |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 410 MB | 极速档 PLaMo Q2_K |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 1.1 GB | 标准档 HyMT1.5 1.8B |
 
-模型包自 v1.4.2 起没有变化，仍在 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases#release-v1.4.2>（OCR v1.4.1 / Q4_K_M v1.4.2 / Q2_K v1.4.2 / HyMT1.5 v1.4.1），不重复上传。
+本体已经自带全部 OCR 模型（微信 OCR + PP-OCR 的日文、极速两套），装完直接能识字，**不需要再导入 OCR 包**。装本体 + Q4，就是日常游戏字幕那一套。
 
-本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4，就是日常游戏字幕那一套。**
+翻译模型包自 v1.4.2 起没有变化，仍在 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases#release-v1.4.2>（Q4_K_M v1.4.2 / Q2_K v1.4.2 / HyMT1.5 v1.4.1），不重复上传。
 
 ## 翻译模型选择
 
