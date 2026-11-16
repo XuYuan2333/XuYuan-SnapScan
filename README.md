@@ -17,9 +17,10 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 ## 下载
 
-全部发布包都在 **发行版页** 里，点进去按需下载：
+全部发布包都在 **发行版页** 里，点进去按需下载。
 
-**<https://gitee.com/xuyuan233/SnapScan/releases>**
+- **Gitee（主站）**：<https://gitee.com/xuyuan233/SnapScan/releases> —— 本体、OCR、Q4 分卷都在这里
+- **GitHub（镜像）**：<https://github.com/XuYuan2333/XuYuan-SnapScan/releases> —— v1.4.9 起每版只发本体；OCR / Q4 / Q2 / HyMT 模型版本自 v1.4.2 起没变，仍挂在 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases/tag/v1.4.2>，不再重复上传
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
@@ -29,7 +30,7 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4 分卷，就是日常游戏字幕那一套。**
 
-> Gitee 社区版限制：单个附件 ≤ 100 MB、单仓库附件总量 1 GB，所以 Q4 包被切成了 7 个 95 MB 的分卷；PLaMo Q2_K（430 MB）和 HyMT1.5（1.1 GB）放不进这个配额，需要极速档/标准档的按 `pack.ps1 -Only models` 本地打包。
+> Gitee 社区版限制单个附件 ≤ 100 MB、单仓库附件总量 1 GB，所以 Q4 包切成了 7 个 95 MB 分卷。极速档 PLaMo Q2_K（430 MB）和标准档 HyMT1.5（1.1 GB）塞不进这个配额，改去 GitHub 的 v1.4.2 发行版下载（模型版本没变，不重复上传），或本地 `pack.ps1 -Only models` 打包。
 
 ### 分卷怎么合并
 
