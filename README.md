@@ -17,15 +17,29 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 ## 下载
 
+全部发布包都在 **发行版页** 里，点进去按需下载：
+
+**<https://gitee.com/xuyuan233/SnapScan/releases>**
+
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.9-Body.zip` | 约 70 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
-| `SnapScan-Model-OCR-v1.4.1.zip` | 约 27 MB | 微信 OCR + PP-OCR 极速 |
-| `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 约 547 MiB | 效率档 PLaMo Q4_K_M |
-| `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 约 391 MiB | 极速档 PLaMo Q2_K |
-| `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 约 1.04 GB | HyMT1.5 1.8B Q4_K_M（标准） |
+| `SnapScan-v1.4.9-Body.zip` | 74 MB | 本体、ONNX Runtime、CPU/Vulkan llama、VC++ 运行库、WebView2 引导 |
+| `SnapScan-Model-OCR-v1.4.1.zip` | 38 MB | 微信 OCR + PP-OCR 极速 |
+| `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part01` ~ `part07` | 共 573 MB | 效率档 PLaMo Q4_K_M，7 个分卷 |
 
-本体不带翻译/OCR 模型；PLaMo 的 Q4_K_M 和 Q2_K 是两个独立包，按需分别导入。
+本体不带翻译/OCR 模型，按需导入。**装本体 + OCR + Q4 分卷，就是日常游戏字幕那一套。**
+
+> Gitee 社区版限制：单个附件 ≤ 100 MB、单仓库附件总量 1 GB，所以 Q4 包被切成了 7 个 95 MB 的分卷；PLaMo Q2_K（430 MB）和 HyMT1.5（1.1 GB）放不进这个配额，需要极速档/标准档的按 `pack.ps1 -Only models` 本地打包。
+
+### 分卷怎么合并
+
+七个分卷放在同一个文件夹，打开 cmd 执行：
+
+```bat
+copy /b "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip.part*" "SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip"
+```
+
+合并出来的 zip 直接拿去「导入模型包」。校验：`600,846,383` 字节，SHA256 `375c1888905dbdf4367abf564260e645aeaa93d25b7896657622317df7cccf20`。
 
 ## 翻译模型选择
 
