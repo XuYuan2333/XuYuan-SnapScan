@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -143,7 +143,7 @@ namespace QRSnap
     internal sealed class NativeShell : Form
     {
         const int WM_HOTKEY = 0x0312;
-        const int ID_QR = 1, ID_OCR = 2, ID_MT = 3, ID_HIDE = 4;
+        const int ID_QR = 1, ID_OCR = 2, ID_MT = 3, ID_HIDE = 4, ID_GAME_MT = 5;
 
         private ToastForm _toast;
         private readonly System.Windows.Forms.Timer _watch;
@@ -152,6 +152,7 @@ namespace QRSnap
         private uint _modsOcr = Native.MOD_CONTROL | Native.MOD_ALT, _vkOcr = (uint)Keys.X;
         private uint _modsMt = Native.MOD_CONTROL | Native.MOD_ALT, _vkMt = (uint)Keys.F;
         private uint _modsHide = Native.MOD_CONTROL | Native.MOD_ALT, _vkHide = (uint)Keys.G;
+        private uint _modsGameMt = Native.MOD_CONTROL | Native.MOD_ALT, _vkGameMt = (uint)Keys.T;
 
         internal Action<string, string> OnCaptured;   // (mode, json)
 
@@ -262,17 +263,20 @@ namespace QRSnap
             Native.UnregisterHotKey(Handle, ID_OCR);
             Native.UnregisterHotKey(Handle, ID_MT);
             Native.UnregisterHotKey(Handle, ID_HIDE);
+            Native.UnregisterHotKey(Handle, ID_GAME_MT);
 
             uint m, k;
             if (HotkeyText.TryParse(AppConfig.HotkeyQr, out m, out k)) { _modsQr = m; _vkQr = k; }
             if (HotkeyText.TryParse(AppConfig.HotkeyOcr, out m, out k)) { _modsOcr = m; _vkOcr = k; }
             if (HotkeyText.TryParse(AppConfig.HotkeyMt, out m, out k)) { _modsMt = m; _vkMt = k; }
             if (HotkeyText.TryParse(AppConfig.HotkeyHide, out m, out k)) { _modsHide = m; _vkHide = k; }
+            if (HotkeyText.TryParse(AppConfig.HotkeyGameTrans, out m, out k)) { _modsGameMt = m; _vkGameMt = k; }
 
             TryRegister(ID_QR, _modsQr, _vkQr, "qr");
             TryRegister(ID_OCR, _modsOcr, _vkOcr, "ocr");
             TryRegister(ID_MT, _modsMt, _vkMt, "mt");
             TryRegister(ID_HIDE, _modsHide, _vkHide, "hide");
+            TryRegister(ID_GAME_MT, _modsGameMt, _vkGameMt, "gamemt");
         }
 
         private void TryRegister(int id, uint mods, uint vk, string which)
@@ -298,6 +302,7 @@ namespace QRSnap
             if (which == "qr") { _modsQr = mods; _vkQr = vk; AppConfig.HotkeyQr = HotkeyText.Format(mods, vk); }
             else if (which == "ocr") { _modsOcr = mods; _vkOcr = vk; AppConfig.HotkeyOcr = HotkeyText.Format(mods, vk); }
             else if (which == "mt") { _modsMt = mods; _vkMt = vk; AppConfig.HotkeyMt = HotkeyText.Format(mods, vk); }
+            else if (which == "gamemt") { _modsGameMt = mods; _vkGameMt = vk; AppConfig.HotkeyGameTrans = HotkeyText.Format(mods, vk); }
             else { _modsHide = mods; _vkHide = vk; AppConfig.HotkeyHide = HotkeyText.Format(mods, vk); }
         }
 
@@ -319,13 +324,22 @@ namespace QRSnap
             {
                 int id = (int)m.WParam;
                 Log("WM_HOTKEY id=" + id);
-                // 游戏模式：Ctrl+Alt+F 作为手动翻译键
+                // 游戏翻译总开关：真正启动/暂停翻译（游戏模式只做准备，不自动开翻）
+                if (id == ID_GAME_MT)
+                {
+                    if (AppConfig.GameOn)
+                    {
+                        GameRuntime.ToggleTranslate();
+                        try { JadeHost.Send("state-refresh", JadeHost.BuildState()); } catch (Exception) { }   // 界面开关跟着变
+                    }
+                    else if (_toast != null) _toast.ShowDone("先开启游戏模式，再用这个键启动翻译", false);
+                    return;
+                }
+                // 游戏模式：Ctrl+Alt+F 与游戏翻译服务键一个动作——按一下开始翻，再按一下关掉
                 if (id == ID_MT && AppConfig.GameOn)
                 {
-                    // 自适应模式（自动识别）：这个键改成「关 / 开译文」的切换，
-                    // 想停的时候按一下就停，不用去别处找开关；手动模式仍然按一次抓一次。
-                    if (AppConfig.GameAutoMode) GameRuntime.ToggleOverlay();
-                    else GameRuntime.Trigger(true);
+                    GameRuntime.ToggleTranslate();
+                    try { JadeHost.Send("state-refresh", JadeHost.BuildState()); } catch (Exception) { }
                     return;
                 }
                 // 识别期间 UI 线程在泵消息，这时再按热键会叠出一轮新截屏，直接忽略
@@ -431,6 +445,57 @@ namespace QRSnap
         private Bitmap _lastOverlayBitmap;          // 本轮成品图，供重复截图缓存落盘
         private ulong _lastShotHash;                // 本轮截图 dHash
         private string _lastMtText;                 // 本轮译文，自动复制用
+
+        // —— 游戏模式「整批预翻译」——
+        // 多块串行翻译时是一块一块等模型返回，屏幕上就一块一块冒出来。
+        // 这里改成：一轮里先把所有分区要翻的文本一次性批量翻好放进缓存，
+        // 之后各分区出屏时直接命中，只剩构建遮罩的几十毫秒 → 多块几乎同时出现。
+        private readonly Dictionary<string, string> _preTr = new Dictionary<string, string>();
+        private readonly object _preTrLock = new object();
+
+        // 缓存键：只认「字」，空格/标点/大小写抖动不该让缓存失效
+        internal static string TrKey(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            StringBuilder sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (char.IsWhiteSpace(c)) continue;
+                if (c == '.' || c == ',' || c == '!' || c == '?' || c == ';' || c == ':' || c == '"'
+                    || c == '\'' || c == '-' || c == '—' || c == '…' || c == '·' || c == '(' || c == ')'
+                    || c == '[' || c == ']' || c == '{' || c == '}'
+                    || c == '。' || c == '，' || c == '、' || c == '！' || c == '？' || c == '：' || c == '；'
+                    || c == '「' || c == '」' || c == '『' || c == '』')
+                    continue;
+                sb.Append(char.ToLowerInvariant(c));
+            }
+            return sb.ToString();
+        }
+
+        internal void PreTrClear()
+        {
+            lock (_preTrLock) { _preTr.Clear(); }
+        }
+
+        private string PreTrGet(string srcText)
+        {
+            string k = TrKey(srcText);
+            if (k.Length == 0) return null;
+            lock (_preTrLock)
+            {
+                string v;
+                return _preTr.TryGetValue(k, out v) ? v : null;
+            }
+        }
+
+        private void PreTrPut(string srcText, string tr)
+        {
+            if (string.IsNullOrEmpty(tr)) return;
+            string k = TrKey(srcText);
+            if (k.Length == 0) return;
+            lock (_preTrLock) { _preTr[k] = tr; }
+        }
 
         // 提示条第二行：这一轮 AI 到底干了什么。没有 AI 介入就返回 null，提示条还是单行。
         private string AiSummary()
@@ -905,6 +970,144 @@ namespace QRSnap
                 Math.Min(bmp.Width, x1 + 1), Math.Min(bmp.Height, y1 + 1));
         }
 
+        // 游戏模式整批预翻译：把一轮里所有分区要翻的文本一次性送进引擎，
+        // 结果按「归一化文本」缓存。各分区随后出屏时命中缓存，不再逐块等模型。
+        // 返回实际翻到的条数；任何一步失败都只是返回 0，各分区仍会走自己的翻译路径，不影响正确性。
+        internal int PreTranslateGame(List<OcrSegment> segs)
+        {
+            if (segs == null || segs.Count == 0) return 0;
+            PreTrClear();
+            string tgt = "zh";
+
+            List<string> texts = new List<string>();
+            List<string> srcs = new List<string>();
+            StringBuilder all = new StringBuilder();
+            for (int i = 0; i < segs.Count; i++)
+            {
+                OcrSegment s = segs[i];
+                if (s == null || s.Text == null || s.Text.Trim().Length == 0) continue;
+                if (Ocr.LooksLikeHud(s.Text)) continue;
+                string pre = LayoutBoost.PreTranslate(s.Text);
+                if (pre != null)
+                {
+                    // 预表已经给出「保留原文」或固定译法，直接进缓存，别再问模型
+                    PreTrPut(s.Text, pre);
+                    continue;
+                }
+                texts.Add(s.Text);
+                srcs.Add(s.Text);
+                all.Append(s.Text).Append('\n');
+            }
+            if (texts.Count == 0) return 0;
+
+            string src = LangDetect.Detect(all.ToString());
+            if (string.IsNullOrEmpty(src) || src == tgt) return 0;
+
+            try
+            {
+                if (AppConfig.AliMt)
+                {
+                    string[] got;
+                    bool isGoogle = AppConfig.MtProv == "google";
+                    if (isGoogle) got = GoogleMt.TranslateBatch(texts.ToArray(), src, tgt);
+                    else got = AliyunMt.TranslateBatch(texts.ToArray(), src, tgt);
+                    if (got == null) return 0;
+                    int n0 = 0;
+                    for (int i = 0; i < srcs.Count && i < got.Length; i++)
+                    {
+                        if (string.IsNullOrEmpty(got[i])) continue;
+                        string tr = LayoutBoost.PostFix(got[i]);
+                        // 音译兜底要和主链路一致，否则缓存里会留一条明显错误的译文
+                        if (tr != null && !Ocr.LookLikeTransliteration(srcs[i], tr)) { PreTrPut(srcs[i], tr); n0++; }
+                    }
+                    return n0;
+                }
+                if (AppConfig.AiMt)
+                {
+                    string aerr = null;
+                    Dictionary<int, string> ai = AiBoost.TranslateAll(segs, src, out aerr);
+                    if (ai == null) return 0;
+                    int n1 = 0;
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        if (!ai.ContainsKey(i)) continue;
+                        OcrSegment s = segs[i];
+                        if (s == null || s.Text == null) continue;
+                        string tr = LayoutBoost.PostFix(ai[i]);
+                        if (tr != null) { PreTrPut(s.Text, tr); n1++; }
+                    }
+                    return n1;
+                }
+
+                MtRouter router = MtRunner.Router;
+                string profile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+                string[] plan = router.PlanFor(src, tgt, AppConfig.MtPair, profile);
+                if (plan.Length == 0) return 0;
+                int put = 0;
+                if (plan[0] == "gguf")
+                {
+                    List<string> got = null;
+                    try
+                    {
+                        got = profile == AppConfig.MtProfileEfficiency
+                            ? LlamaMt.TranslateMany(plan[1], texts, tgt, texts.Count >= 8 ? 4 : 2)
+                            : LlamaMt.TranslateBatch(plan[1], texts, tgt);
+                    }
+                    catch (Exception) { got = null; }
+                    if (got != null && got.Count == texts.Count)
+                    {
+                        for (int i = 0; i < texts.Count; i++)
+                        {
+                            if (string.IsNullOrEmpty(got[i])) continue;
+                            string tr = LayoutBoost.PostFix(got[i]);
+                            if (tr != null && !Ocr.LookLikeTransliteration(texts[i], tr)) { PreTrPut(texts[i], tr); put++; }
+                        }
+                    }
+                    else
+                    {
+                        // 批量失败就按 8 行一批重来，别让整屏都退回逐块串行
+                        int k = 0;
+                        while (k < texts.Count)
+                        {
+                            int take = Math.Min(8, texts.Count - k);
+                            List<string> part = texts.GetRange(k, take);
+                            List<string> one = null;
+                            try { one = LlamaMt.TranslateBatch(plan[1], part, tgt); }
+                            catch (Exception) { one = null; }
+                            if (one != null && one.Count == take)
+                            {
+                                for (int i = 0; i < take; i++)
+                                {
+                                    if (string.IsNullOrEmpty(one[i])) continue;
+                                    string tr = LayoutBoost.PostFix(one[i]);
+                                    if (tr != null && !Ocr.LookLikeTransliteration(part[i], tr)) { PreTrPut(part[i], tr); put++; }
+                                }
+                            }
+                            k += take;
+                        }
+                    }
+                }
+                else
+                {
+                    string route;
+                    string[] outs = router.TranslateMany(texts, src, tgt, AppConfig.MtPair, profile, out route);
+                    if (outs == null) return 0;
+                    for (int i = 0; i < texts.Count && i < outs.Length; i++)
+                    {
+                        if (string.IsNullOrEmpty(outs[i])) continue;
+                        string tr = LayoutBoost.PostFix(outs[i]);
+                        if (tr != null && !Ocr.LookLikeTransliteration(texts[i], tr)) { PreTrPut(texts[i], tr); put++; }
+                    }
+                }
+                return put;
+            }
+            catch (Exception ex)
+            {
+                Log("[game] pretranslate fail " + ex.Message);
+                return 0;
+            }
+        }
+
         // 逐行翻译并原地铺译文；返回画出来的行数
         internal int TranslateAndShow(List<OcrSegment> segs, Rectangle screenRect, Bitmap bmp, bool layoutPre = false)
         {
@@ -934,7 +1137,14 @@ namespace QRSnap
             _layoutActive = layoutPre;
             _layoutLines = layoutPre ? segs.Count : 0;
             if (!layoutPre) _layoutObstacles = null;
+            // 游戏分区模式：障碍裁剪图是「别的那一块」留下的，套在本块会把遮罩削错位置，直接不用
+            if (zoneId >= 0) _layoutObstacles = null;
             if (layoutPre) NativeShell.Log("[layout] precomputed blocks=" + segs.Count);
+
+            // 「抢眼保底时长」：桌面单次翻译要让「翻译中」提示条露个面，所以每轮至少等 650ms。
+            // 游戏模式一轮要连出十几块，每块都等 650ms 就变成一块一块往外冒（10 块 6.5 秒），
+            // 分区出屏不需要这个保底，直接压到 0，多块才能在几十毫秒内一起出现。
+            int floorMs = zoneId >= 0 ? 0 : 650;
 
             // 版面强化：AI 翻译和纯离线翻译都先做「分栏/徽章/段落」切分。
             // 只依赖本地 PP-OCR（默认极速档），模型缺失就静默回退原链路。
@@ -982,7 +1192,29 @@ namespace QRSnap
                 return 0;
             }
             // 不再抛异常：抛出去只会变成「只识字、不翻译」，用户根本不知道是跳过了
-            if (src == tgt)
+            // 游戏分区例外：日文被 OCR 压成纯汉字（假名全丢）时会被判成中文，
+            // 一判成中文就整块跳过翻译，遮罩直接不上屏——看起来就是「遮罩不在文字处、也没翻完」。
+            // 所以游戏里只要是个长句（≥6 字）且一个拉丁字母都没有，就照翻，不因为「像中文」放弃。
+            bool zhButMaybeJp = false;
+            if (src == tgt && zoneId >= 0 && AppConfig.GameJpAuto)
+            {
+                int letters = 0, latin = 0, kana = 0;
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    string t = segs[i].Text;
+                    if (t == null) continue;
+                    for (int j = 0; j < t.Length; j++)
+                    {
+                        char c = t[j];
+                        if (c >= '\u3040' && c <= '\u30FF') kana++;           // 假名（真日文）
+                        else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) latin++;
+                        if (char.IsLetter(c)) letters++;
+                    }
+                }
+                if (kana > 0) zhButMaybeJp = true;                              // 有假名，肯定是日文
+                else if (latin == 0 && letters >= 6) zhButMaybeJp = true;        // 全汉字长句：当被压扁的日文
+            }
+            if (src == tgt && !zhButMaybeJp)
             {
                 _mtSkipReason = "选区文字本身就是" + MtRouter.NameOf(tgt) + "，已跳过翻译";
                 _mtSkipShort = "选区已是" + MtRouter.NameOf(tgt);
@@ -1053,6 +1285,15 @@ namespace QRSnap
                         }
                     }
                     string[] trs = new string[segs.Count];
+                    // 命中「整批预翻译」缓存的行直接用：游戏模式一轮里多块一次翻好，
+                    // 各块出屏时不再各自排队等模型，视觉上就是多块同时出现。
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment ps = segs[i];
+                        if (ps == null || ps.SkipMt || ps.Text == null) continue;
+                        string ph = PreTrGet(ps.Text);
+                        if (ph != null) { trs[i] = ph; }
+                    }
                     if (AppConfig.AliMt)
                     {
                         // 阿里云在线翻译：整屏一次批量，完全不碰本地模型
@@ -1064,6 +1305,7 @@ namespace QRSnap
                             OcrSegment s = segs[i];
                             if (s == null || s.Text == null || s.Text.Trim().Length == 0) continue;
                             if (s.SkipMt) continue;
+                            if (trs[i] != null) continue;      // 已在整批预翻译里拿到译文
                             string pre = LayoutBoost.PreTranslate(s.Text);
                             if (pre != null) { trs[i] = pre; continue; }
                             needMs.Add(i);
@@ -1103,7 +1345,10 @@ namespace QRSnap
                         }
                         _aiMtLines = ai.Count;
                         for (int i = 0; i < segs.Count; i++)
+                        {
+                            if (trs[i] != null) continue;     // 整批预翻译已经给过这条
                             trs[i] = ai.ContainsKey(i) ? LayoutBoost.PostFix(ai[i]) : null;
+                        }
                         lastRoute = "ai";
                     }
                     else
@@ -1123,12 +1368,18 @@ namespace QRSnap
                             OcrSegment s = segs[i];
                             if (s.Text == null || s.Text.Trim().Length == 0) continue;
                             if (s.SkipMt) continue;
+                            if (trs[i] != null) continue;      // 已在整批预翻译里拿到译文
                             string pre = LayoutBoost.PreTranslate(s.Text);
                             if (pre != null) { trs[i] = pre; continue; }
                             need.Add(i);
                         }
 
-                        if (plan[0] == "gguf")
+                        if (need.Count == 0)
+                        {
+                            // 全部命中整批预翻译缓存：这一块不再问模型，直接构建遮罩
+                            lastRoute = "pre";
+                        }
+                        else if (plan[0] == "gguf")
                         {
                             // 效率档：单句字幕逐行翻；整屏几十行就并发铺（实测 8 行 300→220ms）
                             if (profile == AppConfig.MtProfileEfficiency)
@@ -1319,7 +1570,7 @@ namespace QRSnap
                 {
                     err = ex.Message;
                 }
-            }, 650);
+            }, floorMs);
 
             if (err != null) throw new Exception(err);
             if (items.Count == 0) return 0;
@@ -1368,7 +1619,7 @@ namespace QRSnap
                         raw = scaled;
                     }
                     outImg = raw;
-                }, 650);
+                }, floorMs);
                 if (outImg == null) throw new Exception("拟真模式渲染失败");
                 if (zoneId >= 0) TransOverlay.ShowZoneImage(zoneId, screenRect, outImg);
                 else TransOverlay.ShowImage(screenRect, outImg);
@@ -1378,10 +1629,12 @@ namespace QRSnap
                 return st.Lines;
             }
 
-            // 效率模式：顺手把「截图 + 遮罩」合成一张图，供重复截图缓存直接贴（同样放后台）
+            // 效率模式：顺手把「截图 + 遮罩」合成一张图，供重复截图缓存直接贴（同样放后台）。
+            // 游戏分区模式不走这里：那块成品图是给「同一画面重复截图」用的，分区每轮合成一张纯属白花时间，
+            // 多块时还会把各块的出屏时间拉开。
             try
             {
-                if (bmp != null)
+                if (bmp != null && zoneId < 0)
                 {
                     Bitmap composed = null;
                     RunPumped(delegate()
@@ -1433,6 +1686,7 @@ namespace QRSnap
                 Native.UnregisterHotKey(Handle, ID_OCR);
                 Native.UnregisterHotKey(Handle, ID_MT);
                 Native.UnregisterHotKey(Handle, ID_HIDE);
+                Native.UnregisterHotKey(Handle, ID_GAME_MT);
             }
             catch (Exception) { }
         }
@@ -2221,6 +2475,15 @@ namespace QRSnap
             return shell.TranslateAndShow(segs, rect, bmp, true, zoneId);
         }
 
+        // 游戏模式整批预翻译：一轮里所有分区要翻的文本一次性送引擎，结果进缓存。
+        // 各分区随后出屏时命中缓存，只剩构建遮罩 → 多块几乎同时出现，不再一块一块冒。
+        internal static int PreTranslateGameZones(List<OcrSegment> segs)
+        {
+            NativeShell shell = _shell;
+            if (shell == null) return 0;
+            try { return shell.PreTranslateGame(segs); } catch (Exception) { return 0; }
+        }
+
         // 上一轮没出译文的短原因（「选区已是中文」「没识别到文字」），给游戏模式的提示条用，
         // 免得一律显示「没有识别到字幕」把真实原因盖掉。
         internal static string GameSkipShort
@@ -2413,10 +2676,19 @@ namespace QRSnap
             sb.Append(",\"autoHold\":").Append(AppConfig.GameAutoHoldMs);
             sb.Append(",\"autoSample\":").Append(AppConfig.GameAutoSampleMs);
             sb.Append(",\"autoWatch\":").Append(AppConfig.GameAutoWatchMs);
+            sb.Append(",\"autoDetect\":").Append(AppConfig.GameAutoDetectMs);
+            sb.Append(",\"maskConfirm\":").Append(AppConfig.GameMaskConfirmMs);
+            sb.Append(",\"transActive\":").Append(J.B(AppConfig.GameOn && GameRuntime.TranslateActive));
+            sb.Append(",\"transHotkey\":").Append(J.S(AppConfig.HotkeyGameTrans));
             string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
             bool gready = (gp == AppConfig.MtProfileEfficiency || gp == AppConfig.MtProfileTurbo) ? MtRunner.GameReadyFor(gp) : MtRunner.Ready;
-            string gmsg = gregions.Count == 0 ? "先添加固定字幕区域"
-                : (!gready ? "缺少对应翻译模型" : (AppConfig.GameTrigger == 2 ? "手动快捷键：" + AppConfig.HotkeyMt : "就绪"));
+            int gregionN = gregions.Count;
+            string gmsg =
+                (gregions.Count == 0 ? "先画一个识别区域（整屏或字幕带都行）"
+                    : (!gready ? "缺少对应翻译模型"
+                        : (AppConfig.GameOn && !GameRuntime.TranslateActive
+                            ? ("游戏模式已开启 · 按 " + AppConfig.HotkeyGameTrans + " 启动翻译")
+                            : (AppConfig.GameTrigger == 2 ? "手动快捷键：" + AppConfig.HotkeyMt : "就绪"))));
             if (!string.IsNullOrEmpty(GameRuntime.LastError)) gmsg = GameRuntime.LastError;
             sb.Append(",\"ready\":").Append(J.B(gready));
             sb.Append(",\"msg\":").Append(J.S(gmsg));
@@ -2429,7 +2701,10 @@ namespace QRSnap
                   .Append(",\"w\":").Append(gregions[gi].Width)
                   .Append(",\"h\":").Append(gregions[gi].Height).Append('}');
             }
-            sb.Append("]}");
+            sb.Append("]");
+            // 自动识别区域已在 1.4.8 移除；字段留着给老前端兼容，恒为空
+            sb.Append(",\"autoRegions\":[]");
+            sb.Append("}");            // 关掉 game 对象，后面是根对象的其余字段
             sb.Append(",\"hotkeys\":{\"qr\":").Append(J.S(HotkeyQrText()));
             sb.Append(",\"ocr\":").Append(J.S(HotkeyOcrText()));
             sb.Append(",\"mt\":").Append(J.S(AppConfig.HotkeyMt));
@@ -2527,6 +2802,10 @@ namespace QRSnap
               .Append(",\"ready\":").Append(J.B(MtRunner.GameReadyFor("turbo"))).Append("}");
             sb.Append("]}");
             sb.Append("}");
+            if (Environment.GetEnvironmentVariable("QRSNAP_DBG_STATE") == "1")
+            {
+                try { File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "_state.json"), sb.ToString(), new UTF8Encoding(false)); } catch (Exception) { }
+            }
             return sb.ToString();
         }
 
@@ -2773,6 +3052,54 @@ namespace QRSnap
                     {
                         bool on = (k == "gameauto") ? (v == "true" || v == "1") : (v == "auto");
                         AppConfig.GameAutoMode = on;
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gameautoregion" || k == "gameautoscope")
+                    {
+                        // 自动识别区域已移除（只认固定选区）：老前端发来的键直接忽略
+                    }
+                    else if (k == "gameautodetect")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameAutoDetectMs = Math.Max(200, Math.Min(2000, gv));
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gametrans")
+                    {
+                        // 界面上的「翻译服务」开关，和专用快捷键同一个动作
+                        if (AppConfig.GameOn) GameRuntime.ToggleTranslate();
+                        try { RunOnUi(delegate { Send("state-refresh", BuildState()); }); } catch (Exception) { }
+                    }
+                    else if (k == "gameautocap")
+                    {
+                        // 框数上限已取消：老前端还会发这个键，忽略即可
+                    }
+                    else if (k == "gamemaskconfirm")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameMaskConfirmMs = Math.Max(300, Math.Min(5000, gv));
+                        try { AppConfig.Save(); } catch (Exception) { }
+                    }
+                    else if (k == "gameautohold")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameAutoHoldMs = Math.Max(100, Math.Min(2000, gv));
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gameautosample")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameAutoSampleMs = Math.Max(20, Math.Min(500, gv));
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gameautowatch")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameAutoWatchMs = Math.Max(400, Math.Min(3000, gv));
                         try { AppConfig.Save(); } catch (Exception) { }
                         GameRuntime.Reconfigure();
                     }

@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.2.0")]
-[assembly: AssemblyFileVersion("1.4.2.0")]
+[assembly: AssemblyVersion("1.4.9.0")]
+[assembly: AssemblyFileVersion("1.4.9.0")]
 
 namespace QRSnap
 {
@@ -357,6 +357,7 @@ namespace QRSnap
         public const string DefaultHotkeyOcr = "Ctrl+Alt+X";
         public const string DefaultHotkeyMt = "Ctrl+Alt+F";     // 截图翻译
         public const string DefaultHotkeyHide = "Ctrl+Alt+G";   // 译文遮罩 显示/隐藏
+        public const string DefaultHotkeyGameTrans = "Ctrl+Alt+T"; // 游戏模式：真正启动/暂停翻译
         public const string ConfigVersion = "1301";
         // 引擎：wechat = 微信内置 OCR（默认，中文支持好）；system = Windows 内置 OCR
         // pp* = 本地 PP-OCR（模型放在 exe 同级 "OCR Model" 目录，离线可用，无需装任何软件）
@@ -414,6 +415,7 @@ namespace QRSnap
         public static string HotkeyOcr = DefaultHotkeyOcr;
         public static string HotkeyMt = DefaultHotkeyMt;
         public static string HotkeyHide = DefaultHotkeyHide;
+        public static string HotkeyGameTrans = DefaultHotkeyGameTrans;
         public static bool AutoCopy = true;
         public static string Engine = EngineWeChat;
         public static string WeChatDir = string.Empty;   // 手动指定的微信安装目录（自动探测失败时用）
@@ -508,6 +510,10 @@ namespace QRSnap
         public static int GameAutoHoldMs = 400;                          // 自适应：画面定住多久才开始识字（100~2000ms）
         public static int GameAutoSampleMs = 40;                         // 自适应：采样间隔（20~500ms）
         public static int GameAutoWatchMs = 800;                         // 自适应：遮罩在屏时的比对间隔（400~3000ms）
+        // 自动识别区域（自动找字块）已在 1.4.8 移除：游戏模式只认玩家画好的固定区域。
+        public static int GameAutoDetectMs = 400;                        // 检测间隔（200~2000ms）：越短越跟手，CPU 越高
+        // 框数上限已取消：检出一块翻一块。老 ini 里的 gameautocap 仍会被读入但不再参与运行。
+        public static int GameMaskConfirmMs = 1000;                      // 遮罩期「文字确认」最短间隔（300~5000ms）：背景变了先 OCR 复核文字再决定收不收
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -645,6 +651,7 @@ namespace QRSnap
             HotkeyOcr = DefaultHotkeyOcr;
             HotkeyMt = DefaultHotkeyMt;
             HotkeyHide = DefaultHotkeyHide;
+            HotkeyGameTrans = DefaultHotkeyGameTrans;
             AutoCopy = true;
             Engine = EngineWeChat;
             WeChatDir = string.Empty;
@@ -696,6 +703,7 @@ namespace QRSnap
             GameAutoHoldMs = 400;
             GameAutoSampleMs = 40;
             GameAutoWatchMs = 800;
+            GameAutoDetectMs = 400;
             Legacy = false;
             try
             {
@@ -716,6 +724,7 @@ namespace QRSnap
                     else if (k.Equals("hotkey2", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyOcr = v;
                     else if (k.Equals("hotkey3", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyMt = v;
                     else if (k.Equals("hotkey4", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyHide = v;
+                    else if (k.Equals("hotkey5", StringComparison.OrdinalIgnoreCase) && v.Length > 0) HotkeyGameTrans = v;
                     else if (k.Equals("autocopy", StringComparison.OrdinalIgnoreCase)) AutoCopy = ToBool(v);
                     else if (k.Equals("engine", StringComparison.OrdinalIgnoreCase) && v.Length > 0) Engine = NormalizeEngine(v);
                     else if (k.Equals("bgopacity", StringComparison.OrdinalIgnoreCase))
@@ -795,6 +804,9 @@ namespace QRSnap
                     else if (k.Equals("gameautohold", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoHoldMs = Math.Max(100, Math.Min(2000, n)); }
                     else if (k.Equals("gameautosample", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoSampleMs = Math.Max(20, Math.Min(500, n)); }
                     else if (k.Equals("gameautowatch", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoWatchMs = Math.Max(400, Math.Min(3000, n)); }
+                    else if (k.Equals("gameautodetect", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoDetectMs = Math.Max(200, Math.Min(2000, n)); }
+                    // gameautocap：框数上限已取消，老配置里读到也不再生效（保留解析避免报未知键）
+                    else if (k.Equals("gamemaskconfirm", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameMaskConfirmMs = Math.Max(300, Math.Min(5000, n)); }
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
                 // gameon 本身就是「游戏模式开着」的记录，写进去就该算数；
@@ -816,6 +828,7 @@ namespace QRSnap
             sb.Append("hotkey2=").Append(HotkeyOcr).Append("\r\n");
             sb.Append("hotkey3=").Append(HotkeyMt).Append("\r\n");
             sb.Append("hotkey4=").Append(HotkeyHide).Append("\r\n");
+            sb.Append("hotkey5=").Append(HotkeyGameTrans).Append("\r\n");
             sb.Append("autocopy=").Append(AutoCopy ? "1" : "0").Append("\r\n");
             sb.Append("engine=").Append(NormalizeEngine(Engine)).Append("\r\n");
             if (ModelDir != null && ModelDir.Length > 0) sb.Append("modeldir=").Append(ModelDir).Append("\r\n");
@@ -868,6 +881,8 @@ namespace QRSnap
             sb.Append("gameautohold=").Append(GameAutoHoldMs).Append("\r\n");
             sb.Append("gameautosample=").Append(GameAutoSampleMs).Append("\r\n");
             sb.Append("gameautowatch=").Append(GameAutoWatchMs).Append("\r\n");
+            sb.Append("gameautodetect=").Append(GameAutoDetectMs).Append("\r\n");
+            sb.Append("gamemaskconfirm=").Append(GameMaskConfirmMs).Append("\r\n");
             sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
             sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
             sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
@@ -2419,6 +2434,12 @@ namespace QRSnap
                     _local = null;
                     _localEngine = string.Empty;
                 }
+                if (_autoDet != null)
+                {
+                    try { _autoDet.Dispose(); } catch (Exception) { }
+                    _autoDet = null;
+                    _autoDetDir = string.Empty;
+                }
             }
         }
 
@@ -2461,6 +2482,42 @@ namespace QRSnap
         // 单独缓存一个检测器，避免把用户当前选的识字引擎（可能是高精）顶掉。
         private static PpOcr _layoutPp;
         private static string _layoutPpDir = string.Empty;
+
+        // 自动识别区域用：只借检测能力（DetectPublic 只出框、不识字），所以用最快的那档就行。
+        // 单独一份实例，和版面识别 / 用户当前引擎互不顶掉；tiny 缺了退 japan，再退 medium。
+        private static PpOcr _autoDet;
+        private static string _autoDetDir = string.Empty;
+
+        public static PpOcr AutoDetector()
+        {
+            try
+            {
+                string dir = AppConfig.ModelTierDir(AppConfig.EnginePpTiny);
+                if (!PpOcr.FolderReady(dir)) dir = AppConfig.ModelTierDir(AppConfig.EnginePpJapan);
+                if (!PpOcr.FolderReady(dir)) dir = AppConfig.ModelTierDir(AppConfig.EnginePpMedium);
+                if (!PpOcr.FolderReady(dir)) return null;
+                lock (LocalLock)
+                {
+                    if (_autoDet != null && _autoDetDir == dir) return _autoDet;
+                    try { if (_autoDet != null) _autoDet.Dispose(); } catch (Exception) { }
+                    _autoDet = null;
+                    _autoDet = new PpOcr(dir, "自动区域检测");
+                    _autoDetDir = dir;
+                }
+                return _autoDet;
+            }
+            catch (Exception) { return null; }
+        }
+
+        public static void InvalidateAutoDetector()
+        {
+            lock (LocalLock)
+            {
+                try { if (_autoDet != null) _autoDet.Dispose(); } catch (Exception) { }
+                _autoDet = null;
+                _autoDetDir = string.Empty;
+            }
+        }
 
         // 启动时后台预热版面检测器：第一次翻译不再等模型加载（约 1~2 秒）
         public static void WarmLayout()

@@ -1,4 +1,4 @@
-/* XuYuan-SnapScan · 前端逻辑
+﻿/* XuYuan-SnapScan · 前端逻辑
    通道：state / config / recheck / pickwx / capture / clipcopy / win / hotkey / importmodel / hidetrans
    后端推送：capture-done / state-refresh
    识码 / 识字 / 翻译是三条独立入口，翻译只在 mode=mt 时叠译文 */
@@ -234,12 +234,39 @@
         : "手动：按「" + ((S && S.hotkeys && S.hotkeys.mt) || "") + "」翻译一次。";
     }
 
+    // 翻译服务：独立运行态，游戏模式开启≠正在翻译
+    const hk = g.transHotkey || "Ctrl+Alt+T";
+    if ($("gameTransKey")) $("gameTransKey").textContent = hk;
+    if ($("gameTransActive")) $("gameTransActive").checked = !!g.transActive;
+    if ($("gameTransHint")) {
+      $("gameTransHint").textContent = !g.on
+        ? "先启用游戏模式；启用后按「" + hk + "」启动翻译。"
+        : (g.transActive
+          ? "翻译服务运行中：识别到字幕就自动翻译上遮罩；按「" + hk + "」暂停。"
+          : "翻译服务未启动：区域照找、不翻译不上遮罩；按「" + hk + "」或点上面开关启动。");
+    }
+
+    // 高级阈值：正在输入的那个框不被状态刷新打断
+    const th = [["gameAutoSample", g.autoSample], ["gameAutoHold", g.autoHold],
+      ["gameAutoDetect", g.autoDetect], ["gameAutoWatch", g.autoWatch],
+      ["gameMaskConfirm", g.maskConfirm]];
+    th.forEach(([id, val]) => {
+      const el = $(id);
+      if (!el || val === undefined || val === null) return;
+      if (document.activeElement === el) return;
+      el.value = String(val);
+    });
+
     const badge = $("gameBadge");
     if (badge) {
       badge.textContent = g.on ? "已启用" : (g.ready ? "未启用" : "未就绪");
       badge.className = "q-badge" + (g.on ? " ok" : (g.ready ? "" : " warn"));
     }
     if ($("gameMsg")) $("gameMsg").textContent = g.msg || "";
+
+    if ($("gameRegionTitle")) $("gameRegionTitle").textContent = "固定字幕区域";
+    if ($("gameRegions")) $("gameRegions").style.display = "";
+    if ($("gameRegionBtns")) $("gameRegionBtns").style.display = "";
 
     const box = $("gameRegions");
     if (!box) return;
@@ -1031,13 +1058,14 @@
       const want = e.target.checked;
       const g = (S && S.game) || {};
       if (want && !(g.regions || []).length) {
-        toast("先点「添加区域」，在屏幕上框出字幕位置");
+        toast("先点「添加区域」框出字幕位置（整屏就框整个画面）");
         e.target.checked = false;
         return;
       }
       const s = await setConfig({ gameon: want });
       if (want && s && s.game && !s.game.on) toast(s.game.msg || "游戏模式启动失败");
     });
+
 
     if ($("gameMerge")) $("gameMerge").addEventListener("change", (e) => {
       setConfig({ gamemerge: e.target.checked });
@@ -1048,11 +1076,36 @@
     if ($("gameToastOn")) $("gameToastOn").addEventListener("change", (e) => {
       setConfig({ gametoaston: e.target.checked });
     });
+
+    // 翻译服务总开关：和专用快捷键等效
+    if ($("gameTransActive")) $("gameTransActive").addEventListener("change", async (e) => {
+      const g = (S && S.game) || {};
+      if (!g.on) { toast("先启用游戏模式"); e.target.checked = false; return; }
+      const s = await setConfig({ gametrans: true });
+      if (s && s.state) applyState(s.state);
+      const ng = (s && s.game) || {};
+      toast(ng.transActive ? "游戏翻译已启动" : "游戏翻译已暂停");
+    });
+
+    // 高级阈值：失焦/回车后保存，非法值由后端收敛
+    const thBind = [["gameAutoSample", "gameautosample"], ["gameAutoHold", "gameautohold"],
+      ["gameAutoDetect", "gameautodetect"], ["gameAutoWatch", "gameautowatch"],
+      ["gameMaskConfirm", "gamemaskconfirm"]];
+    thBind.forEach(([id, key]) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("change", async (e) => {
+        const n = Number(e.target.value);
+        if (!isFinite(n)) { applyGameState(S.game); return; }
+        const s = await setConfig({ [key]: Math.round(n) });
+        if (s && s.state) applyState(s.state);
+      });
+    });
     if ($("gameTriggerMode")) $("gameTriggerMode").addEventListener("change", async (e) => {
       const want = e.target.value === "auto";
       const g = (S && S.game) || {};
       if (want && !g.on) { toast("先启用游戏模式，再选自适应"); applyGameState(S.game); return; }
-      if (want && !(g.regions || []).length) { toast("先点「添加区域」，框出字幕位置"); applyGameState(S.game); return; }
+        if (want && !(g.regions || []).length) { toast("先点「添加区域」，框出字幕位置"); applyGameState(S.game); return; }
       const s = await setConfig({ gametriggermode: want ? "auto" : "manual" });
       if (s && s.state) applyState(s.state);
       toast(want ? "已切到自适应：定住就自动翻译" : "已切到手动：按快捷键翻译");

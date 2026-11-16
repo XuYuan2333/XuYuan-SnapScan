@@ -433,6 +433,73 @@ namespace QRSnap
             return shown;
         }
 
+        // 自动识别区域：字幕原文没变、只是检测框挪了位置/变了尺寸时，
+        // 不重新 OCR、不重新翻译，直接把这块遮罩连内容一起搬过去。
+        // 之前靠 ReshowZone 复原会连同旧坐标一起复原，看起来就是「遮罩位置不对」。
+        public static void MoveZone(int id, Rectangle newRect)
+        {
+            if (!OnOverlayThread) { RunOverlay(delegate { MoveZone(id, newRect); }); return; }
+            if (newRect.Width < 8 || newRect.Height < 8) return;
+            Rectangle old = Rectangle.Empty;
+            List<Item> items = null;
+            bool hasZone = false;
+            lock (_zoneLock)
+            {
+                if (_zoneRects.ContainsKey(id)) old = _zoneRects[id];
+                if (_zoneItems.ContainsKey(id)) items = _zoneItems[id];
+                hasZone = _zones.ContainsKey(id) || _zoneItems.ContainsKey(id) || _zoneRects.ContainsKey(id);
+            }
+            if (!hasZone) return;
+
+            if (items != null && items.Count > 0 && old.Width > 0 && old.Height > 0)
+            {
+                // 平移为主，尺寸变了就把每个译文框等比缩一下（原文没变，框还是那些框）
+                double kx = (double)newRect.Width / old.Width;
+                double ky = (double)newRect.Height / old.Height;
+                List<Item> scaled = new List<Item>(items.Count);
+                for (int i = 0; i < items.Count; i++)
+                {
+                    Item s = items[i];
+                    Item c = new Item();
+                    c.Text = s.Text;
+                    c.Angle = s.Angle;
+                    c.BgColor = s.BgColor;
+                    c.TextColor = s.TextColor;
+                    c.Box = ScaleMove(s.Box, kx, ky);
+                    c.TextBox = s.TextBox.IsEmpty ? Rectangle.Empty : ScaleMove(s.TextBox, kx, ky);
+                    if (s.MaskRects != null)
+                    {
+                        c.MaskRects = new List<Rectangle>(s.MaskRects.Count);
+                        for (int k = 0; k < s.MaskRects.Count; k++) c.MaskRects.Add(ScaleMove(s.MaskRects[k], kx, ky));
+                    }
+                    scaled.Add(c);
+                }
+                ShowZoneCore(id, newRect, scaled, null);
+                if (DbgZone) JadeHost.Log("[zone] move id=" + id + " " + old.X + "," + old.Y + " -> "
+                    + newRect.X + "," + newRect.Y + " items=" + scaled.Count);
+                return;
+            }
+
+            // 拟真整块图 / 没有 items：只挪窗口，图片随窗口尺寸铺
+            lock (_zoneLock)
+            {
+                TransOverlay f = _zones.ContainsKey(id) ? _zones[id] : null;
+                if (Dead(f)) return;
+                _zoneRects[id] = newRect;
+                if (f.Bounds != newRect) f.Bounds = newRect;
+                f.RenderAll();
+                PinTop(f);
+            }
+            try { BarShow(UnionOfZones()); } catch (Exception) { }
+        }
+
+        private static Rectangle ScaleMove(Rectangle r, double kx, double ky)
+        {
+            return new Rectangle(
+                (int)Math.Round(r.X * kx), (int)Math.Round(r.Y * ky),
+                Math.Max(1, (int)Math.Round(r.Width * kx)), Math.Max(1, (int)Math.Round(r.Height * ky)));
+        }
+
         // 这一块没内容了就把它撤掉（别的区不动）
         public static void HideZone(int id)
         {

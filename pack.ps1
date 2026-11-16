@@ -22,7 +22,7 @@ $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outDir = Join-Path $root 'out'
 $dist   = Join-Path $root 'dist'
 $stage  = Join-Path $root '_packtmp'
-$ver    = 'v1.4.2'
+$ver    = 'v1.4.9'
 
 if (-not (Test-Path -LiteralPath $outDir)) { throw "找不到构建产物目录：$outDir，先跑 build19.ps1" }
 if (-not (Test-Path -LiteralPath $dist))   { New-Item -ItemType Directory -Path $dist | Out-Null }

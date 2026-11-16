@@ -382,6 +382,16 @@ body { display: flex; flex-direction: column; }
 .field-grid .field { margin-bottom: 4px; min-width: 0; }
 .field-grid .field > span { width: 64px; }
 
+/* 单列阈值：每行一项，标签在左、数字框在右、灰色推荐值单独占一行，避免三项挤在一格里 */
+.field-list .field {
+  display: grid; grid-template-columns: minmax(0, 1fr) 92px;
+  grid-template-areas: "lab input" "hint hint";
+  align-items: center; gap: 3px 10px; margin-bottom: 9px;
+}
+.field-list .field > span { grid-area: lab; width: auto; flex: none; font-size: 12.5px; color: #57657d; }
+.field-list .field input { grid-area: input; width: 92px; flex: none; min-width: 0; text-align: right; }
+.field-list .field small { grid-area: hint; display: block; color: #8a8f98; font-size: 11px; line-height: 1.5; }
+
 .group { padding: 16px 0 6px; border-bottom: 1px solid rgba(230, 237, 248, .9); }
 .group:last-child { border-bottom: none; }
 .group-title { font-size: 12px; color: #8d99ad; letter-spacing: .6px; margin-bottom: 10px; }

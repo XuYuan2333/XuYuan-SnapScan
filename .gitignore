@@ -13,3 +13,6 @@ verify/
 *.zip
 *.log
 *.tmp
+.workbuddy/
+tools/detect-verify/bin/
+_state.json

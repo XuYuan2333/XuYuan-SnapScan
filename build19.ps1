@@ -1,4 +1,4 @@
-# 一键编译：只用 Windows 自带的 .NET Framework 4.x 编译器（csc.exe）
+﻿# 一键编译：只用 Windows 自带的 .NET Framework 4.x 编译器（csc.exe）
 # 工程内相对路径，产物落到 <工程>\out，不再往工程外写任何文件
 # 用法：powershell -ExecutionPolicy Bypass -File build19.ps1
 

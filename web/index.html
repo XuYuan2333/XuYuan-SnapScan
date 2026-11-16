@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -389,25 +389,61 @@
   </div>
   <div class="drawer-body" id="gameDetail">
     <label class="switch-row">
-      <div><b>启用游戏模式</b><i>只翻译固定区域内的字幕；启动时自动加载 PLaMo，关闭时释放所有本地模型。</i></div>
+      <div><b>启用游戏模式</b><i>只翻译固定区域内的字幕；翻译服务默认不启动，按 Ctrl+Alt+T 才真正加载模型并上遮罩，关闭游戏模式时释放本地模型。</i></div>
       <input type="checkbox" id="gameOn"><span class="sw"></span>
     </label>
     <div class="group-note" id="gameMsg">先添加固定字幕区域</div>
+
+    <label class="switch-row">
+      <div><b>游戏翻译服务</b><i>游戏模式打开时只做识别准备，不会自动开翻。按 <span id="gameTransKey">Ctrl+Alt+T</span> 或点这里，才真正启动 / 暂停翻译。</i></div>
+      <input type="checkbox" id="gameTransActive"><span class="sw"></span>
+    </label>
+    <div class="group-note" id="gameTransHint">翻译服务未启动</div>
 
     <label class="field">
       <span>触发方式</span>
       <select id="gameTriggerMode">
         <option value="manual">手动 · 按快捷键翻译一次</option>
-        <option value="auto">自适应 · 定住 400ms 自动识字，字幕变了自动重译</option>
+        <option value="auto">自动 · 定住 400ms 自动识字，字幕变了自动重译</option>
       </select>
     </label>
-    <div class="group-note" id="gameAutoHint">手动：按「<span data-hk="mt"></span>」翻译一次。自适应：40ms 采样选区，画面定住 400ms 才识字，图像指纹挡重复 OCR、文本指纹挡重复翻译。</div>
+    <div class="group-note" id="gameAutoHint">手动：按「<span data-hk="mt"></span>」翻译一次。自动：按上面的「游戏翻译服务」快捷键开关翻译（游戏模式下翻译键也是同一个开关），40ms 采样选区、定住 400ms 才识字；只有文字真变才重译重贴，背景变色不动遮罩。</div>
 
-    <div class="sub-title">固定字幕区域</div>
+    <div class="sub-title" id="gameRegionTitle">固定字幕区域</div>
     <div class="game-regions" id="gameRegions"></div>
-    <div class="row-btns">
+    <div class="row-btns" id="gameRegionBtns">
       <button class="btn ghost" id="btnGameAdd" type="button">添加区域</button>
       <button class="btn ghost" id="btnGameClear" type="button">全部清空</button>
+    </div>
+
+    <div class="sub-title">高级阈值</div>
+    <div class="group-note">一般保持默认即可；灰色小字是推荐值，超出范围的值会自动收敛到允许区间。</div>
+    <div class="field-list">
+      <label class="field">
+        <span>采样间隔（毫秒）</span>
+        <input type="number" id="gameAutoSample" min="20" max="500" step="10">
+        <small>推荐 40 · 范围 20~500，越小越跟手、越费 CPU</small>
+      </label>
+      <label class="field">
+        <span>画面定住时长（毫秒）</span>
+        <input type="number" id="gameAutoHold" min="100" max="2000" step="50">
+        <small>推荐 400 · 范围 100~2000，静止这么久才识字</small>
+      </label>
+      <label class="field">
+        <span>区域检测间隔（已停用）</span>
+        <input type="number" id="gameAutoDetect" min="200" max="2000" step="50" disabled>
+        <small>已停用：自动识别区域移除后不再需要检测间隔</small>
+      </label>
+      <label class="field">
+        <span>遮罩比对间隔（毫秒）</span>
+        <input type="number" id="gameAutoWatch" min="400" max="3000" step="100">
+        <small>推荐 800 · 范围 400~3000，遮罩在屏时的巡检</small>
+      </label>
+      <label class="field">
+        <span>文字确认间隔（毫秒）</span>
+        <input type="number" id="gameMaskConfirm" min="300" max="5000" step="100">
+        <small>推荐 1000 · 范围 300~5000，背景变了先复核文字再决定收不收遮罩</small>
+      </label>
     </div>
 
     <div class="sub-title">手动翻译</div>
