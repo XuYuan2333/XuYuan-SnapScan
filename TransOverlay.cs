@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -107,6 +108,14 @@ namespace QRSnap
         // 采样专用：只把可见性掐掉，不重绘不拆钩子，抓完立刻恢复
         private static bool _samplingHidden;
         private static readonly List<Form> _sampledVisible = new List<Form>();
+
+        // 采样期（HideForSample → ShowForSample）遮罩是「故意不可见」的。
+        // 游戏模式的「遮罩在屏上就跳过自动采样」必须把这几十毫秒也算成「在屏」，
+        // 否则每抓一次底图都会骗出一轮新的 OCR + 翻译，看起来就是遮罩一直在闪。
+        public static bool Sampling
+        {
+            get { return _samplingHidden; }
+        }
 
         public static void HideForSample()
         {
@@ -214,6 +223,44 @@ namespace QRSnap
                         if (f != null && !f.IsDisposed && f.Visible) return true;
                 }
                 return false;
+            }
+        }
+
+        // 游戏模式专用：只有「真的画着东西」的分区才算遮罩在屏。
+        // IsShowing 只看窗口 Visible，桌面翻译留下的空壳主窗口会一直可见，
+        // 遮罩期巡检就会永远转下去——每 1 秒 OCR 一遍，再判「文字变了」把遮罩收掉重贴，
+        // 表现就是文字消失一下又回来。这里按「有内容」判，空窗口直接不算。
+        public static bool GameShowing
+        {
+            get
+            {
+                lock (_zoneLock)
+                {
+                    foreach (TransOverlay f in _zones.Values)
+                    {
+                        if (f == null || f.IsDisposed || !f.Visible || Dead(f)) continue;
+                        if (f._items.Count > 0 || f._image != null) return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        // 这块分区当前画着的译文（给遮罩期复核用：确认抓到的不是「遮罩自己」）
+        public static string ZoneText(int id)
+        {
+            lock (_zoneLock)
+            {
+                TransOverlay f = _zones.ContainsKey(id) ? _zones[id] : null;
+                if (f == null || f.IsDisposed) return "";
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < f._items.Count; i++)
+                {
+                    if (f._items[i] == null || f._items[i].Text == null) continue;
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append(f._items[i].Text);
+                }
+                return sb.ToString();
             }
         }
 

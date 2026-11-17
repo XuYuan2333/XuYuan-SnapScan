@@ -329,16 +329,19 @@ namespace QRSnap
                 {
                     if (AppConfig.GameOn)
                     {
-                        GameRuntime.ToggleTranslate();
+                        // 手动模式没有「翻译服务」的开/关：这个键就是「翻当前画面一次」
+                        if (AppConfig.GameAutoMode) GameRuntime.ToggleTranslate();
+                        else GameRuntime.TriggerOnce("游戏翻译快捷键");
                         try { JadeHost.Send("state-refresh", JadeHost.BuildState()); } catch (Exception) { }   // 界面开关跟着变
                     }
                     else if (_toast != null) _toast.ShowDone("先开启游戏模式，再用这个键启动翻译", false);
                     return;
                 }
-                // 游戏模式：Ctrl+Alt+F 与游戏翻译服务键一个动作——按一下开始翻，再按一下关掉
+                // 游戏模式：Ctrl+Alt+F 与游戏翻译服务键一个动作——自适应下开/关服务，手动下翻一次
                 if (id == ID_MT && AppConfig.GameOn)
                 {
-                    GameRuntime.ToggleTranslate();
+                    if (AppConfig.GameAutoMode) GameRuntime.ToggleTranslate();
+                    else GameRuntime.TriggerOnce("翻译快捷键");
                     try { JadeHost.Send("state-refresh", JadeHost.BuildState()); } catch (Exception) { }
                     return;
                 }
@@ -453,6 +456,14 @@ namespace QRSnap
         private readonly Dictionary<string, string> _preTr = new Dictionary<string, string>();
         private readonly object _preTrLock = new object();
 
+        // 跨轮次的长缓存：同一句原文（OCR 抖一两个字也算同一句）翻过一次就不再问模型。
+        // 以前每轮 PreTranslateGame 都先 PreTrClear 再把所有行重翻一遍，字幕根本没换也会反复调用翻译，
+        // 遮罩跟着反复重贴——表现得就是「画面不动也一直在闪、一直在翻」。
+        private readonly Dictionary<string, string> _preTrLong = new Dictionary<string, string>();
+        private readonly List<string> _preTrLongOrder = new List<string>();
+        private string _preTrLongScope = "";
+        private const int PreTrLongCap = 800;
+
         // 缓存键：只认「字」，空格/标点/大小写抖动不该让缓存失效
         internal static string TrKey(string s)
         {
@@ -485,7 +496,8 @@ namespace QRSnap
             lock (_preTrLock)
             {
                 string v;
-                return _preTr.TryGetValue(k, out v) ? v : null;
+                if (_preTr.TryGetValue(k, out v)) return v;
+                return PreTrLongGetLocked(k);
             }
         }
 
@@ -494,7 +506,51 @@ namespace QRSnap
             if (string.IsNullOrEmpty(tr)) return;
             string k = TrKey(srcText);
             if (k.Length == 0) return;
-            lock (_preTrLock) { _preTr[k] = tr; }
+            lock (_preTrLock)
+            {
+                _preTr[k] = tr;
+                PreTrLongPutLocked(k, tr);
+            }
+        }
+
+        // 长缓存的键要带「翻译来源」：换模型 / 切在线服务之后旧译文不能再拿来用
+        private static string PreTrScope()
+        {
+            if (AppConfig.AliMt) return "ali:" + AppConfig.MtProv;
+            if (AppConfig.AiMt) return "ai:" + AppConfig.AiModel;
+            return "local:" + AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+        }
+
+        private void EnsurePreTrScopeLocked()
+        {
+            string scope = PreTrScope();
+            if (string.Equals(scope, _preTrLongScope, StringComparison.Ordinal)) return;
+            _preTrLong.Clear();
+            _preTrLongOrder.Clear();
+            _preTrLongScope = scope;
+        }
+
+        private string PreTrLongGetLocked(string key)
+        {
+            EnsurePreTrScopeLocked();
+            string v;
+            return _preTrLong.TryGetValue(_preTrLongScope + "\u0001" + key, out v) ? v : null;
+        }
+
+        private void PreTrLongPutLocked(string key, string tr)
+        {
+            if (string.IsNullOrEmpty(tr)) return;
+            EnsurePreTrScopeLocked();
+            string full = _preTrLongScope + "\u0001" + key;
+            if (_preTrLong.ContainsKey(full)) { _preTrLong[full] = tr; return; }
+            _preTrLong[full] = tr;
+            _preTrLongOrder.Add(full);
+            if (_preTrLongOrder.Count > PreTrLongCap)
+            {
+                int drop = _preTrLongOrder.Count - PreTrLongCap;
+                for (int i = 0; i < drop; i++) _preTrLong.Remove(_preTrLongOrder[i]);
+                _preTrLongOrder.RemoveRange(0, drop);
+            }
         }
 
         // 提示条第二行：这一轮 AI 到底干了什么。没有 AI 介入就返回 null，提示条还是单行。
@@ -994,6 +1050,14 @@ namespace QRSnap
                     PreTrPut(s.Text, pre);
                     continue;
                 }
+                // 长缓存命中：这句原文以前翻过（OCR 抖一两个字也会落到同一个键上），直接复用
+                string cached = PreTrGet(s.Text);
+                if (cached != null)
+                {
+                    PreTrPut(s.Text, cached);
+                    all.Append(s.Text).Append('\n');
+                    continue;
+                }
                 texts.Add(s.Text);
                 srcs.Add(s.Text);
                 all.Append(s.Text).Append('\n');
@@ -1050,7 +1114,7 @@ namespace QRSnap
                     try
                     {
                         got = profile == AppConfig.MtProfileEfficiency
-                            ? LlamaMt.TranslateMany(plan[1], texts, tgt, texts.Count >= 8 ? 4 : 2)
+                            ? LlamaMt.TranslateMany(plan[1], texts, tgt, texts.Count >= 4 ? 4 : 2)
                             : LlamaMt.TranslateBatch(plan[1], texts, tgt);
                     }
                     catch (Exception) { got = null; }
@@ -1389,7 +1453,7 @@ namespace QRSnap
                                     List<string> texts = new List<string>();
                                     for (int i = 0; i < need.Count; i++) texts.Add(segs[need[i]].Text ?? "");
                                     List<string> got = null;
-                                    try { got = LlamaMt.TranslateMany(plan[1], texts, tgt, need.Count >= 8 ? 4 : 2); }
+                                    try { got = LlamaMt.TranslateMany(plan[1], texts, tgt, need.Count >= 4 ? 4 : 2); }
                                     catch (Exception) { got = null; }
                                     if (got != null)
                                     {
@@ -1499,6 +1563,17 @@ namespace QRSnap
                             Log("mt asis fallback | " + fb.Text + " => " + trs[i]);
                             trs[i] = null;
                         }
+                    }
+
+                    // 定稿的译文写进跨轮次长缓存：下一轮同一句原文（哪怕 OCR 抖个字）
+                    // 直接命中，不再调模型。这是「画面不动也反复翻译」的止挡。
+                    for (int i = 0; i < segs.Count; i++)
+                    {
+                        OcrSegment sc = segs[i];
+                        if (sc == null || sc.SkipMt || string.IsNullOrEmpty(sc.Text)) continue;
+                        string fin = trs[i];
+                        if (fin == null || fin.Trim().Length == 0) continue;
+                        PreTrPut(sc.Text, fin);
                     }
 
                     for (int i = 0; i < segs.Count; i++)
@@ -2667,8 +2742,16 @@ namespace QRSnap
             sb.Append(",\"trigger\":").Append(AppConfig.GameTrigger);
             sb.Append(",\"interval\":").Append(AppConfig.GameIntervalMs);
             sb.Append(",\"sens\":").Append(AppConfig.GameSensitivity);
+            sb.Append(",\"sensLevel\":").Append(AppConfig.GameSensLevel);
+            sb.Append(",\"sensName\":").Append(J.S(AppConfig.GameSensName()));
+            sb.Append(",\"sensPreset\":[").Append(AppConfig.GameAutoSampleMs).Append(",")
+              .Append(AppConfig.GameAutoHoldMs).Append(",")
+              .Append(AppConfig.GameAutoWatchMs).Append(",")
+              .Append(AppConfig.GameMaskConfirmMs).Append("]");
             sb.Append(",\"merge\":").Append(J.B(AppConfig.GameMerge));
             sb.Append(",\"fontFilter\":").Append(J.B(AppConfig.GameFontFilter));
+            sb.Append(",\"block\":").Append(J.B(AppConfig.GameBlock));
+            sb.Append(",\"blockDebug\":").Append(J.B(AppConfig.GameBlockDebug));
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             sb.Append(",\"toastOn\":").Append(J.B(AppConfig.GameToastOn));
@@ -2676,7 +2759,6 @@ namespace QRSnap
             sb.Append(",\"autoHold\":").Append(AppConfig.GameAutoHoldMs);
             sb.Append(",\"autoSample\":").Append(AppConfig.GameAutoSampleMs);
             sb.Append(",\"autoWatch\":").Append(AppConfig.GameAutoWatchMs);
-            sb.Append(",\"autoDetect\":").Append(AppConfig.GameAutoDetectMs);
             sb.Append(",\"maskConfirm\":").Append(AppConfig.GameMaskConfirmMs);
             sb.Append(",\"transActive\":").Append(J.B(AppConfig.GameOn && GameRuntime.TranslateActive));
             sb.Append(",\"transHotkey\":").Append(J.S(AppConfig.HotkeyGameTrans));
@@ -3061,10 +3143,7 @@ namespace QRSnap
                     }
                     else if (k == "gameautodetect")
                     {
-                        int gv;
-                        if (int.TryParse(v, out gv)) AppConfig.GameAutoDetectMs = Math.Max(200, Math.Min(2000, gv));
-                        try { AppConfig.Save(); } catch (Exception) { }
-                        GameRuntime.Reconfigure();
+                        // 检测间隔是死参数（没有任何代码读），v1.4.14 起忽略
                     }
                     else if (k == "gametrans")
                     {
@@ -3115,6 +3194,13 @@ namespace QRSnap
                         if (int.TryParse(v, out gv)) AppConfig.GameIntervalMs = Math.Max(250, Math.Min(5000, gv));
                         GameRuntime.Reconfigure();
                     }
+                    else if (k == "gamelevel")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.ApplyGameSens(gv);
+                        try { AppConfig.Save(); } catch (Exception) { }
+                        GameRuntime.Reconfigure();
+                    }
                     else if (k == "gamesens")
                     {
                         int gv;
@@ -3152,6 +3238,11 @@ namespace QRSnap
                     else if (k == "gamefontfilter")
                     {
                         AppConfig.GameFontFilter = v == "true" || v == "1";
+                    }
+                    else if (k == "gameblockdebug")
+                    {
+                        AppConfig.GameBlockDebug = v == "true" || v == "1";
+                        if (!AppConfig.GameBlockDebug) BlockDebug.Hide();
                     }
                     else if (k == "opacity")
                     {

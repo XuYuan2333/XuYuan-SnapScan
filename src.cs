@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.9.0")]
-[assembly: AssemblyFileVersion("1.4.9.0")]
+[assembly: AssemblyVersion("1.4.14.0")]
+[assembly: AssemblyFileVersion("1.4.14.0")]
 
 namespace QRSnap
 {
@@ -496,6 +496,8 @@ namespace QRSnap
         public static string GameMaskMode = MtModeEfficiency;            // 游戏遮罩独立控制；仅效率，游戏页不提供拟真
         public static bool GameToastOn = true;                           // 游戏模式是否显示右下角识别提示
         public static bool GameMerge = true;                             // 合并被拆开的字幕行
+        public static bool GameBlock = true;                             // 按位置把相邻行聚成段落块，整块翻译（PreTranslate 里并发）
+        public static bool GameBlockDebug = false;                       // 调试：把自动分割出的文字块用矩形画在屏幕上
         public static bool GameFontFilter = true;                        // 框选得大时按字号滤掉 UI 小字，只翻最大的那几行
         public static bool GameAutoClose = true;                         // 遮罩期自动收遮罩（字幕消失/被替换）
         // 日文兜底：中文模型一个假名都吐不出来，日文会被判成中文直接跳过。
@@ -511,9 +513,52 @@ namespace QRSnap
         public static int GameAutoSampleMs = 40;                         // 自适应：采样间隔（20~500ms）
         public static int GameAutoWatchMs = 800;                         // 自适应：遮罩在屏时的比对间隔（400~3000ms）
         // 自动识别区域（自动找字块）已在 1.4.8 移除：游戏模式只认玩家画好的固定区域。
-        public static int GameAutoDetectMs = 400;                        // 检测间隔（200~2000ms）：越短越跟手，CPU 越高
         // 框数上限已取消：检出一块翻一块。老 ini 里的 gameautocap 仍会被读入但不再参与运行。
         public static int GameMaskConfirmMs = 1000;                      // 遮罩期「文字确认」最短间隔（300~5000ms）：背景变了先 OCR 复核文字再决定收不收
+        // 灵敏度档位：0低 1中 2高 3极高。每档内置一整套阈值，界面上只选档不填数。
+        // 档位越高越跟手（采样更密、定住更短、确认更快），代价是 CPU 和翻译调用变多。
+        public static int GameSensLevel = 2;
+        public static readonly string[] GameSensNames = { "低", "中", "高", "极高" };
+        public static readonly int[,] GameSensPresets = new int[4, 5]
+        {
+            // 采样间隔 / 定住时长 / 遮罩巡检间隔 / 文字确认间隔 / 手动比对间隔（毫秒）
+            {  80, 900, 2500, 3000, 3000 },   // 低：最省资源，字幕停留久的场景
+            {  50, 550, 1500, 1800, 2000 },   // 中：常规剧情/对话
+            {  35, 350,  900, 1100, 1200 },   // 高：默认，跟手与开销均衡
+            {  25, 220,  600,  700,  900 },   // 极高：字幕切得快
+        };
+
+        public static string GameSensName()
+        {
+            int lv = Math.Max(0, Math.Min(3, GameSensLevel));
+            return GameSensNames[lv];
+        }
+
+        // 选档即落一整套阈值。老字段 GameSensitivity（0 最灵敏 … 4 最迟钝）跟着同步，
+        // 免得别处还按老语义读它。
+        public static void ApplyGameSens(int lv)
+        {
+            lv = Math.Max(0, Math.Min(3, lv));
+            GameSensLevel = lv;
+            GameAutoSampleMs = GameSensPresets[lv, 0];
+            GameAutoHoldMs = GameSensPresets[lv, 1];
+            GameAutoWatchMs = GameSensPresets[lv, 2];
+            GameMaskConfirmMs = GameSensPresets[lv, 3];
+            GameWatchMs = GameSensPresets[lv, 4];
+            GameSensitivity = 4 - lv;
+        }
+
+        // 老 ini 没有 gamelevel：按采样间隔反推最接近的一档，让界面显示和实际手感对得上
+        public static int GameSensNearest()
+        {
+            int best = 2, gap = int.MaxValue;
+            for (int i = 0; i < 4; i++)
+            {
+                int d = Math.Abs(GameAutoSampleMs - GameSensPresets[i, 0]);
+                if (d < gap) { gap = d; best = i; }
+            }
+            return best;
+        }
         public static bool Legacy;
 
         public static string ConfigFolder
@@ -694,6 +739,8 @@ namespace QRSnap
             GameMaskMode = MtModeEfficiency;
             GameToastOn = true;
             GameMerge = true;
+            GameBlock = true;
+            GameBlockDebug = false;
             GameFontFilter = true;
             GameAutoClose = true;
             GameWatchMs = 2500;
@@ -703,7 +750,8 @@ namespace QRSnap
             GameAutoHoldMs = 400;
             GameAutoSampleMs = 40;
             GameAutoWatchMs = 800;
-            GameAutoDetectMs = 400;
+            GameMaskConfirmMs = 1000;
+            GameSensLevel = 2;
             Legacy = false;
             try
             {
@@ -713,6 +761,7 @@ namespace QRSnap
                 _activePath = p;
 
                 string ver = string.Empty;
+                bool levelSeen = false;
                 foreach (string line in File.ReadAllLines(p, Encoding.UTF8))
                 {
                     int i = line.IndexOf('=');
@@ -793,6 +842,8 @@ namespace QRSnap
                     else if (k.Equals("gamemask", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameMaskMode = NormalizeMtMode(v);
                     else if (k.Equals("gametoaston", StringComparison.OrdinalIgnoreCase)) GameToastOn = ToBool(v);
                     else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
+                    else if (k.Equals("gameblock", StringComparison.OrdinalIgnoreCase)) GameBlock = ToBool(v);
+                    else if (k.Equals("gameblockdebug", StringComparison.OrdinalIgnoreCase)) GameBlockDebug = ToBool(v);
                     else if (k.Equals("gamefontfilter", StringComparison.OrdinalIgnoreCase)) GameFontFilter = ToBool(v);
                     else if (k.Equals("gameautoclose", StringComparison.OrdinalIgnoreCase)) GameAutoClose = ToBool(v);
                     else if (k.Equals("gamejpauto", StringComparison.OrdinalIgnoreCase)) GameJpAuto = ToBool(v);
@@ -804,11 +855,16 @@ namespace QRSnap
                     else if (k.Equals("gameautohold", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoHoldMs = Math.Max(100, Math.Min(2000, n)); }
                     else if (k.Equals("gameautosample", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoSampleMs = Math.Max(20, Math.Min(500, n)); }
                     else if (k.Equals("gameautowatch", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoWatchMs = Math.Max(400, Math.Min(3000, n)); }
-                    else if (k.Equals("gameautodetect", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameAutoDetectMs = Math.Max(200, Math.Min(2000, n)); }
                     // gameautocap：框数上限已取消，老配置里读到也不再生效（保留解析避免报未知键）
                     else if (k.Equals("gamemaskconfirm", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameMaskConfirmMs = Math.Max(300, Math.Min(5000, n)); }
+                    else if (k.Equals("gamelevel", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) { GameSensLevel = Math.Max(0, Math.Min(3, n)); levelSeen = true; } }
                     else if (k.Equals("modeldir", StringComparison.OrdinalIgnoreCase) && v.Length > 0) ModelDir = v;
                 }
+                // 灵敏度档位是唯一入口：有 gamelevel 就整套覆盖，
+                // 老 ini 没有就按采样间隔反推最接近的一档，保证界面档位和实际手感一致。
+                ApplyGameSens(levelSeen ? GameSensLevel : GameSensNearest());
+                try { JadeHost.Log("[config] game sens level=" + GameSensLevel + " (" + GameSensName() + ")" + " sample=" + GameAutoSampleMs + " hold=" + GameAutoHoldMs + " watch=" + GameAutoWatchMs + " confirm=" + GameMaskConfirmMs); } catch (Exception) { }
+
                 // gameon 本身就是「游戏模式开着」的记录，写进去就该算数；
                 // 以前这里还要求 gameautostart=1 才保留，结果 ini 里明明 gameon=1，
                 // 启动后却被抹成 false，按热键落到普通截图框选，看着像游戏模式不出翻译。
@@ -881,13 +937,15 @@ namespace QRSnap
             sb.Append("gameautohold=").Append(GameAutoHoldMs).Append("\r\n");
             sb.Append("gameautosample=").Append(GameAutoSampleMs).Append("\r\n");
             sb.Append("gameautowatch=").Append(GameAutoWatchMs).Append("\r\n");
-            sb.Append("gameautodetect=").Append(GameAutoDetectMs).Append("\r\n");
             sb.Append("gamemaskconfirm=").Append(GameMaskConfirmMs).Append("\r\n");
             sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
+            sb.Append("gamelevel=").Append(GameSensLevel).Append("\r\n");
             sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
             sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
             sb.Append("gametoaston=").Append(GameToastOn ? "1" : "0").Append("\r\n");
             sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");
+            sb.Append("gameblock=").Append(GameBlock ? "1" : "0").Append("\r\n");
+            sb.Append("gameblockdebug=").Append(GameBlockDebug ? "1" : "0").Append("\r\n");
             sb.Append("gamefontfilter=").Append(GameFontFilter ? "1" : "0").Append("\r\n");
 
             string text = sb.ToString();

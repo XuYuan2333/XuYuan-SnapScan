@@ -69,6 +69,7 @@ internal static class LlamaMt
     private static Process _proc;
     private static string _model;      // 当前服务加载的模型文件
     private static int _port;
+    private static int _slots = 1;     // llama-server 实际开了几个并发槽（GPU 4 / CPU 1），并发请求数不能超过它
     private static string _exe;
     private static DateTime _lastUse = DateTime.MinValue;
     private static Timer _idle;
@@ -438,6 +439,7 @@ internal static class LlamaMt
         // 并发槽：GPU 上开 4 槽，能把"等解码"的空隙填满（整屏几十行收益明显）；
         // CPU 上并发只会把线程挤爆，保持单槽。
         int slots = gpu ? 4 : 1;
+        _slots = slots;
         // -c 是所有槽共享的总上下文，每槽分到 -c/slots；8192/4=2048，
         // 和原来单槽一致，长行也不会被截。
         int ctx = gpu ? 8192 : 2048;
@@ -613,6 +615,7 @@ internal static class LlamaMt
         }
 
         int workers = Math.Max(1, Math.Min(maxParallel, todo.Count));
+        if (workers > _slots) workers = _slots;   // 超过槽数的请求只会在服务端排队，白占线程
         if (workers == 1)
         {
             for (int i = 0; i < todo.Count; i++)
