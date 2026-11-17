@@ -7,8 +7,8 @@ XuYuan-SnapScan 启动说明
 - WebView2 Runtime 是界面必需项：如果启动提示缺少 WebView2，请先运行本目录的 MicrosoftEdgeWebview2Setup.exe。
 - 建议 .NET Framework 4.8（Win10 21H2 / Win11 一般自带）。
 
-模型包（按需导入，光本体不会翻译）
-- OCR 包：微信 OCR + RapidOCR，导入后识字可用。
+模型包（按需导入）
+- OCR 包：微信 OCR + RapidOCR；本体已内置，模型目录丢失时再导入。
 - PLaMo Q4 包：效率档 PLaMo Q4_K_M。
 - PLaMo Q2 包：极速档 PLaMo Q2_K，按需单独导入。
 - 标准包：HyMT1.5 1.8B，导入后标准档可用（所有语种）。
