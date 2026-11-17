@@ -226,36 +226,43 @@
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
     if ($("gameFontFilter")) $("gameFontFilter").checked = g.fontFilter !== false;
     if ($("gameToastOn")) $("gameToastOn").checked = g.toastOn !== false;
+    if ($("gameBlockDebug")) $("gameBlockDebug").checked = !!g.blockDebug;
     if ($("gameAuto")) $("gameAuto").checked = !!g.auto;
     if ($("gameTriggerMode")) $("gameTriggerMode").value = g.auto ? "auto" : "manual";
     if ($("gameAutoHint")) {
       $("gameAutoHint").textContent = g.auto
-        ? "自适应：40ms 采样选区，画面定住 400ms 才识字；图像指纹挡重复 OCR、文本指纹挡重复翻译；字幕换了自动重译。"
-        : "手动：按「" + ((S && S.hotkeys && S.hotkeys.mt) || "") + "」翻译一次。";
+        ? "自适应：按 " + (g.autoSample || 40) + "ms 采样选区，画面定住 " + (g.autoHold || 400) + "ms 才识字；同一句原文只翻一次，字幕换句才重译重贴。"
+        : "手动：每按一次「" + ((S && S.hotkeys && S.hotkeys.mt) || "") + "」翻一次当前画面；画面一变化遮罩立刻消失。";
     }
 
     // 翻译服务：独立运行态，游戏模式开启≠正在翻译
     const hk = g.transHotkey || "Ctrl+Alt+T";
     if ($("gameTransKey")) $("gameTransKey").textContent = hk;
-    if ($("gameTransActive")) $("gameTransActive").checked = !!g.transActive;
+    if ($("gameTransActive")) {
+      $("gameTransActive").checked = !!g.transActive;
+      // 手动模式没有「服务」的开/关，开关点了也只会翻一次，直接禁用免得误解
+      $("gameTransActive").disabled = !g.auto;
+    }
     if ($("gameTransHint")) {
       $("gameTransHint").textContent = !g.on
         ? "先启用游戏模式；启用后按「" + hk + "」启动翻译。"
-        : (g.transActive
-          ? "翻译服务运行中：识别到字幕就自动翻译上遮罩；按「" + hk + "」暂停。"
-          : "翻译服务未启动：区域照找、不翻译不上遮罩；按「" + hk + "」或点上面开关启动。");
+        : (!g.auto
+          ? "手动模式：翻译快捷键就是「翻一次」，不用开翻译服务；画面一变遮罩自动消失。"
+          : (g.transActive
+            ? "翻译服务运行中：识别到字幕就自动翻译上遮罩；按「" + hk + "」暂停。"
+            : "翻译服务未启动：区域照找、不翻译不上遮罩；按「" + hk + "」或点上面开关启动。"));
     }
 
-    // 高级阈值：正在输入的那个框不被状态刷新打断
-    const th = [["gameAutoSample", g.autoSample], ["gameAutoHold", g.autoHold],
-      ["gameAutoDetect", g.autoDetect], ["gameAutoWatch", g.autoWatch],
-      ["gameMaskConfirm", g.maskConfirm]];
-    th.forEach(([id, val]) => {
-      const el = $(id);
-      if (!el || val === undefined || val === null) return;
-      if (document.activeElement === el) return;
-      el.value = String(val);
-    });
+    // 灵敏度档位：只选档，数字由后端预设表整套写入
+    if ($("gameSensLevel") && g.sensLevel !== undefined && g.sensLevel !== null) {
+      $("gameSensLevel").value = String(g.sensLevel);
+    }
+    if ($("gameSensSummary")) {
+      const pv = Array.isArray(g.sensPreset) ? g.sensPreset : [];
+      $("gameSensSummary").textContent = pv.length >= 4
+        ? "当前「" + (g.sensName || "") + "」内置值：采样 " + pv[0] + "ms · 定住 " + pv[1] + "ms · 巡检 " + pv[2] + "ms · 文字确认 " + pv[3] + "ms"
+        : "当前档位内置值";
+    }
 
     const badge = $("gameBadge");
     if (badge) {
@@ -1076,6 +1083,9 @@
     if ($("gameToastOn")) $("gameToastOn").addEventListener("change", (e) => {
       setConfig({ gametoaston: e.target.checked });
     });
+    if ($("gameBlockDebug")) $("gameBlockDebug").addEventListener("change", (e) => {
+      setConfig({ gameblockdebug: e.target.checked });
+    });
 
     // 翻译服务总开关：和专用快捷键等效
     if ($("gameTransActive")) $("gameTransActive").addEventListener("change", async (e) => {
@@ -1087,19 +1097,14 @@
       toast(ng.transActive ? "游戏翻译已启动" : "游戏翻译已暂停");
     });
 
-    // 高级阈值：失焦/回车后保存，非法值由后端收敛
-    const thBind = [["gameAutoSample", "gameautosample"], ["gameAutoHold", "gameautohold"],
-      ["gameAutoDetect", "gameautodetect"], ["gameAutoWatch", "gameautowatch"],
-      ["gameMaskConfirm", "gamemaskconfirm"]];
-    thBind.forEach(([id, key]) => {
-      const el = $(id);
-      if (!el) return;
-      el.addEventListener("change", async (e) => {
-        const n = Number(e.target.value);
-        if (!isFinite(n)) { applyGameState(S.game); return; }
-        const s = await setConfig({ [key]: Math.round(n) });
-        if (s && s.state) applyState(s.state);
-      });
+    // 灵敏度档位：改一下就是整套阈值一起换
+    if ($("gameSensLevel")) $("gameSensLevel").addEventListener("change", async (e) => {
+      const lv = Number(e.target.value);
+      if (!isFinite(lv)) { applyGameState(S.game); return; }
+      const s = await setConfig({ gamelevel: Math.round(lv) });
+      if (s && s.state) applyState(s.state);
+      const ng = (s && s.game) || {};
+      toast("灵敏度已切到「" + (ng.sensName || lv) + "」");
     });
     if ($("gameTriggerMode")) $("gameTriggerMode").addEventListener("change", async (e) => {
       const want = e.target.value === "auto";

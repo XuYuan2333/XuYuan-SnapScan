@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File pack.ps1            # 本体 + 全部模型包
 #   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only body  # 只打本体
 #   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only models # 只打模型包
-#   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only body -WithOcr  # 本体自带 OCR 模型（免导入）
+#   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only body -NoOcr   # 本体不带 OCR 模型（精简版，需要自己导入 OCR 包）
 # 结构必须和程序导入逻辑对上：
 #   OCR 包 = OCR Model\WeChat + OCR Model\PP-OCR
 #   翻译包 = MT Model\<*.gguf>（≥50MB 才会被识别）
@@ -11,7 +11,10 @@
 param(
     [ValidateSet('all','body','models')]
     [string]$Only = 'all',
-    # 本体包里顺带把 OCR 模型一起打进去（WeChat + PP-OCR），用户装上就能识字，不必再导入 OCR 包
+    # 本体包默认就把 OCR 模型一起打进去（WeChat + PP-OCR 的全部变体：微信 / 日文 / 极速），装上就能识字，不必再导入 OCR 包
+    # 想发精简本体时加 -NoOcr
+    [switch]$NoOcr,
+    # 兼容旧用法：显式要求带 OCR（现在默认就带，传不传都一样）
     [switch]$WithOcr
 )
 
@@ -22,7 +25,7 @@ $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outDir = Join-Path $root 'out'
 $dist   = Join-Path $root 'dist'
 $stage  = Join-Path $root '_packtmp'
-$ver    = 'v1.4.9'
+$ver    = 'v1.4.14'
 
 if (-not (Test-Path -LiteralPath $outDir)) { throw "找不到构建产物目录：$outDir，先跑 build19.ps1" }
 if (-not (Test-Path -LiteralPath $dist))   { New-Item -ItemType Directory -Path $dist | Out-Null }
@@ -74,9 +77,11 @@ if ($Only -eq 'all' -or $Only -eq 'body') {
         else { Write-Host ("  缺少 " + $f) -ForegroundColor Yellow }
     }
 
-    # 可选：OCR 模型跟着本体一起走（目录结构要和导入逻辑一致：OCR Model\WeChat、OCR Model\PP-OCR）
-    if ($WithOcr) {
-        Write-Host '[本体] 附带 OCR 模型（微信 OCR + PP-OCR）...'
+    # OCR 模型默认跟着本体一起走（目录结构要和导入逻辑一致：OCR Model\WeChat、OCR Model\PP-OCR）
+    # PP-OCR 下的全部变体（japan 日文 / tiny 极速）都要打进去
+    $includeOcr = -not $NoOcr
+    if ($includeOcr) {
+        Write-Host '[本体] 附带 OCR 模型（微信 OCR + PP-OCR 日文/极速）...'
         $ocrDst = Join-Path $stage 'OCR Model'
         New-Item -ItemType Directory -Path $ocrDst | Out-Null
         foreach ($d in @('WeChat','PP-OCR')) {
@@ -86,7 +91,7 @@ if ($Only -eq 'all' -or $Only -eq 'body') {
         }
     }
 
-    $bodyName = if ($WithOcr) { "SnapScan-$ver-Body-Full.zip" } else { "SnapScan-$ver-Body.zip" }
+    $bodyName = if ($includeOcr) { "SnapScan-$ver-Body.zip" } else { "SnapScan-$ver-Body-Slim.zip" }
     New-Zip -StageDir $stage -ZipPath (Join-Path $dist $bodyName) -Level 'Optimal'
 }
 

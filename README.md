@@ -1,4 +1,4 @@
-# XuYuan-SnapScan v1.4.9
+# XuYuan-SnapScan v1.4.14
 
 Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻译、手动游戏字幕翻译。
 界面为 JadeView 2 + WebView2，模型按需导入，本体不内置大模型。
@@ -23,7 +23,7 @@ Windows 截图识别 / 离线翻译工具：二维码、文字 OCR、截图翻�
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.9-Body.zip` | 112 MB | 本体 + 微信 OCR + PP-OCR（日文 / 极速），装着就能识字 |
+| `SnapScan-v1.4.14-Body.zip` | 112.3 MB | 本体 + 微信 OCR + PP-OCR（日文 / 极速），装着就能识字 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 573 MB | 效率档 PLaMo Q4_K_M |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 410 MB | 极速档 PLaMo Q2_K |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 1.1 GB | 标准档 HyMT1.5 1.8B |
@@ -65,7 +65,23 @@ OCR 引擎：
 5. PLaMo 只导入 Q4 也能用效率档；需要极速档时再单独导入 Q2 包。
 6. 清除 API Key 会自动关闭所有依赖 Key 的 AI 功能。
 
-## 游戏模式：固定区域 + 翻译开关（v1.4.9）
+## 游戏模式：固定区域 + 翻译开关（v1.4.14）
+
+### v1.4.14：四档灵敏度 + 分块框可视化 + 阈值修正
+
+**灵敏度只留 4 档**：低 / 中 / 高 / 极高。删掉第 5 档「敏感肌」——它和「极高」只差采样 5ms、定住 80ms，实际手感没有区别；老配置 `gamelevel=4` 读入后钳到 3（极高）。
+
+**阈值逐条核对**：`GameAutoSampleMs` / `GameAutoHoldMs` / `GameAutoWatchMs` / `GameWatchMs` 都生效；`GameMaskConfirmMs` 在「无像素变化」分支被硬编码 `Math.Max(1200, …)`，高 1100 / 极高 700 实际失效，已改成 `Math.Max(300, …)`；`GameAutoDetectMs` 全项目没有任何代码读取，字段、ini 读写、状态输出全部删除。
+
+**分块框可视化**：设置里新增「显示分块框（调试）」，ini 键 `gameblockdebug=1`。每轮 OCR 后在选区上画：粗彩框 = 一个翻译块（带 `#1/#2…` 编号）、白色细点线 = 块内每一行的原框、左上角「分块 N 个」。抓图前自动隐藏、抓完立刻恢复，框线不会被自己的 OCR 读成正文（不用 `WDA_EXCLUDEFROMCAPTURE`，本项目里分层窗口用它会让整个遮罩看不见）。
+
+### v1.4.13：按文字位置并成段落块，整块并发翻译
+
+`GameFilter.GroupBlocks` 把同一选区、上下相邻、左右对得上的 2~4 行并成一个段落块再翻译（行距 ≤0.9 倍行高、水平重叠 ≥35%、单行高倍率 ≤1.8、一块最多 4 行 / 220 字、句末标点收紧到 0.4 倍行高 + 55% 重叠、不跨分区）。块之间走 `llama-server --parallel 4` 的 4 个槽并发；`gameblock=1` 默认开，设 0 退回逐行翻译。
+
+### v1.4.11：文字没变就不收遮罩
+
+40 字以内按 LCS 80% 比、超过 40 字按 3-gram 覆盖率比；读到自己译文按「没变」处理；只有真贴过译文的分区才有资格收遮罩；`GameShowing` 只认「真的画着东西」的分区，空壳遮罩不再空转巡检。
 
 ### v1.4.9：修掉 1.4.8 的启动故障
 
