@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.14.0")]
-[assembly: AssemblyFileVersion("1.4.14.0")]
+[assembly: AssemblyVersion("1.4.15.0")]
+[assembly: AssemblyFileVersion("1.4.15.0")]
 
 namespace QRSnap
 {
@@ -369,6 +369,9 @@ namespace QRSnap
         // 日文专用识别模型：PP-OCR 的中文模型字典里没有假名（keys.txt 6904 项、假名为 0），
         // 日文只会被强行映射成汉字再判成中文。这一档换成 japan_PP-OCRv4 的 rec + 日文字典。
         public const string EnginePpJapan = "ppjapan";
+        // RapidOCR 档：模型来自 RapidAI/RapidOCR（PaddleOCR 权重转 ONNX，Apache-2.0），
+        // PP-OCRv4 det + rec，放在 "OCR Model\PP-OCR\rapid" 下。
+        public const string EnginePpRapid = "pprapid";
         public const string ModelFolderName = "OCR Model";
         public const string MtFolderName = "MT Model";
 
@@ -402,6 +405,7 @@ namespace QRSnap
             string tier = "tiny";
             if (engine == EnginePpJapan) tier = "japan";
             else if (engine == EnginePpMedium) tier = "medium";
+            else if (engine == EnginePpRapid) tier = "rapid";
             return Path.Combine(Path.Combine(ModelRoot(), "PP-OCR"), tier);
         }
         public const string FileName = "XuYuan-SnapScan_config.ini";
@@ -599,6 +603,7 @@ namespace QRSnap
             if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
             if (v == EnginePpSmall || v == "small" || v == "standard") return EnginePpTiny;
             if (v == EnginePpJapan || v == "japan" || v == "jp" || v == "日文") return EnginePpJapan;
+            if (v == EnginePpRapid || v == "rapidocr" || v == "rapid-ocr" || v == "rapid_ocr") return EnginePpRapid;
             if (v == EnginePpMedium || v == "medium" || v == "med" || v == "高精") return EnginePpTiny;
             return EngineWeChat;
         }
@@ -606,7 +611,7 @@ namespace QRSnap
         public static bool IsLocalEngine(string engine)
         {
             string e = NormalizeEngine(engine);
-            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium || e == EnginePpJapan;
+            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium || e == EnginePpJapan || e == EnginePpRapid;
         }
 
         private static bool ToBool(string v)
@@ -2473,6 +2478,7 @@ namespace QRSnap
             string e = AppConfig.NormalizeEngine(engine);
             if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
+            if (e == AppConfig.EnginePpRapid) return "RapidOCR";
             return "PP-OCR 极速";
         }
 
@@ -6948,6 +6954,7 @@ namespace QRSnap
                 if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
                 else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
                 else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
+                else if (mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
                 else if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
 
                 Bitmap bmp = LoadBitmap(imagePath);
@@ -6958,6 +6965,11 @@ namespace QRSnap
 
                 StringBuilder sb = new StringBuilder();
                 sb.Append("engine=").Append(eng).Append("\r\n");
+                if (AppConfig.IsLocalEngine(AppConfig.Engine))
+                {
+                    PpOcr pp = Ocr.LocalFor(AppConfig.Engine);
+                    if (pp != null) sb.Append("classes=").Append(pp.ClassCount).Append(" keys=").Append(pp.KeyCount).Append("\r\n");
+                }
                 sb.Append("ms=").Append(ms).Append("\r\n");
                 sb.Append("lines=").Append(segs.Count).Append("\r\n");
                 sb.Append("SEG_BEGIN\r\n");
@@ -6990,6 +7002,7 @@ namespace QRSnap
                 else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
                 else if (mode == "ppsmall") AppConfig.Engine = AppConfig.EnginePpTiny;   // 标准档已下线，并入极速
                 else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
+                else if (mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
 
                 EngineProbe probe = Ocr.Probe();
                 Bitmap bmp = LoadBitmap(imagePath);

@@ -52,6 +52,8 @@ namespace QRSnap
         private int _classes;
 
         public string Label { get { return _label; } }
+        public int ClassCount { get { return _classes; } }
+        public int KeyCount { get { return _keys.Count; } }
 
         // "-dir" is a tier folder holding det.onnx / rec.onnx / keys.txt
         public PpOcr(string dir, string label)

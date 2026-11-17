@@ -2175,6 +2175,7 @@ namespace QRSnap
             if (e == AppConfig.EnginePpTiny) return "PP-OCR 极速";
             if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
             if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
+            if (e == AppConfig.EnginePpRapid) return "RapidOCR";
             return "Windows OCR";
         }
 
@@ -2186,6 +2187,7 @@ namespace QRSnap
             if (e == AppConfig.EnginePpTiny) return "轻量 · 快";
             if (e == AppConfig.EnginePpMedium) return "高精度";
             if (e == AppConfig.EnginePpJapan) return "日文专用 · 假名";
+            if (e == AppConfig.EnginePpRapid) return "社区方案 · 新";
             return "系统兜底";
         }
 
@@ -2675,7 +2677,7 @@ namespace QRSnap
             sb.Append(",\"list\":[");
             bool firstOpt = true;
             string[] keys = new string[] {
-                AppConfig.EngineWeChat, AppConfig.EnginePpTiny, AppConfig.EnginePpJapan, AppConfig.EngineSystem };
+                AppConfig.EngineWeChat, AppConfig.EnginePpTiny, AppConfig.EnginePpRapid, AppConfig.EnginePpJapan, AppConfig.EngineSystem };
             for (int i = 0; i < keys.Length; i++)
             {
                 string k = keys[i];
