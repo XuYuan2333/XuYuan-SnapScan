@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.15.0")]
-[assembly: AssemblyFileVersion("1.4.15.0")]
+[assembly: AssemblyVersion("1.4.16.0")]
+[assembly: AssemblyFileVersion("1.4.16.0")]
 
 namespace QRSnap
 {
@@ -493,7 +493,11 @@ namespace QRSnap
         }
         public static bool GameOn;                                       // 游戏模式是否运行
         public static string GameRegions = "";                           // 多个固定区域：x,y,w,h;x,y,w,h
-        public static int GameTrigger;                                   // 0=变化即翻 1=固定间隔 2=手动快捷键
+        public static int GameTrigger;                                   // 0=变化即翻 1=固定间隔 2=手动快捷键 3=鼠标停稳后翻一次
+        public static bool GameRoi = true;                               // 动态 ROI：只重扫画面里真正变化的那几行，没变的部分沿用上一轮结果
+        public static bool GameBackoff = true;                           // 空结果退避：连续认不出字时把采样间隔逐步拉长，避免空转
+        public static int GameDwellMs = 300;                             // 鼠标停稳触发：光标静止多久算停稳（100~1500ms）
+        public static bool GameDwellOn;                                  // 自动模式下只在鼠标停稳且移动过一段距离时扫一次
         public static int GameIntervalMs = 500;                          // 固定间隔，默认 0.5s
         public static int GameSensitivity = 2;                           // 0超灵敏 1灵敏 2平衡 3迟钝 4最迟钝
         public static string GameModel = MtProfileEfficiency;            // 游戏模式默认 0.5B，可切标准
@@ -738,6 +742,10 @@ namespace QRSnap
             GameOn = false;
             GameRegions = "";
             GameTrigger = 2;
+            GameRoi = true;
+            GameBackoff = true;
+            GameDwellMs = 300;
+            GameDwellOn = false;
             GameIntervalMs = 500;
             GameSensitivity = 2;
             GameModel = MtProfileEfficiency;
@@ -841,6 +849,10 @@ namespace QRSnap
                     else if (k.Equals("mtprov", StringComparison.OrdinalIgnoreCase)) MtProv = NormalizeProv(v);
                     else if (k.Equals("gameregions", StringComparison.OrdinalIgnoreCase)) GameRegions = v;
                     else if (k.Equals("gametrigger", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameTrigger = Math.Max(0, Math.Min(2, n)); }
+                    else if (k.Equals("gamerio", StringComparison.OrdinalIgnoreCase)) GameRoi = ToBool(v);
+                    else if (k.Equals("gamebackoff", StringComparison.OrdinalIgnoreCase)) GameBackoff = ToBool(v);
+                    else if (k.Equals("gamedwellon", StringComparison.OrdinalIgnoreCase)) GameDwellOn = ToBool(v);
+                    else if (k.Equals("gamedwellms", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameDwellMs = Math.Max(100, Math.Min(1500, n)); }
                     else if (k.Equals("gameinterval", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameIntervalMs = Math.Max(250, Math.Min(5000, n)); }
                     else if (k.Equals("gamesens", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameSensitivity = Math.Max(0, Math.Min(4, n)); }
                     else if (k.Equals("gamemodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameModel = NormalizeMtProfile(v);
@@ -931,6 +943,10 @@ namespace QRSnap
             sb.Append("gameon=").Append(GameOn ? "1" : "0").Append("\r\n");
             sb.Append("gameregions=").Append(GameRegions ?? "").Append("\r\n");
             sb.Append("gametrigger=").Append(GameTrigger).Append("\r\n");
+            sb.Append("gamerio=").Append(GameRoi ? "1" : "0").Append("\r\n");
+            sb.Append("gamebackoff=").Append(GameBackoff ? "1" : "0").Append("\r\n");
+            sb.Append("gamedwellon=").Append(GameDwellOn ? "1" : "0").Append("\r\n");
+            sb.Append("gamedwellms=").Append(GameDwellMs).Append("\r\n");
             sb.Append("gameinterval=").Append(GameIntervalMs).Append("\r\n");
             sb.Append("gameautoclose=").Append(GameAutoClose ? "1" : "0").Append("\r\n");
             sb.Append("gamejpauto=").Append(GameJpAuto ? "1" : "0").Append("\r\n");

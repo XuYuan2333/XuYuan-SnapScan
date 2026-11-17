@@ -431,6 +431,14 @@
       </label>
     </div>
     <label class="switch-row">
+      <div><b>动态 ROI · 只重扫变化行</b><i>画面没变的部分直接沿用上一轮识别结果，只把变化的那几条横带重新识别；覆盖太大时自动退回整区。默认开，省 OCR、也减少遮罩重画。</i></div>
+      <input type="checkbox" id="gameRoi"><span class="sw"></span>
+    </label>
+    <label class="switch-row">
+      <div><b>鼠标停稳才扫描</b><i>自动模式下，光标静止约 300ms 且比上一轮移动过 30px 才扫一次；鼠标一直在动就不扫，适合边操作边看字幕。</i></div>
+      <input type="checkbox" id="gameDwellOn"><span class="sw"></span>
+    </label>
+    <label class="switch-row">
       <div><b>显示分块框（调试）</b><i>把自动分割出来的文字块用矩形画在屏幕上：粗框=一个翻译块，细虚线=块内每一行的原框。用来核对合并对不对。</i></div>
       <input type="checkbox" id="gameBlockDebug"><span class="sw"></span>
     </label>

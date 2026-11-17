@@ -516,9 +516,13 @@ namespace QRSnap
         // 长缓存的键要带「翻译来源」：换模型 / 切在线服务之后旧译文不能再拿来用
         private static string PreTrScope()
         {
-            if (AppConfig.AliMt) return "ali:" + AppConfig.MtProv;
-            if (AppConfig.AiMt) return "ai:" + AppConfig.AiModel;
-            return "local:" + AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+            string scope;
+            if (AppConfig.AliMt) scope = "ali:" + AppConfig.MtProv;
+            else if (AppConfig.AiMt) scope = "ai:" + AppConfig.AiModel;
+            else scope = "local:" + AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
+            // 游戏模式按进程名隔离缓存：不同游戏的同名台词不会互相串译，换游戏自动失效。
+            string game = GameRuntime.CacheProfile;
+            return game.Length == 0 ? scope : scope + "|game:" + game;
         }
 
         private void EnsurePreTrScopeLocked()
@@ -2754,6 +2758,9 @@ namespace QRSnap
             sb.Append(",\"fontFilter\":").Append(J.B(AppConfig.GameFontFilter));
             sb.Append(",\"block\":").Append(J.B(AppConfig.GameBlock));
             sb.Append(",\"blockDebug\":").Append(J.B(AppConfig.GameBlockDebug));
+            sb.Append(",\"roi\":").Append(J.B(AppConfig.GameRoi));
+            sb.Append(",\"dwell\":").Append(J.B(AppConfig.GameDwellOn));
+            sb.Append(",\"dwellMs\":").Append(AppConfig.GameDwellMs);
             sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             sb.Append(",\"toastOn\":").Append(J.B(AppConfig.GameToastOn));
@@ -3245,6 +3252,20 @@ namespace QRSnap
                     {
                         AppConfig.GameBlockDebug = v == "true" || v == "1";
                         if (!AppConfig.GameBlockDebug) BlockDebug.Hide();
+                    }
+                    else if (k == "gamerio")
+                    {
+                        AppConfig.GameRoi = v == "true" || v == "1";
+                    }
+                    else if (k == "gamedwellon")
+                    {
+                        AppConfig.GameDwellOn = v == "true" || v == "1";
+                        GameRuntime.Reconfigure();
+                    }
+                    else if (k == "gamedwellms")
+                    {
+                        int gv;
+                        if (int.TryParse(v, out gv)) AppConfig.GameDwellMs = Math.Max(100, Math.Min(1500, gv));
                     }
                     else if (k == "opacity")
                     {

@@ -45,6 +45,7 @@ namespace QRSnap
         private InferenceSession _det;
         private InferenceSession _rec;
         private static readonly object CropLock = new object();   // GDI+ 克隆同一张图要串行
+        private readonly object _recRunLock = new object();        // rec.Run 共用一个输入 tensor，并行会互相踩
         private string _detIn;
         private string _recIn;
         private List<string> _keys = new List<string>();
@@ -475,6 +476,8 @@ namespace QRSnap
             }
 
             DenseTensor<float> t = new DenseTensor<float>(data, new int[] { 1, 3, th, tw });
+            lock (_recRunLock)
+            {
             using (var results = _rec.Run(new[] { NamedOnnxValue.CreateFromTensor(_recIn, t) }))
             {
                 int classes = _classes > 0 ? _classes : 1;
@@ -501,6 +504,7 @@ namespace QRSnap
                     prev = best;
                 }
                 return sb.ToString();
+            }
             }
         }
 

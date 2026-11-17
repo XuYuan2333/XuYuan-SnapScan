@@ -227,6 +227,8 @@
     if ($("gameFontFilter")) $("gameFontFilter").checked = g.fontFilter !== false;
     if ($("gameToastOn")) $("gameToastOn").checked = g.toastOn !== false;
     if ($("gameBlockDebug")) $("gameBlockDebug").checked = !!g.blockDebug;
+    if ($("gameRoi")) $("gameRoi").checked = g.roi !== false;
+    if ($("gameDwellOn")) $("gameDwellOn").checked = !!g.dwell;
     if ($("gameAuto")) $("gameAuto").checked = !!g.auto;
     if ($("gameTriggerMode")) $("gameTriggerMode").value = g.auto ? "auto" : "manual";
     if ($("gameAutoHint")) {
@@ -1085,6 +1087,12 @@
     });
     if ($("gameBlockDebug")) $("gameBlockDebug").addEventListener("change", (e) => {
       setConfig({ gameblockdebug: e.target.checked });
+    });
+    if ($("gameRoi")) $("gameRoi").addEventListener("change", (e) => {
+      setConfig({ gamerio: e.target.checked });
+    });
+    if ($("gameDwellOn")) $("gameDwellOn").addEventListener("change", (e) => {
+      setConfig({ gamedwellon: e.target.checked });
     });
 
     // 翻译服务总开关：和专用快捷键等效

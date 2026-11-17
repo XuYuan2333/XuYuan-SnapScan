@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -39,9 +40,15 @@ namespace QRSnap
             public int Zid;  // 这块专属的遮罩窗口编号（跟着块走，块顺序变了也不会串）
             public int Lines;      // 这块上一轮画上去几行译文
             public string LastText; // 这块上一轮的原文，用来跳过重复翻译
+            public List<OcrSegment> PrevSegs; // 上一轮真正上屏的逐行结果：整块拼一起会把「只改一行」稀释掉，必须逐行比
             public Rectangle ShownRect;    // 这块遮罩上一次真正贴在屏幕上的矩形（用于「原文没变只挪框」时搬遮罩）
             public int DirtyStreak;       // 连续几次检测到像素变化：单帧抖动不撤罩重译，连续四次才判脏
             public string JpKey;          // 上一次日文复核时的原文指纹：同一句话不重复跑日文模型
+            public byte[] RoiGray;        // 上一轮「已接受」画面的 160x90 灰度采样，做动态 ROI 只重扫变化行
+            public int RoiW, RoiH;
+            public List<Rectangle> RoiBands;   // 本轮要重扫的变化横带（null=整区，空表=无变化）
+            public byte[] RoiNew;             // 本轮画面的灰度采样，OCR 接受后作为下一轮基线
+            public bool RoiFull;
         }
         private static List<RegionSlot> _slots = new List<RegionSlot>();
         private static bool _paused;
@@ -53,6 +60,14 @@ namespace QRSnap
         private const int ZidPool = 96;
         private static readonly List<int> _freeZid = new List<int>();
         private static int _zidNext;
+        // 单槽合并：OCR 正在跑时再来一批变化，不排队堆任务，只记一个「跑完再补一次」。
+        private static bool _pendingRun;
+        private static long _autoHoldUntil;      // 空结果退避截止时间（Environment.TickCount）
+        private static int _emptyStreak;         // 连续几轮没有识别到文字
+        private static bool _allowWhileShowing;  // 遮罩期 MaskTick 主动触发重扫时，允许进入 DoTick
+        private static Point _dwellPos;          // 鼠标停稳触发：上一次采样时的光标位置
+        private static long _dwellSince;          // 光标停住起始时刻
+        private static Point _dwellAnchor;        // 上一轮扫描时的光标位置（移动够远才允许再扫）
 
 
         private static int NewZid()
@@ -184,6 +199,25 @@ namespace QRSnap
         // 游戏「翻译服务」运行态：和「游戏模式开没开」分开。
         // false = 只做准备（自动识别区域照常找字、界面照常显示区域），不 OCR、不翻译、不上遮罩。
         public static bool TranslateActive { get; private set; }
+
+        // 每游戏缓存命名空间：用遮罩下面那个窗口的进程名做身份，换游戏自动换缓存桶。
+        // 只取进程名不取标题（标题经常带章节/关卡名，会一直变，缓存全被拆散）。
+        public static string CacheProfile
+        {
+            get
+            {
+                if (!TranslateActive || _maskHwnd == IntPtr.Zero) return "";
+                try
+                {
+                    uint pid = 0;
+                    GetWindowThreadProcessId(_maskHwnd, out pid);
+                    if (pid == 0) return "";
+                    using (Process p = Process.GetProcessById((int)pid))
+                        return p.ProcessName == null ? "" : p.ProcessName.ToLowerInvariant();
+                }
+                catch (Exception) { return ""; }
+            }
+        }
 
         // 专用快捷键/界面开关：真正启动或暂停翻译。
         public static void ToggleTranslate()
@@ -688,12 +722,12 @@ namespace QRSnap
                 int ms = AppConfig.GameAutoSampleMs;
                 if (ms < 20) ms = 20;
                 if (ms > 500) ms = 500;
-                _autoLastGray = null;
-                _autoLastBaseGray = null;
                 _autoStableAt = Environment.TickCount;
-                _autoBaseReady = false;
                 _autoOcrSkip = 0;
                 _autoTextSkip = 0;
+                _dwellPos = Cursor.Position;
+                _dwellAnchor = _dwellPos;
+                _dwellSince = Environment.TickCount;
                 _autoTimer = new System.Threading.Timer(AutoTick, null, ms, ms);
                 JadeHost.Log("[game] auto watch start sample=" + ms + "ms hold=" + AppConfig.GameAutoHoldMs
                     + "ms watch=" + AppConfig.GameAutoWatchMs + "ms");
@@ -710,6 +744,29 @@ namespace QRSnap
             }
         }
 
+        // 鼠标停稳：同一位置停够 GameDwellMs，且离上一次真正扫描的锚点至少 30px，
+        // 才认为用户「停下来看字幕了」。遮罩显示期间的自动更新也走这一条。
+        private static bool DwellStill()
+        {
+            long nowTick = (long)Environment.TickCount;
+            Point mp = Cursor.Position;
+            if (mp != _dwellPos)
+            {
+                _dwellPos = mp;
+                _dwellSince = nowTick;
+                return false;
+            }
+            return nowTick - _dwellSince >= Math.Max(100, AppConfig.GameDwellMs);
+        }
+
+        private static bool DwellReady()
+        {
+            if (!DwellStill()) return false;
+            Point mp = Cursor.Position;
+            int ddx = mp.X - _dwellAnchor.X, ddy = mp.Y - _dwellAnchor.Y;
+            return ddx * ddx + ddy * ddy >= 30 * 30;
+        }
+
         private static void AutoTick(object state)
         {
             if (!AppConfig.GameOn || _paused || _overlayClosed) { StopAuto(); return; }
@@ -717,6 +774,11 @@ namespace QRSnap
             if (_busy) return;
             if (_maskClosing) { AutoNote("closing"); return; }
             if (_autoBusy) return;
+            long nowTick = (long)Environment.TickCount;
+            if (nowTick < _autoHoldUntil) { AutoNote("backoff"); return; }
+            // 鼠标停稳触发：光标静止够久、且相比上一轮扫描移动过一段距离，才允许扫。
+            // 鼠标一直在动就不扫，避免边玩边翻、白白拉高 CPU。
+            if (AppConfig.GameDwellOn && !DwellReady()) return;
 
             // 只认固定区域：直接按选区并集抓图
             Rectangle scan;
@@ -775,10 +837,12 @@ namespace QRSnap
             ulong h = MaskHash(b, out gray);
 
             // ① 画面还在动就重置稳定计时——绝不每帧跑 OCR
-            int moved = _autoLastGray == null ? 999 : GrayDiff(gray, _autoLastGray);
+            List<Rectangle> rs = ActiveRegions();
+            int moved = _autoLastGray == null ? 999 : MotionScore(b, union, rs);
+            if (moved < 0) moved = _autoLastGray == null ? 999 : GrayDiff(gray, _autoLastGray);
             _autoLastGray = gray;
             _autoLastMoved = moved;
-            if (moved > 6) { _autoStableAt = Environment.TickCount; AutoNote("moving=" + moved); return false; }
+            if (moved > 3) { _autoStableAt = Environment.TickCount; AutoNote("moving=" + moved); return false; }
 
             int hold = AppConfig.GameAutoHoldMs;
             if (hold < 100) hold = 100;
@@ -786,11 +850,14 @@ namespace QRSnap
             if (held < hold) { AutoNote("settling " + held + "ms"); return false; }   // 还没定住够久
 
             // ② 图像层缓存：这一帧和上次识字的那帧几乎一样才跳过。
-            if (_autoBaseReady && _autoLastBaseGray != null && GrayDiff(gray, _autoLastBaseGray) <= 3)
+            // 32x24 的整区平均差会把「三行细字」摊到接近 0；缓存只认完全一样的那一帧，
+            // 背景动画已经被上面的稳定判定挡掉，这里 0 不会造成额外 OCR。
+            if (_autoBaseReady && _autoLastBaseGray != null && GrayDiff(gray, _autoLastBaseGray) <= 0)
             { _autoOcrSkip++; AutoNote("sameimg"); return false; }
             _autoLastBase = h;
             _autoLastBaseGray = gray;
             _autoBaseReady = true;
+            if (AppConfig.GameDwellOn) _dwellAnchor = Cursor.Position;
             JadeHost.Log("[game] auto ocr trigger held=" + held + "ms moved=" + moved);
             StartOcrWork(ref handed);
             return handed;
@@ -830,6 +897,52 @@ namespace QRSnap
             // 统一走 TextSimilar：短句严格、长段按 3-gram 覆盖率放宽，
             // 免得整段文字因为 OCR 重排/重复被判成「换了」而反复重译。
             return TextSimilar(a, b);
+        }
+
+        private static List<OcrSegment> CopySegs(List<OcrSegment> segs)
+        {
+            List<OcrSegment> res = new List<OcrSegment>();
+            if (segs == null) return res;
+            for (int i = 0; i < segs.Count; i++)
+            {
+                OcrSegment s = segs[i];
+                OcrSegment c = new OcrSegment();
+                c.Text = s.Text;
+                c.Box = s.Box;
+                c.Angle = s.Angle;
+                res.Add(c);
+            }
+            return res;
+        }
+
+        // 逐行比：把 3 行拼成一个 key 再用 3-gram 相似度，改一行也会被另外两行“稀释”成没变，
+        // 旧译文就一直贴在屏上、新原文从旧遮罩右边漏出来。这里按行数 + 每行文本分别比。
+        // 段落块可能把多行并进一个 OcrSegment（text 里带换行），所以先摊平成「逻辑行」。
+        private static List<string> TextLines(List<OcrSegment> segs)
+        {
+            List<string> res = new List<string>();
+            if (segs == null) return res;
+            for (int i = 0; i < segs.Count; i++)
+            {
+                string t = segs[i] == null ? null : segs[i].Text;
+                if (string.IsNullOrEmpty(t)) continue;
+                string[] parts = t.Replace("\r", "\n").Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int k = 0; k < parts.Length; k++)
+                {
+                    string s = parts[k].Trim();
+                    if (s.Length > 0) res.Add(s);
+                }
+            }
+            return res;
+        }
+
+        private static bool SameLines(List<OcrSegment> a, List<OcrSegment> b)
+        {
+            List<string> la = TextLines(a), lb = TextLines(b);
+            if (la.Count != lb.Count) return false;
+            for (int i = 0; i < la.Count; i++)
+                if (!TextSimilar(la[i], lb[i])) return false;
+            return true;
         }
 
         private static int EditDistance(string a, string b)
@@ -894,6 +1007,9 @@ namespace QRSnap
             // 选区底下换成别的窗口（游戏被切走/最小化）、游戏窗口被移走或缩放 → 直接收掉
             string why;
             if (WindowGone(union, out why)) { CloseMask(why); return; }
+            // 鼠标停稳才扫描同样适用于「遮罩已经贴在屏上」的阶段：鼠标还在动时不抓图，
+            // 既省 OCR 也避免边玩边疯狂重扫。这里只要求「停住」，不要求「移动过 30px」。
+            if (AppConfig.GameDwellOn && !DwellStill()) return;
 
             // ② 外围比对：低频（默认 1.5s 一次），抓图不隐藏遮罩，屏幕不闪
             _maskTickCount++;
@@ -952,9 +1068,34 @@ namespace QRSnap
                     ulong zh = MaskHashOf(b, union, rs[i], out zg);
                     if (zg == null) continue;
                     int zd = Hamming(zh, _zoneBase[i]);
-                    if (zd >= 6)
+                    // ROI 关掉时没有 RoiGray 基线，但 128x48 的选区指纹还能用：
+                    // 一行字幕换掉大约差 2%~8%，比 32x24 哈希灵敏得多。
+                    int zsig = -1;
+                    if (i < _slots.Count && _slots[i].Sig != null)
                     {
-                        JadeHost.Log("[game] zone " + (i + 1) + " pixel-change dist=" + zd + "（待文字确认）");
+                        byte[] nowSig = SignatureOne(b, union, rs[i]);
+                        if (nowSig != null) zsig = (int)(SignatureDiff(_slots[i].Sig, nowSig) * 100);
+                    }
+                    // 高分辨率兜底：32x24 的哈希里一行字幕只占两三像素，改一整句也可能只差 1 位；
+                    // 用 SlotGray 的 160x90 采样直接数变化像素，字幕换一行会命中上百个点。
+                    int zpx = -1;
+                    if (i < _slots.Count && _slots[i].RoiGray != null)
+                    {
+                        byte[] g2 = SlotGray(b, union, rs[i]);
+                        if (g2 != null && g2.Length == _slots[i].RoiGray.Length)
+                        {
+                            zpx = 0;
+                            for (int k = 0; k < g2.Length; k++)
+                            {
+                                int d = g2[k] - _slots[i].RoiGray[k];
+                                if (d < 0) d = -d;
+                                if (d >= 12) zpx++;
+                            }
+                        }
+                    }
+                    if (zpx >= 80 || zsig >= 2 || zd >= 3)
+                    {
+                        JadeHost.Log("[game] zone " + (i + 1) + " pixel-change dist=" + zd + " px=" + zpx + " sig=" + zsig + "（待重扫）");
                         zoneHit = true;
                         break;
                     }
@@ -973,58 +1114,28 @@ namespace QRSnap
                     return;
                 }
 
-                if (!zoneHit && !unionHit)
-                {
-                    // 没有像素变化也可能是字幕换句了（背景不动、只有那行字变了）。
-                    // 定时用 OCR 复核一遍：不变就继续留着，变了才收遮罩重翻。
-                    int nowP = Environment.TickCount;
-                    int gapP = Math.Max(300, AppConfig.GameMaskConfirmMs);
-                    if (_maskConfirmAt != 0 && unchecked(nowP - _maskConfirmAt) < gapP) return;
-                    _maskConfirmAt = nowP;
-                    string changeKey;
-                    if (MaskTextUnchanged(union, rs, out changeKey))
-                    {
-                        _maskMiss = 0;
-                        _maskMissKey = null;
-                        JadeHost.Log("[game] watch text unchanged → 保留遮罩不重译（定时复核）");
-                        return;
-                    }
-                    if (!MaskChangeConfirmed(changeKey))
-                    {
-                        JadeHost.Log("[game] watch 文字疑似变化（第 " + _maskMiss + " 次，定时复核），再确认一次");
-                        return;
-                    }
-                    CloseMask("字幕内容已变");
-                    return;
-                }
+                // 自动模式：画面有变化只让主链路重扫，遮罩原地不动。
+                // 以前这里先去跑 OCR 复核、再 CloseMask 整层收掉、400ms 后重新贴，
+                // 所以画面不动也会看到「消失—出现」；现在文字由 DoTick 原子替换，窗口常驻。
+                if (!zoneHit && !unionHit) return;
 
-                // 确认要跑 OCR，节流一下：间隔内反复命中就只留遮罩，下一轮再确认
                 int nowTick = Environment.TickCount;
                 int confirmGap = AppConfig.GameMaskConfirmMs;
-                if (confirmGap < 300) confirmGap = 300;
+                if (confirmGap > 500) confirmGap = 500;   // 遮罩期重扫上限 0.5s：局部 ROI 很便宜，不必等到 1~3s
+                if (confirmGap < 250) confirmGap = 250;
                 if (_maskConfirmAt != 0 && unchecked(nowTick - _maskConfirmAt) < confirmGap) return;
                 _maskConfirmAt = nowTick;
-
-                string changed;
-                if (MaskTextUnchanged(union, rs, out changed))
-                {
-                    // 文字没变：把背景基准换成当前帧，免得下一轮还拿旧背景比、反复确认
-                    _maskMiss = 0;
-                    _maskMissKey = null;
-                    _maskBase = h;
-                    _maskBaseGray = gray;
-                    _zoneBase = ZoneHashes(b, union, rs);
-                    JadeHost.Log("[game] watch text unchanged → 保留遮罩不重译（只刷新背景基准）");
-                    return;
-                }
-                // 单次 OCR 可能刚好赶上换行瞬态（半行字被截掉），要连续两次都读到同一段新文字才收遮罩，
-                // 否则 OCR 每次抖出来的噪声会被当成「变了」，遮罩闪一下再贴回来。
-                if (!MaskChangeConfirmed(changed))
-                {
-                    JadeHost.Log("[game] watch 文字疑似变化（第 " + _maskMiss + " 次），再确认一次");
-                    return;
-                }
-                CloseMask("字幕内容已变");
+                // 先把基准换成当前帧：否则同一处变化会在下一轮反复触发重扫
+                _maskBase = h;
+                _maskBaseGray = gray;
+                _zoneBase = ZoneHashes(b, union, rs);
+                _maskMiss = 0;
+                _maskMissKey = null;
+                _dwellAnchor = Cursor.Position;
+                JadeHost.Log("[game] auto pixel-change → rescan（遮罩保留） dist=" + dist + " diff=" + diff);
+                _allowWhileShowing = true;
+                try { Trigger(false); }
+                finally { _allowWhileShowing = false; }
             }
             catch (Exception) { }
             finally { b.Dispose(); }
@@ -1132,7 +1243,7 @@ namespace QRSnap
                         JadeHost.Log("[game] watch zone " + (i + 1) + " 文字消失");
                         return false;
                     }
-                    if (!TextSimilar(last, tkey))
+                    if (!SameLines(mine, sl.PrevSegs))
                     {
                         changeKey = tkey;
                         JadeHost.Log("[game] watch zone " + (i + 1) + " 文字确实变了 last=" + last + " now=" + tkey);
@@ -1251,12 +1362,81 @@ namespace QRSnap
             fromWin = false;
             if (_maskHwnd != IntPtr.Zero)
             {
+                // 首选窗口自绘：拿到的就是游戏自己的当前帧，遮罩压在屏幕上也不影响，
+                // 既不会把译文读成原文，也不用 Hide/Show 掐遮罩（不闪）。
+                Bitmap pw = CaptureWindowPrint(_maskHwnd, union);
+                if (pw != null)
+                {
+                    fromWin = true;
+                    LogCapSource("print");
+                    return pw;
+                }
                 Bitmap w = CaptureWindowPart(_maskHwnd, union);
-                if (w != null) { fromWin = true; return w; }
+                if (w != null) { fromWin = true; LogCapSource("screen"); return w; }
             }
             Bitmap b = CaptureUnderOverlay(union);
-            if (b != null) { fromWin = true; return b; }
+            if (b != null) { fromWin = true; LogCapSource("hidecap"); return b; }
             return CaptureBand(union);
+        }
+
+        private static long _capLogAt;
+        private static string _capLast;
+        private static void LogCapSource(string src)
+        {
+            long now = (long)Environment.TickCount;
+            if (_capLast == src && now - _capLogAt < 5000) return;
+            _capLast = src;
+            _capLogAt = now;
+            JadeHost.Log("[game] capture src=" + src);
+        }
+
+        // PrintWindow：直接从窗口取原始内容，遮罩是另一个分层窗口，不会混进来。
+        // 独占全屏 / GPU 直出窗口常返回纯色，用 HasContent 判掉后走屏幕抓图兜底。
+        private static Bitmap CaptureWindowPrint(IntPtr hwnd, Rectangle union)
+        {
+            if (hwnd == IntPtr.Zero) return null;
+            Rectangle wr = WndRect(hwnd);
+            if (wr.Width < 40 || wr.Height < 40 || wr.Width > 8000 || wr.Height > 8000) return null;
+            // 遮罩窗口在重绘的瞬间，PrintWindow 偶尔会回一帧空白；重试两次再判失败，
+            // 避免掉进「掐遮罩 8ms」的兜底路径（那一下就是肉眼看到的闪）。
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                Bitmap full = null;
+                try
+                {
+                    full = new Bitmap(wr.Width, wr.Height, PixelFormat.Format24bppRgb);
+                    bool ok = false;
+                    using (Graphics g = Graphics.FromImage(full))
+                    {
+                        IntPtr dc = g.GetHdc();
+                        try
+                        {
+                            // 2 = PW_RENDERFULLCONTENT（Win10 起对 DirectComposition/Chromium 更有效）
+                            ok = PrintWindow(hwnd, dc, 2);
+                            if (!ok) ok = PrintWindow(hwnd, dc, 0);
+                        }
+                        finally { g.ReleaseHdc(dc); }
+                    }
+                    if (ok)
+                    {
+                        Rectangle cut = new Rectangle(union.Left - wr.Left, union.Top - wr.Top, union.Width, union.Height);
+                        cut.Intersect(new Rectangle(0, 0, full.Width, full.Height));
+                        if (cut.Width >= 16 && cut.Height >= 12)
+                        {
+                            Bitmap part = full.Clone(cut, PixelFormat.Format24bppRgb);
+                            if (part != null)
+                            {
+                                if (HasContent(part)) return part;
+                                part.Dispose();
+                            }
+                        }
+                    }
+                }
+                catch (Exception) { }
+                finally { if (full != null) { try { full.Dispose(); } catch (Exception) { } } }
+                Thread.Sleep(12);
+            }
+            return null;
         }
 
         private static Bitmap CaptureWindowPart(IntPtr hwnd, Rectangle union)
@@ -1616,7 +1796,7 @@ namespace QRSnap
             // 遮罩已经在屏上、遮罩期低频比对（MaskTick）也在跑时，定时触发的这一轮 OCR 是多余的：
             // DoTick 抓图前要把所有遮罩隐藏约 34ms，每 250ms 藏一次就是肉眼可见的闪屏。
             // 字幕换句/消失由 MaskTick 的 OCR 复核负责，确认变了会先收罩，再交给 AutoTick 重新识字。
-            if (!force && (TransOverlay.GameShowing || TransOverlay.Sampling) && _maskWatch != null)
+            if (!force && !_allowWhileShowing && (TransOverlay.GameShowing || TransOverlay.Sampling) && _maskWatch != null)
             {
                 JadeHost.Log("[game] skip timer tick: mask watch active");
                 return;
@@ -1625,7 +1805,9 @@ namespace QRSnap
             {
                 if (!force)
                 {
-                    JadeHost.Log("[game] skip busy");
+                    // 单槽 latest-wins：正在 OCR/翻译时又来新变化，不堆任务，只记一次「跑完补扫」。
+                    _pendingRun = true;
+                    JadeHost.Log("[game] pending merge (busy)");
                     return;
                 }
                 _gen++;
@@ -1642,6 +1824,7 @@ namespace QRSnap
             {
                 StopMaskWatch();
                 StopAuto();
+                _pendingRun = false;
                 _maskClosing = false;
                 try { TransOverlay.HideOverlay(); } catch (Exception) { }
             }
@@ -1653,6 +1836,19 @@ namespace QRSnap
             {
                 if (_gen == g) _busy = false;
                 JadeHost.Log("[game] tick exit gen=" + g);
+                if (_pendingRun)
+                {
+                    _pendingRun = false;
+                    Thread th = new Thread(delegate()
+                    {
+                        try { Thread.Sleep(40); _allowWhileShowing = true; Trigger(false); }
+                        catch (Exception) { }
+                        finally { _allowWhileShowing = false; }
+                    });
+                    th.IsBackground = true;
+                    th.Start();
+                    JadeHost.Log("[game] pending rescan kicked");
+                }
             }
         }
 
@@ -1693,6 +1889,8 @@ namespace QRSnap
         {
             // 这一轮重新识字，遮罩期的比对先停掉：否则它会在 OCR 期间反复判「画面已变」并刷屏
             StopMaskWatch();
+            long tStart = (long)Environment.TickCount;
+            long tCap = 0, tOcr = 0, tMt = 0;
             List<Rectangle> regions = ActiveRegions();
             if (regions.Count == 0) return;
             Rectangle union = Union(regions);
@@ -1708,10 +1906,22 @@ namespace QRSnap
             // 分块框在屏上时先藏一下再抓：框线和编号会被 OCR 当成正文
             bool dbgHid = BlockDebug.SuspendForCapture();
             Bitmap bmp = null;
-            try { bmp = TransOverlay.IsShowing ? CaptureUnderOverlay(union) : Capture(union); }
+            string capSrc = "screen";
+            try
+            {
+                if (TransOverlay.IsShowing)
+                {
+                    // 遮罩在屏上时优先 PrintWindow 取原始窗口，完全不闪；失败才退回「掐遮罩 8ms」
+                    bmp = CaptureWindowPrint(_maskHwnd, union);
+                    if (bmp != null) capSrc = "print";
+                    else { bmp = CaptureUnderOverlay(union); capSrc = "hidecap"; }
+                }
+                else bmp = Capture(union);
+            }
             finally { if (dbgHid) BlockDebug.ResumeAfterCapture(); }
             if (bmp == null) return;
-            JadeHost.Log("[game] tick captured");
+            tCap = (long)Environment.TickCount - tStart;
+            JadeHost.Log("[game] tick captured src=" + capSrc);
             if (Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
             {
                 try
@@ -1731,22 +1941,46 @@ namespace QRSnap
             // 槽位跟着配置里的固定选区重排；遮罩编号沿用上一轮，不整片重贴
             SyncSlots(regions);
             int dirtyCount = 0;
+            bool forceAll = force || _forceRepaint;
             for (int i = 0; i < _slots.Count; i++)
             {
                 RegionSlot sl = _slots[i];
                 byte[] cur = SignatureOne(bmp, union, sl.R);
                 double rd = sl.Sig == null ? 1.0 : SignatureDiff(sl.Sig, cur);
-                bool moved = false;   // 固定区域不会自己挪位，只有内容变化才要重画
-                // 连续两次超阈值才判脏：单帧背景闪动/采样抖动不撤遮罩重译，避免遮罩一收一放闪屏。
-                if (rd >= threshold) sl.DirtyStreak++; else sl.DirtyStreak = 0;
-                // 像素只当「画面动过」的参考，不再直接决定重画：背景换个色也会让 rd 变大，
-                // 但字没换就不该撤遮罩。真正标脏的是下面 OCR 完的文字比对。
-                sl.Dirty = force || _forceRepaint;
                 sl.Sig = cur;
-                if (sl.Dirty) dirtyCount++;
-                JadeHost.Log("[game] region " + (i + 1) + "/" + _slots.Count
-                    + (sl.Dirty ? " dirty" : " keep") + " diff=" + rd.ToString("0.000")
-                    + (moved ? " moved" : "") + " streak=" + sl.DirtyStreak);
+                bool full = true;
+                List<Rectangle> bands = null;
+                byte[] grayNew = null;
+                if (!forceAll && sl.HasSegs && AppConfig.GameRoi)
+                {
+                    // 动态 ROI：只在变化的那几条横带里识字，没变的部分沿用上一轮结果。
+                    // 返回 null = 整区都变了，退回整区 OCR；返回空表 = 这一区没变化。
+                    bands = ChangeBands(bmp, union, sl, out grayNew);
+                    if (bands != null && bands.Count == 0)
+                    {
+                        sl.Dirty = false;
+                        sl.RoiBands = null;
+                        sl.RoiNew = null;
+                        sl.DirtyStreak = 0;
+                        JadeHost.Log("[game] region " + (i + 1) + "/" + _slots.Count
+                            + " clean (roi) diff=" + rd.ToString("0.000"));
+                        continue;
+                    }
+                    full = bands == null;
+                }
+                else
+                {
+                    grayNew = SlotGray(bmp, union, sl.R);
+                }
+                if (rd >= threshold) sl.DirtyStreak++; else sl.DirtyStreak = 0;
+                sl.Dirty = true;
+                sl.RoiBands = bands;
+                sl.RoiNew = grayNew;
+                sl.RoiFull = full;
+                dirtyCount++;
+                JadeHost.Log("[game] region " + (i + 1) + "/" + _slots.Count + " dirty"
+                    + (full ? " full" : " bands=" + (bands == null ? 0 : bands.Count))
+                    + " diff=" + rd.ToString("0.000") + " streak=" + sl.DirtyStreak);
             }
             JadeHost.Log("[game] diff=" + diff.ToString("0.000") + " threshold=" + threshold.ToString("0.000")
                 + " dirty=" + dirtyCount + "/" + _slots.Count + " excluded=" + (excluded ? 1 : 0)
@@ -1757,6 +1991,7 @@ namespace QRSnap
             {
                 List<OcrSegment> segs = new List<OcrSegment>();
                 List<Thread> ths = new List<Thread>();
+                List<Bitmap> cropBufs = new List<Bitmap>();
 
                 // 整区识字：每个固定区域整个裁出来跑一次 OCR，识别到几行就是几行，没有块数上限。
                 // 每轮都识字（不是只识脏块）：判定要以「这一轮真实的文字」为准，
@@ -1766,10 +2001,21 @@ namespace QRSnap
                     RegionSlot sl = _slots[i];
                     RegionSlot cur = sl;
                     int idx = i;
+                    if (!sl.Dirty)
+                    {
+                        // 没变化的区不识字，直接沿用上一轮 Segs（动态 ROI 的省调用核心）
+                        continue;
+                    }
                     // 复制图必须在这个（主）线程里做：GDI+ 的 Bitmap 不能几个线程同时读
                     Bitmap mine = CropAt(bmp, 0, 0, bmp.Width, bmp.Height);
                     Bitmap forTh = mine;
-                    Thread th = new Thread(delegate() { DoOcrSlot(cur, forTh, union, idx, _slots.Count); });
+                    cropBufs.Add(mine);
+                    bool partial = !sl.RoiFull && sl.RoiBands != null && sl.RoiBands.Count > 0;
+                    Thread th = new Thread(delegate()
+                    {
+                        if (partial) DoOcrSlotBands(cur, forTh, union, idx, _slots.Count, cur.RoiBands);
+                        else DoOcrSlot(cur, forTh, union, idx, _slots.Count);
+                    });
                     th.IsBackground = true;
                     th.Priority = System.Threading.ThreadPriority.BelowNormal;
                     th.Start();
@@ -1779,9 +2025,19 @@ namespace QRSnap
                 {
                     try { ths[i].Join(20000); } catch (Exception) { }   // 单块卡死也不能把整轮拖住
                 }
+                for (int i = 0; i < cropBufs.Count; i++)
+                {
+                    try { if (cropBufs[i] != null) cropBufs[i].Dispose(); } catch (Exception) { }
+                }
+                tOcr = (long)Environment.TickCount - tStart - tCap;
                 for (int i = 0; i < _slots.Count; i++)
                 {
                     RegionSlot sl = _slots[i];
+                    // OCR 已接受这一帧：把采样换成新基线，下一轮只认之后的像素变化。
+                    // 不限于 dirty 块：干净块这一轮也跟着抓了新帧，背景动画累积会让旧基线越来越偏。
+                    if (sl.RoiNew != null) sl.RoiGray = sl.RoiNew;
+                    sl.RoiBands = null;
+                    sl.RoiNew = null;
                     if (sl.HasSegs && sl.Segs != null) segs.AddRange(sl.Segs);
                 }
 
@@ -1821,7 +2077,7 @@ namespace QRSnap
                 {
                     RegionSlot sl = _slots[i];
                     string nowKey = TextKey(sl.Segs == null ? new List<OcrSegment>() : sl.Segs);
-                    if (!SameText(nowKey, sl.LastText))
+                    if (!SameLines(sl.Segs, sl.PrevSegs))
                     {
                         sl.Dirty = true;
                         textChanged++;
@@ -1883,23 +2139,18 @@ namespace QRSnap
                         continue;
                     }
                     string ztk = TextKey(zs);
-                    // 原文换了：先把这一块旧遮罩撤掉，再翻新的。
-                    // 否则从地图切到设置页这类「同一位置换了另一套文字」的场景，
-                    // 上一句译文会一直贴在屏上，等到新译文返回才被替换，看起来就是文字串台。
-                    // 注意用 SameText 而不是严格相等：OCR 抖一两个字不算换句，遮罩不该被收掉重画。
-                    if (!SameText(ztk, sl.LastText) && sl.Lines > 0)
-                    {
-                        try { TransOverlay.HideZone(sl.Zid); } catch (Exception) { }
-                        sl.Lines = 0;
-                    }
-                    if (!force && ztk.Length > 0 && SameText(ztk, sl.LastText) && sl.Lines > 0)
+                    // 原文换了也不再先 HideZone：旧译文留在屏上，等新译文回来后由 ShowZone
+                    // 原文换了也不再先 HideZone：旧译文留在屏上，等新译文回来后由 ShowZone
+                    // 在同一次绘制里原子替换（清空+RenderAll 是一次窗口更新，不会出现空白帧）。
+                    // 以前先撤再贴，用户看到的就是「文字消失一下又出现」。
+                    if (!force && ztk.Length > 0 && SameLines(zs, sl.PrevSegs) && sl.Lines > 0)
                     {
                         // 原文没变（或只抖了一两个字）：遮罩在屏上就原样留着，一个字都不重画；
                         // 遮罩已经不在屏上了才把上一轮的译文铺回去。
                         if (KeepZoneOnScreen(sl, i + 1)) { totalLines += sl.Lines; continue; }
                     }
                     sl.LastText = ztk;
-                    if (gen != _gen) return;
+                    if (gen != _gen) { JadeHost.Log("[game] zone " + (i + 1) + " abort gen=" + gen + " now=" + _gen); return; }
 
                     // 坐标从「相对并集」转成「相对这一块」，抓图也只裁这一块。
                     // 但检测块可能比实际字形小一圈（或补边让 OCR 看到了框外的行），
@@ -1936,22 +2187,40 @@ namespace QRSnap
                 }
 
                 if (gen != _gen) return;
-                // 本轮所有块都处理过了：清掉脏标记。
+                tMt = (long)Environment.TickCount - tStart - tCap - tOcr;
+                JadeHost.Log("[game] latency capture=" + tCap + "ms ocr=" + tOcr + "ms mt=" + tMt
+                    + "ms total=" + ((long)Environment.TickCount - tStart) + "ms"
+                    + " dirty=" + dirtyCount + "/" + _slots.Count);
                 // 脏标记原来是「置位后永不消除」（检测循环里脏块直接 continue 不参与重算），
                 // 于是下一轮检测永远数出「全部脏」，遮罩就一直陷在整页清空-重贴的循环里闪。
                 for (int i = 0; i < _slots.Count; i++)
                 {
                     _slots[i].Dirty = false;
                     _slots[i].DirtyStreak = 0;
+                    _slots[i].PrevSegs = CopySegs(_slots[i].Segs);
                 }
                 if (totalBlocks == 0)
                 {
+                    // 空结果退避：连续认不出字时把自动采样间隔逐步拉长（1.5x/2x/2.5x，上限 1s），
+                    // 避免在菜单/黑屏/过场上每 25~80ms 空跑一次 OCR；一旦有字立刻复位。
+                    if (AppConfig.GameBackoff && AppConfig.GameAutoMode)
+                    {
+                        _emptyStreak++;
+                        int baseMs = Math.Max(250, AppConfig.GameAutoSampleMs);
+                        double f = 1.0 + 0.5 * Math.Min(3, _emptyStreak);
+                        int hold = (int)Math.Min(1000, baseMs * f);
+                        _autoHoldUntil = (long)Environment.TickCount + hold;
+                        JadeHost.Log("[game] empty backoff streak=" + _emptyStreak + " hold=" + hold + "ms");
+                    }
                     JadeHost.Log("[game] no dialogue raw=" + rawCount + " rawMaxH=" + rawMaxH
                         + " dirty=" + dirtyCount + "/" + _slots.Count);
                     try { TransOverlay.HideOverlay(); } catch (Exception) { }   // 没结果就别留旧译文
+                    if (AppConfig.GameAutoMode) StartAutoResume();               // 空帧也马上接着盯，别等 2 秒
                     JadeHost.GameDone("没有识别到字幕", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel), false);
                     return;
                 }
+                _emptyStreak = 0;
+                _autoHoldUntil = 0;
                 JadeHost.GameDone(totalLines > 0 ? "翻译完成" : (JadeHost.GameSkipShort ?? "没有识别到字幕"),
                     "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel) + (totalLines > 0 ? " · " + totalLines + " 行" : ""),
                     totalLines > 0);
@@ -2033,6 +2302,69 @@ namespace QRSnap
             {
                 if (own != null) { try { own.Dispose(); } catch (Exception) { } }
             }
+        }
+
+        // 动态 ROI 的局部识字：只把变化的那几条横带送 OCR，横带外的旧行原样保留。
+        // 语言已判定过的区沿用原语言模型；局部更新不做日文重判（整页换语言时覆盖率会超限，自然退回整区）。
+        private static void DoOcrSlotBands(RegionSlot sl, Bitmap own, Rectangle union, int idx, int total, List<Rectangle> bands)
+        {
+            try
+            {
+                if (own == null) return;
+                List<OcrSegment> fresh = new List<OcrSegment>();
+                bool jp = sl.Jp == 1;
+                for (int i = 0; i < bands.Count; i++)
+                {
+                    Rectangle b = Rectangle.Intersect(bands[i], union);
+                    if (b.Width < 8 || b.Height < 6) continue;
+                    List<OcrSegment> bs = OcrRegion(own, union, b, jp);
+                    if (bs != null && bs.Count > 0) fresh.AddRange(bs);
+                }
+                List<OcrSegment> merged = MergeBandSegs(sl.Segs, fresh, bands, union);
+                merged.Sort(delegate(OcrSegment a, OcrSegment b)
+                {
+                    int c = a.Box.Y.CompareTo(b.Box.Y);
+                    return c != 0 ? c : a.Box.X.CompareTo(b.Box.X);
+                });
+                sl.Segs = merged;
+                sl.HasSegs = true;
+                JadeHost.Log("[game] roi zone=" + (idx + 1) + "/" + total + " bands=" + bands.Count
+                    + " fresh=" + fresh.Count + " keep=" + (merged.Count - fresh.Count));
+            }
+            catch (Exception ex)
+            {
+                JadeHost.Log("[game] zone " + (idx + 1) + " roi ocr fail " + ex.Message);
+            }
+            finally
+            {
+                if (own != null) { try { own.Dispose(); } catch (Exception) { } }
+            }
+        }
+
+        // 旧行里，中心落在变化横带内的删掉（由 fresh 替换），横带外的保留。
+        // 横带是屏幕坐标，旧行是「相对并集」坐标，先换算再判。
+        private static List<OcrSegment> MergeBandSegs(List<OcrSegment> old, List<OcrSegment> fresh, List<Rectangle> bands, Rectangle union)
+        {
+            List<OcrSegment> res = new List<OcrSegment>();
+            if (old != null)
+            {
+                for (int i = 0; i < old.Count; i++)
+                {
+                    OcrSegment s = old[i];
+                    int cx = s.Box.X + s.Box.Width / 2 + union.Left;
+                    int cy = s.Box.Y + s.Box.Height / 2 + union.Top;
+                    bool hit = false;
+                    for (int j = 0; j < bands.Count; j++)
+                    {
+                        Rectangle b = bands[j];
+                        b.Inflate(6, 6);
+                        if (cx >= b.Left && cx <= b.Right && cy >= b.Top && cy <= b.Bottom) { hit = true; break; }
+                    }
+                    if (!hit) res.Add(s);
+                }
+            }
+            if (fresh != null) res.AddRange(fresh);
+            return res;
         }
 
         // 过滤后的行按选区归属拆开：每块只留落在自己范围内的行（坐标仍相对并集）。
@@ -2361,7 +2693,181 @@ namespace QRSnap
             }
         }
 
+        // 选区固定采样成 160x90 灰度：动态 ROI 的比对底图。
+        // 不用逐像素 GetPixel（一个区一万多次调用，采样定时器会被拖慢），走 LockBits 一次读出来。
+        private const int RoiW = 160, RoiH = 90;
+        private static byte[] SlotGray(Bitmap bmp, Rectangle union, Rectangle r)
+        {
+            byte[] data = new byte[RoiW * RoiH];
+            if (bmp == null) return data;
+            int sx = r.Left - union.X, sy = r.Top - union.Y;
+            int sw = Math.Min(r.Width, bmp.Width - sx);
+            int sh = Math.Min(r.Height, bmp.Height - sy);
+            if (sw < 4 || sh < 4) return data;
+            Bitmap small = null;
+            BitmapData bd = null;
+            try
+            {
+                small = new Bitmap(RoiW, RoiH, PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(small))
+                {
+                    g.Clear(Color.Black);
+                    g.DrawImage(bmp, new Rectangle(0, 0, RoiW, RoiH), new Rectangle(sx, sy, sw, sh), GraphicsUnit.Pixel);
+                }
+                bd = small.LockBits(new Rectangle(0, 0, RoiW, RoiH), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                byte[] px = new byte[bd.Stride * RoiH];
+                Marshal.Copy(bd.Scan0, px, 0, px.Length);
+                int k = 0;
+                for (int y = 0; y < RoiH; y++)
+                {
+                    int off = y * bd.Stride;
+                    for (int x = 0; x < RoiW; x++)
+                    {
+                        int p = off + x * 4;
+                        data[k++] = (byte)((px[p + 2] * 77 + px[p + 1] * 151 + px[p] * 28) >> 8);
+                    }
+                }
+            }
+            catch (Exception) { }
+            finally
+            {
+                if (bd != null) { try { small.UnlockBits(bd); } catch (Exception) { } }
+                if (small != null) { try { small.Dispose(); } catch (Exception) { } }
+            }
+            return data;
+        }
+
+        // 动态 ROI：返回「这一轮真正变了的横带」（屏幕坐标）。
+        // null = 变化太大/没有基线，退回整区 OCR；空表 = 这一区没变化，直接沿用上一轮 Segs。
+        // 只看横向长条而不是任意矩形：字幕是一行行排的，横带裁出来仍然是一张正常比例的图，
+        // DB 检测模型不会因为窄条而整行漏检；同时把 OCR 面积从整区压到变化的那几行。
+        private static List<Rectangle> ChangeBands(Bitmap bmp, Rectangle union, RegionSlot sl, out byte[] gray)
+        {
+            gray = SlotGray(bmp, union, sl.R);
+            List<Rectangle> empty = new List<Rectangle>();
+            if (sl.RoiGray == null || sl.RoiGray.Length != gray.Length)
+            {
+                JadeHost.Log("[game] roi no baseline → full");
+                return null;
+            }
+            if (sl.R.Width < 80 || sl.R.Height < 60) return null;   // 小选区没有省的必要，整区更准
+
+            const int tw = 8, th = 4;
+            int cols = (RoiW + tw - 1) / tw;          // 20
+            int rows = (RoiH + th - 1) / th;          // 23
+            bool[,] active = new bool[rows, cols];
+            int changedTiles = 0;
+            for (int ty = 0; ty < rows; ty++)
+            {
+                for (int tx = 0; tx < cols; tx++)
+                {
+                    int cnt = 0;
+                    int y0 = ty * th, yEnd = Math.Min(RoiH, y0 + th);
+                    int x0 = tx * tw, xEnd = Math.Min(RoiW, x0 + tw);
+                    for (int y = y0; y < yEnd; y++)
+                    {
+                        int off = y * RoiW;
+                        for (int x = x0; x < xEnd; x++)
+                        {
+                            int d = gray[off + x] - sl.RoiGray[off + x];
+                            if (d < 0) d = -d;
+                            if (d >= 12) cnt++;
+                        }
+                    }
+                    if (cnt >= 2) { active[ty, tx] = true; changedTiles++; }
+                }
+            }
+            if (changedTiles == 0) return empty;
+
+            // 膨胀一格：字幕抗锯齿/轻微位移只落在边缘时，把相邻格一起带上，避免半行被切
+            bool[,] dil = new bool[rows, cols];
+            for (int ty = 0; ty < rows; ty++)
+                for (int tx = 0; tx < cols; tx++)
+                {
+                    if (!active[ty, tx]) continue;
+                    int y1 = Math.Max(0, ty - 1), y2 = Math.Min(rows - 1, ty + 1);
+                    int x1 = Math.Max(0, tx - 1), x2 = Math.Min(cols - 1, tx + 1);
+                    for (int yy = y1; yy <= y2; yy++)
+                        for (int xx = x1; xx <= x2; xx++) dil[yy, xx] = true;
+                }
+
+            bool[] rowOn = new bool[rows];
+            for (int ty = 0; ty < rows; ty++)
+                for (int tx = 0; tx < cols; tx++) if (dil[ty, tx]) { rowOn[ty] = true; break; }
+
+            List<int[]> spans = new List<int[]>();
+            int sy = 0;
+            while (sy < rows)
+            {
+                if (!rowOn[sy]) { sy++; continue; }
+                int start = sy, end = sy, gap = 0;
+                while (end + 1 < rows)
+                {
+                    if (rowOn[end + 1]) { end++; gap = 0; }
+                    else if (gap < 1) { gap++; end++; }
+                    else break;
+                }
+                spans.Add(new int[] { start, end });
+                sy = end + 1;
+            }
+            if (spans.Count == 0) return empty;
+
+            double scaleX = (double)sl.R.Width / RoiW;
+            double scaleY = (double)sl.R.Height / RoiH;
+            int cov = 0;
+            List<Rectangle> bands = new List<Rectangle>();
+            for (int i = 0; i < spans.Count; i++)
+            {
+                int top = spans[i][0] * th;
+                int bot = Math.Min(RoiH, (spans[i][1] + 1) * th);
+                // 上下各扩一行的高度当上下文，横带太薄时补到至少 36px
+                int pad = Math.Max(6, (bot - top) / 2);
+                top = Math.Max(0, top - pad);
+                bot = Math.Min(RoiH, bot + pad);
+                int y0 = sl.R.Top + (int)Math.Round(top * scaleY);
+                int y1 = sl.R.Top + (int)Math.Round(bot * scaleY);
+                if (y1 - y0 < 32) y1 = Math.Min(sl.R.Bottom, y0 + 32);
+                cov += (y1 - y0);
+                bands.Add(new Rectangle(sl.R.Left, y0, sl.R.Width, Math.Max(8, y1 - y0)));
+            }
+            // 变化覆盖超过 45% 或横带太多：省不了多少，整区一次更稳（也避免碎 OCR 把句子拆散）
+            if (bands.Count > 6 || cov > sl.R.Height * 0.45)
+            {
+                JadeHost.Log("[game] roi too much bands=" + bands.Count + " cov=" + cov + "/" + sl.R.Height + " → full");
+                return null;
+            }
+            JadeHost.Log("[game] roi bands=" + bands.Count + " cov=" + cov + "/" + sl.R.Height
+                + " tiles=" + changedTiles);
+            return bands;
+        }
+
         // 单个选区的指纹（128x48 灰度，恒定长度，好和上一轮逐字节比）
+        // 画面稳定判定改成高分辨率像素占比：32x24 的均值差会把三行细字摊成 1~2，
+        // 结果字幕早就换了、还要干等 6 秒。160x90 上直接数「差异 >= 12」的像素占比，
+        // 换一行字通常 5%~25%，背景轻微动画一般 <3%。
+        private static int MotionScore(Bitmap bmp, Rectangle union, List<Rectangle> rs)
+        {
+            int best = -1;
+            if (bmp == null || rs == null) return best;
+            for (int i = 0; i < rs.Count && i < _slots.Count; i++)
+            {
+                RegionSlot sl = _slots[i];
+                if (sl.RoiGray == null) continue;
+                byte[] g = SlotGray(bmp, union, rs[i]);
+                if (g == null || g.Length != sl.RoiGray.Length || g.Length == 0) continue;
+                int n = 0;
+                for (int k = 0; k < g.Length; k++)
+                {
+                    int d = g[k] - sl.RoiGray[k];
+                    if (d < 0) d = -d;
+                    if (d >= 12) n++;
+                }
+                int pct = n * 100 / g.Length;
+                if (pct > best) best = pct;
+            }
+            return best;
+        }
+
         private static byte[] SignatureOne(Bitmap bmp, Rectangle union, Rectangle r)
         {
             byte[] data = new byte[128 * 48];
@@ -2388,6 +2894,32 @@ namespace QRSnap
         }
 
         // 单个选区单独识字：裁出来 → 补边 → OCR（一行都没检出就放大 2x 再试）→ 坐标换回 union 坐标系
+        // 游戏模式的识字入口：直接用检测+逐行识别的平铺结果，不走 LayoutBoost 的分栏清洗。
+        // LayoutBoost 是给「界面截图」设计的：它会找贯穿上下的竖向空白走廊，把稀疏字幕的整块背景
+        // 误判成分栏，3 行字幕会被切成 0 块；游戏字幕区域通常是纯色背景 + 少量行，直接用平坦结果更稳。
+        private static List<OcrSegment> GameRecognize(Bitmap bmp, bool japan, out string log)
+        {
+            List<OcrSegment> segs = new List<OcrSegment>();
+            log = null;
+            string eng = null;
+            long ms = 0;
+            string det = null;
+            try
+            {
+                // 微信 OCR 经常把多行字幕并成一句、只给一个整块框，游戏模式逐行贴译文就全糊成一行。
+                // 游戏模式优先用随包附带的 PP-OCR 快速档做「检测+逐行识别」；模型不在才退回用户引擎。
+                string force = japan ? AppConfig.EnginePpJapan : (string)null;
+                if (!japan
+                    && AppConfig.NormalizeEngine(AppConfig.Engine) == AppConfig.EngineWeChat
+                    && PpOcr.FolderReady(AppConfig.ModelTierDir(AppConfig.EnginePpRapid)))
+                    force = AppConfig.EnginePpRapid;
+                Ocr.Recognize(bmp, out eng, out ms, out det, segs, force);
+                log = det;
+            }
+            catch (Exception ex) { log = ex.Message; }
+            return segs ?? new List<OcrSegment>();
+        }
+
         private static List<OcrSegment> OcrRegion(Bitmap unionBmp, Rectangle union, Rectangle r, bool japan)
         {
             List<OcrSegment> segs = new List<OcrSegment>();
@@ -2411,14 +2943,20 @@ namespace QRSnap
                 // 选区贴着文字边缘时检测模型常常整行漏检（小框最明显），补一圈底色再喂 OCR
                 const int pad = 12;
                 Bitmap ocrIn = PadForOcr(sub, pad, out padX, out padY);
+                JadeHost.Log("[game] ocr in=" + ocrIn.Width + "x" + ocrIn.Height + " r=" + r.Width + "x" + r.Height
+                    + " engine=" + AppConfig.Engine + " jp=" + (japan ? 1 : 0));
+                if (Environment.GetEnvironmentVariable("QRSNAP_DBG_CROP") == "1")
+                {
+                    try { ocrIn.Save(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\qrsnap-ocrin.png", System.Drawing.Imaging.ImageFormat.Png); }
+                    catch (Exception) { }
+                }
                 try
                 {
-                    segs = japan
-                        ? Ocr.LayoutSegmentsJapan(ocrIn, out obstacles, out log)
-                        : (AppConfig.OcrFusion
-                            ? Ocr.LayoutSegmentsFused(ocrIn, out obstacles, out log)
-                            : Ocr.LayoutSegments(ocrIn, out obstacles, out log));
+                    segs = GameRecognize(ocrIn, japan, out log);
+                    obstacles = new List<Rectangle>();
                     if (segs == null) segs = new List<OcrSegment>();
+                    if (segs.Count == 0 && log != null)
+                        JadeHost.Log("[game] ocr0 " + log.Replace("\r\n", " | ").Replace("\n", " | "));
                     if (segs.Count == 0)
                     {
                         Bitmap big = null;
@@ -2431,15 +2969,9 @@ namespace QRSnap
                                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                                 g.DrawImage(ocrIn, new Rectangle(0, 0, big.Width, big.Height));
                             }
-                            List<Rectangle> ob2 = null;
                             string lg2 = "";
-                            segs = japan
-                                ? Ocr.LayoutSegmentsJapan(big, out ob2, out lg2)
-                                : (AppConfig.OcrFusion
-                                    ? Ocr.LayoutSegmentsFused(big, out ob2, out lg2)
-                                    : Ocr.LayoutSegments(big, out ob2, out lg2));
-                            if (segs == null) segs = new List<OcrSegment>();
-                            obstacles = ob2 == null ? new List<Rectangle>() : ob2;
+                            segs = GameRecognize(big, japan, out lg2);
+                            obstacles = new List<Rectangle>();
                             ScaleSegs(segs, obstacles, 2);
                         }
                         catch (Exception) { }
@@ -2465,18 +2997,17 @@ namespace QRSnap
                                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                                     g.DrawImage(ocrIn, new Rectangle(0, 0, big2.Width, big2.Height));
                                 }
-                                List<Rectangle> ob2 = null;
                                 string lg2 = "";
-                                List<OcrSegment> s2 = Ocr.LayoutSegmentsJapan(big2, out ob2, out lg2);
+                                List<OcrSegment> s2 = GameRecognize(big2, true, out lg2);
                                 if (s2 != null && s2.Count > 0)
                                 {
-                                    ScaleSegs(s2, ob2 == null ? new List<Rectangle>() : ob2, 2);
+                                    ScaleSegs(s2, new List<Rectangle>(), 2);
                                     int k2 = 0, c2 = 0, lat2 = 0, dg2 = 0;
                                     CountChars(s2, ref c2, ref k2, ref lat2, ref dg2);
                                     if (k2 > k)
                                     {
                                         segs = s2;
-                                        obstacles = ob2 == null ? new List<Rectangle>() : ob2;
+                                        obstacles = new List<Rectangle>();
                                         JadeHost.Log("[game] region ocr kana retry2x kana=" + k2);
                                     }
                                 }
