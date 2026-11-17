@@ -1,6 +1,6 @@
-﻿# XuYuan-SnapScan v1.4.16
+﻿# XuYuan-SnapScan v1.4.17
 
-Windows 截图 OCR / 翻译工具（WinForm + JadeView 2 + WebView2）：二维码、文字识别、截图翻译、固定区域游戏字幕翻译。本体已内置微信 OCR + PP-OCR，装完直接能识字；翻译模型按需导入。
+Windows 截图 OCR / 翻译工具（WinForm + JadeView 2 + WebView2）：二维码、文字识别、截图翻译、固定区域游戏字幕翻译。本体已内置微信 OCR + RapidOCR，装完直接能识字；翻译模型按需导入。
 
 ## 功能
 
@@ -11,7 +11,7 @@ Windows 截图 OCR / 翻译工具（WinForm + JadeView 2 + WebView2）：二维�
 - **游戏字幕翻译**：只认你画的固定区域，遮罩常驻不闪；按文字位置把相邻行并成段，块间并发；动态 ROI 只重扫真正变化的行，没变的部分沿用上一轮结果；每款游戏独立翻译缓存；`Ctrl+Alt+T` 开关翻译（手动模式按一次翻一次、画面一变遮罩即收；自适应模式只在新字幕出现时重译）
 - **灵敏度四档**：低 / 中 / 高 / 极高
 - **分块框调试**：设置里打开「显示分块框（调试）」，屏上用彩色矩形标出自动分出来的文字块，方便核对
-- **多 OCR 引擎**：微信 OCR / PP-OCR 极速 / Windows OCR
+- **多 OCR 引擎**：微信 OCR / RapidOCR（游戏模式推荐）
 - **多翻译档**：标准 HyMT1.5 1.8B、效率 PLaMo Q4_K_M、极速 PLaMo Q2_K
 - **模型包导入**：设置 → 识别引擎 / 翻译 → 导入模型包
 
@@ -21,8 +21,8 @@ Windows 截图 OCR / 翻译工具（WinForm + JadeView 2 + WebView2）：二维�
 
 | 文件 | 大小 | 内容 |
 |---|---:|---|
-| `SnapScan-v1.4.16-Body.zip` | 126.0 MB | 本体 + 微信 OCR + PP-OCR（日文 / 极速），装着就能识字 |
-| `SnapScan-Model-OCR-v1.4.1.zip` | 37.8 MB | 备用 OCR 包（本体已内置，一般不用下） |
+| `SnapScan-v1.4.17-Body.zip` | 110.4 MB | 本体 + 微信 OCR + RapidOCR，装着就能识字 |
+| `SnapScan-Model-OCR-v1.4.1.zip` | 35.9 MB | 备用 OCR 包（本体已内置，一般不用下） |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 573 MB | 效率档 PLaMo Q4_K_M |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 410 MB | 极速档 PLaMo Q2_K |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 1.1 GB | 标准档 HyMT1.5 1.8B |

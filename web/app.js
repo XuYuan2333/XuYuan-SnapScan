@@ -65,7 +65,6 @@
     const alpha = (c.mtalpha === undefined || c.mtalpha === null) ? 100 : c.mtalpha;
 
     if ($("selMtMode")) $("selMtMode").value = mode;
-    if ($("gameMask")) $("gameMask").value = mode;
 
     if ($("rngMtAlpha")) $("rngMtAlpha").value = alpha;
     if ($("gameRngMtAlpha")) $("gameRngMtAlpha").value = alpha;
@@ -146,7 +145,6 @@
     $("swRestoreWin").checked = !!c.restorewin;
     $("swRestoreQr").checked = !!c.restoreqr;
     if ($("swToast")) $("swToast").checked = c.toast !== false;
-    if ($("swOcrFusion")) $("swOcrFusion").checked = !!c.ocrfusion;
     if ($("swMtBar")) $("swMtBar").checked = c.mtbar !== false;
     if ($("selMtPerf")) $("selMtPerf").value = c.mtperf || "balanced";
     if ($("selMtGpu")) $("selMtGpu").value = c.mtgpu || "auto";
@@ -221,8 +219,6 @@
   function applyGameState(g) {
     if (!g) return;
     if ($("gameOn")) $("gameOn").checked = !!g.on;
-    if ($("gameModel")) $("gameModel").value = ["efficiency", "turbo", "standard"].includes(g.profile) ? g.profile : "efficiency";
-    if ($("gameMask")) $("gameMask").value = normMaskMode(g.mask);
     if ($("gameMerge")) $("gameMerge").checked = g.merge !== false;
     if ($("gameFontFilter")) $("gameFontFilter").checked = g.fontFilter !== false;
     if ($("gameToastOn")) $("gameToastOn").checked = g.toastOn !== false;
@@ -346,7 +342,7 @@
       return t;
     }
     if (e.effective && e.effective.indexOf("pp") === 0) {
-      return "本地 PP-OCR 模型，已从「OCR Model」目录加载，不需要额外装任何软件。";
+      return "本地 RapidOCR 模型，已从「OCR Model」目录加载，不需要额外装任何软件。";
     }
     if (e.wechatUsable) return "微信 OCR 可用，但没有被选中（可在设置里切换）";
     return "当前使用 Windows 系统自带 OCR。" + (e.problem ? " 原因：" + e.problem : "");
@@ -537,22 +533,15 @@
 
     const list = (e && e.list) ? e.list : [];
     const readyKeys = list.filter((it) => it && it.ready).map((it) => it.key);
-    const fuse = !!(S && S.config && S.config.ocrfusion);
-    const fuseReady = readyKeys.indexOf("wechat") >= 0 && readyKeys.indexOf("pptiny") >= 0;
-    if ($("swOcrFusion")) {
-      $("swOcrFusion").disabled = !fuseReady;
-      $("swOcrFusion").title = fuseReady ? "融合：PP 出框 + 微信出字" : "需要同时装好微信 OCR 和 PP-OCR 极速";
-    }
     let active = (readyKeys.indexOf(current) >= 0) ? current : null;
     if (!active && e && readyKeys.indexOf(e.effective) >= 0) active = e.effective;
     if (!active && readyKeys.length) active = readyKeys[0];
-    const activeKeys = fuse && fuseReady ? ["wechat", "pptiny"] : [active];
 
     list.forEach((it) => {
       if (!it) return;
       const row = document.createElement("div");
       row.className = "engine-opt";
-      if (it.ready) row.className += " pick" + (activeKeys.indexOf(it.key) >= 0 ? " on" : "");
+      if (it.ready) row.className += " pick" + (it.key === active ? " on" : "");
       else row.className += " off";
 
       const tick = document.createElement("span");
@@ -574,7 +563,6 @@
 
       if (it.ready) {
         row.addEventListener("click", () => {
-          if (fuse) { doOcrLoad(it.key, it.name || it.key, { ocrfusion: false }); return; }
           if (it.key !== active) doOcrLoad(it.key, it.name || it.key);
         });
       } else {
@@ -584,10 +572,8 @@
     });
 
     const missing = list.filter((it) => it && !it.ready).map((it) => it.name);
-    let note = fuse
-      ? "融合模式已开启：微信 OCR + PP-OCR 极速同时勾选；点任一引擎会退出融合并切回单引擎。"
-      : "只列出本机真正检测到的可用引擎；灰掉的是没找到模型的。";
-    if (!fuse && missing.length) note += " 缺少：" + missing.join(" / ") + "。";
+    let note = "只列出本机真正检测到的可用引擎；灰掉的是没找到模型的。";
+    if (missing.length) note += " 缺少：" + missing.join(" / ") + "。";
     if (e && e.modelRoot) note += "\n模型目录：" + e.modelRoot;
     $("engineNote").textContent = note;
   }
@@ -960,10 +946,6 @@
       $("swToast").dataset.bound = "1";
       $("swToast").addEventListener("change", (e) => setConfig({ toast: e.target.checked }));
     }
-    if ($("swOcrFusion") && !$("swOcrFusion").dataset.bound) {
-      $("swOcrFusion").dataset.bound = "1";
-      $("swOcrFusion").addEventListener("change", (e) => setConfig({ ocrfusion: e.target.checked }));
-    }
     if ($("swHotStart") && !$("swHotStart").dataset.bound) {
       $("swHotStart").dataset.bound = "1";
       $("swHotStart").addEventListener("change", (e) => setConfig({ hotstart: e.target.checked }));
@@ -995,11 +977,6 @@
     if ($("selMtMode")) $("selMtMode").addEventListener("change", (e) => {
       applyMtMode(e.target.value);
       setConfig({ mtmode: e.target.value });
-    });
-
-    if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
-      applyMtMode(e.target.value);
-      setConfig({ gamemask: e.target.value });
     });
 
     $("numMtIdle").addEventListener("change", (e) => {
@@ -1123,19 +1100,6 @@
       if (s && s.state) applyState(s.state);
       toast(want ? "已切到自适应：定住就自动翻译" : "已切到手动：按快捷键翻译");
     });
-    if ($("gameMask")) $("gameMask").addEventListener("change", (e) => {
-      setConfig({ gamemask: e.target.value });
-    });
-    if ($("gameModel")) $("gameModel").addEventListener("change", async (e) => {
-      const v = e.target.value;
-      if (v === "standard") {
-        const ok = confirm("标准模型 HyMT1.5 更慢、更占显存，但质量更高。\n游戏模式仍会常驻，不会自动释放。确定切到标准？");
-        if (!ok) { applyGameState(S.game); return; }
-      }
-      const s = await setConfig({ gamemodel: v });
-      if (s && s.game && s.game.on && s.game.msg) toast(s.game.msg);
-    });
-
     if ($("btnGameAdd")) $("btnGameAdd").addEventListener("click", async () => {
       const r = await api("gamepick", {});
       if (r && r.state) applyState(r.state);

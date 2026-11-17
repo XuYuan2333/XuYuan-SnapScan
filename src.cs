@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("XuYuan-SnapScan 二维码 / 文字识别工具")]
 [assembly: AssemblyProduct("XuYuan-SnapScan")]
 [assembly: AssemblyDescription("截图识别二维码与文字的小工具")]
-[assembly: AssemblyVersion("1.4.16.0")]
-[assembly: AssemblyFileVersion("1.4.16.0")]
+[assembly: AssemblyVersion("1.4.17.0")]
+[assembly: AssemblyFileVersion("1.4.17.0")]
 
 namespace QRSnap
 {
@@ -402,7 +402,7 @@ namespace QRSnap
         // 某个 PP-OCR 档位的模型目录
         public static string ModelTierDir(string engine)
         {
-            string tier = "tiny";
+            string tier = "rapid";
             if (engine == EnginePpJapan) tier = "japan";
             else if (engine == EnginePpMedium) tier = "medium";
             else if (engine == EnginePpRapid) tier = "rapid";
@@ -500,8 +500,6 @@ namespace QRSnap
         public static bool GameDwellOn;                                  // 自动模式下只在鼠标停稳且移动过一段距离时扫一次
         public static int GameIntervalMs = 500;                          // 固定间隔，默认 0.5s
         public static int GameSensitivity = 2;                           // 0超灵敏 1灵敏 2平衡 3迟钝 4最迟钝
-        public static string GameModel = MtProfileEfficiency;            // 游戏模式默认 0.5B，可切标准
-        public static string GameMaskMode = MtModeEfficiency;            // 游戏遮罩独立控制；仅效率，游戏页不提供拟真
         public static bool GameToastOn = true;                           // 游戏模式是否显示右下角识别提示
         public static bool GameMerge = true;                             // 合并被拆开的字幕行
         public static bool GameBlock = true;                             // 按位置把相邻行聚成段落块，整块翻译（PreTranslate 里并发）
@@ -602,20 +600,20 @@ namespace QRSnap
         {
             if (string.IsNullOrEmpty(value)) return EngineWeChat;
             string v = value.Trim().ToLowerInvariant();
-            // 兼容旧版 auto / rapid / ppocr 等写法；标准档已下线，旧配置一律并到极速
+            // 兼容旧版 auto / rapid / ppocr 等写法；日文/极速/高精档已下线，旧配置一律并到 RapidOCR
             if (v == EngineSystem || v == "win" || v == "windows") return EngineSystem;
-            if (v == EnginePpTiny || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr") return EnginePpTiny;
-            if (v == EnginePpSmall || v == "small" || v == "standard") return EnginePpTiny;
-            if (v == EnginePpJapan || v == "japan" || v == "jp" || v == "日文") return EnginePpJapan;
+            if (v == EnginePpTiny || v == EnginePpSmall || v == EnginePpMedium || v == EnginePpJapan
+                || v == "ppocr" || v == "rapid" || v == "tiny" || v == "pp-ocr"
+                || v == "small" || v == "standard" || v == "medium" || v == "med"
+                || v == "japan" || v == "jp" || v == "日文" || v == "高精") return EnginePpRapid;
             if (v == EnginePpRapid || v == "rapidocr" || v == "rapid-ocr" || v == "rapid_ocr") return EnginePpRapid;
-            if (v == EnginePpMedium || v == "medium" || v == "med" || v == "高精") return EnginePpTiny;
             return EngineWeChat;
         }
 
         public static bool IsLocalEngine(string engine)
         {
             string e = NormalizeEngine(engine);
-            return e == EnginePpTiny || e == EnginePpSmall || e == EnginePpMedium || e == EnginePpJapan || e == EnginePpRapid;
+            return e == EnginePpRapid;
         }
 
         private static bool ToBool(string v)
@@ -748,8 +746,6 @@ namespace QRSnap
             GameDwellOn = false;
             GameIntervalMs = 500;
             GameSensitivity = 2;
-            GameModel = MtProfileEfficiency;
-            GameMaskMode = MtModeEfficiency;
             GameToastOn = true;
             GameMerge = true;
             GameBlock = true;
@@ -812,7 +808,6 @@ namespace QRSnap
                     else if (k.Equals("mtperf", StringComparison.OrdinalIgnoreCase)) MtPerf = NormalizeMtPerf(v);
                     else if (k.Equals("mtgpu", StringComparison.OrdinalIgnoreCase)) MtGpu = NormalizeMtGpu(v);
                     else if (k.Equals("ocrgpu", StringComparison.OrdinalIgnoreCase)) OcrGpu = ToBool(v);
-                    else if (k.Equals("ocrfusion", StringComparison.OrdinalIgnoreCase)) OcrFusion = ToBool(v);
                     else if (k.Equals("shotcache", StringComparison.OrdinalIgnoreCase)) ShotCacheEnabled = ToBool(v);
                     else if (k.Equals("shotcache", StringComparison.OrdinalIgnoreCase)) ShotCacheEnabled = ToBool(v);
                     else if (k.Equals("hotstart", StringComparison.OrdinalIgnoreCase)) HotStart = ToBool(v);
@@ -855,8 +850,6 @@ namespace QRSnap
                     else if (k.Equals("gamedwellms", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameDwellMs = Math.Max(100, Math.Min(1500, n)); }
                     else if (k.Equals("gameinterval", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameIntervalMs = Math.Max(250, Math.Min(5000, n)); }
                     else if (k.Equals("gamesens", StringComparison.OrdinalIgnoreCase)) { int n; if (int.TryParse(v, out n)) GameSensitivity = Math.Max(0, Math.Min(4, n)); }
-                    else if (k.Equals("gamemodel", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameModel = NormalizeMtProfile(v);
-                    else if (k.Equals("gamemask", StringComparison.OrdinalIgnoreCase) && v.Length > 0) GameMaskMode = NormalizeMtMode(v);
                     else if (k.Equals("gametoaston", StringComparison.OrdinalIgnoreCase)) GameToastOn = ToBool(v);
                     else if (k.Equals("gamemerge", StringComparison.OrdinalIgnoreCase)) GameMerge = ToBool(v);
                     else if (k.Equals("gameblock", StringComparison.OrdinalIgnoreCase)) GameBlock = ToBool(v);
@@ -961,8 +954,6 @@ namespace QRSnap
             sb.Append("gamemaskconfirm=").Append(GameMaskConfirmMs).Append("\r\n");
             sb.Append("gamesens=").Append(GameSensitivity).Append("\r\n");
             sb.Append("gamelevel=").Append(GameSensLevel).Append("\r\n");
-            sb.Append("gamemodel=").Append(GameModel).Append("\r\n");
-            sb.Append("gamemask=").Append(NormalizeMtMode(GameMaskMode)).Append("\r\n");
             sb.Append("gametoaston=").Append(GameToastOn ? "1" : "0").Append("\r\n");
             sb.Append("gamemerge=").Append(GameMerge ? "1" : "0").Append("\r\n");
             sb.Append("gameblock=").Append(GameBlock ? "1" : "0").Append("\r\n");
@@ -2492,10 +2483,8 @@ namespace QRSnap
         public static string LocalName(string engine)
         {
             string e = AppConfig.NormalizeEngine(engine);
-            if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
-            if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
             if (e == AppConfig.EnginePpRapid) return "RapidOCR";
-            return "PP-OCR 极速";
+            return "OCR";
         }
 
         // 只查文件，不加载模型
@@ -2572,9 +2561,7 @@ namespace QRSnap
         {
             try
             {
-                string dir = AppConfig.ModelTierDir(AppConfig.EnginePpTiny);
-                if (!PpOcr.FolderReady(dir)) dir = AppConfig.ModelTierDir(AppConfig.EnginePpJapan);
-                if (!PpOcr.FolderReady(dir)) dir = AppConfig.ModelTierDir(AppConfig.EnginePpMedium);
+                string dir = AppConfig.ModelTierDir(AppConfig.EnginePpRapid);
                 if (!PpOcr.FolderReady(dir)) return null;
                 lock (LocalLock)
                 {
@@ -2606,9 +2593,8 @@ namespace QRSnap
             {
                 string tier = AppConfig.NormalizeEngine(AppConfig.Engine);
                 string dir = AppConfig.ModelTierDir(tier);
-                if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpTiny;
+                if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpRapid;
                 dir = AppConfig.ModelTierDir(tier);
-                if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
                 if (!PpOcr.FolderReady(dir)) return;
                 lock (LocalLock)
                 {
@@ -2628,59 +2614,16 @@ namespace QRSnap
 
         public static bool JapanReady()
         {
-            return PpOcr.FolderReady(AppConfig.ModelTierDir(AppConfig.EnginePpJapan));
+            // 日文专用档已下线：日文/中英混排统一交给 RapidOCR 的多语言字典。
+            return false;
         }
 
-        // 日文模型整块识字。中文模型字典里没有假名，日文会被强行映射成汉字再判成中文，
-        // 所以「看着像中文、其实一个假名都没出来」的时候用这一份复跑一次。
+        // 日文专用档已下线；保留空实现给旧调用方兜底。
         public static List<OcrSegment> LayoutSegmentsJapan(Bitmap bmp, out List<Rectangle> obstacles, out string log)
         {
             obstacles = null;
-            log = null;
-            if (bmp == null) return null;
-            string dir = AppConfig.ModelTierDir(AppConfig.EnginePpJapan);
-            if (!PpOcr.FolderReady(dir)) { log = "日文模型缺失"; return null; }
-            lock (LocalLock)
-            {
-                if (_layoutJp == null || _layoutJpDir != dir)
-                {
-                    try { if (_layoutJp != null) _layoutJp.Dispose(); } catch (Exception) { }
-                    _layoutJp = null;
-                    _layoutJp = new PpOcr(dir, LocalName(AppConfig.EnginePpJapan));
-                    _layoutJpDir = dir;
-                }
-            }
-            PreparedImage prep = OcrImage.ForOcr(bmp);
-            try
-            {
-                List<OcrSegment> segs = LayoutBoost.Recognize(prep.Bitmap, _layoutJp, out log, out obstacles);
-                if (prep.Scaled)
-                {
-                    if (segs != null)
-                    {
-                        for (int i = 0; i < segs.Count; i++)
-                        {
-                            OcrSegment s = segs[i];
-                            s.Box = prep.MapBack(s.Box);
-                            if (s.SourceBoxes != null)
-                            {
-                                for (int k = 0; k < s.SourceBoxes.Count; k++)
-                                    s.SourceBoxes[k] = prep.MapBack(s.SourceBoxes[k]);
-                            }
-                        }
-                    }
-                    if (obstacles != null)
-                    {
-                        for (int i = 0; i < obstacles.Count; i++) obstacles[i] = prep.MapBack(obstacles[i]);
-                    }
-                }
-                log = (string.IsNullOrEmpty(log) ? prep.Trace : (log + " · " + prep.Trace));
-                return segs;
-            }
-            finally
-            {
-                prep.Dispose();
-            }
+            log = "日文专用档已下线，改用 RapidOCR";
+            return null;
         }
 
         public static List<OcrSegment> LayoutSegments(Bitmap bmp, out List<Rectangle> obstacles, out string log)
@@ -2728,14 +2671,12 @@ namespace QRSnap
             obstacles = null;
             log = null;
             if (bmp == null) return null;
-            // 版面识字优先跟用户当前选的本地引擎走：选了日文档位就必须用日文模型，
-            // 否则这一层still用中文 tiny，日文会被强行映射成汉字再判成中文，上层翻译直接跳过。
+            // 版面识字优先跟用户当前选的本地引擎走；旧档位已经归一成 RapidOCR。
             string tier = AppConfig.NormalizeEngine(AppConfig.Engine);
             string dir = AppConfig.ModelTierDir(tier);
-            if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpTiny;
+            if (!AppConfig.IsLocalEngine(tier) || !PpOcr.FolderReady(dir)) tier = AppConfig.EnginePpRapid;
             dir = AppConfig.ModelTierDir(tier);
-            if (!PpOcr.FolderReady(dir)) { tier = AppConfig.EnginePpMedium; dir = AppConfig.ModelTierDir(tier); }
-            if (!PpOcr.FolderReady(dir)) { log = "PP-OCR 模型缺失，版面强化跳过"; return null; }
+            if (!PpOcr.FolderReady(dir)) { log = "RapidOCR 模型缺失，版面强化跳过"; return null; }
 
             lock (LocalLock)
             {
@@ -2821,12 +2762,12 @@ namespace QRSnap
             string want = AppConfig.NormalizeEngine(AppConfig.Engine);
             if (AppConfig.IsLocalEngine(want) && LocalReady(want)) return want;
             if (want == AppConfig.EngineWeChat && CurrentProbe.WeChatUsable) return AppConfig.EngineWeChat;
-            if (LocalReady(AppConfig.EnginePpTiny)) return AppConfig.EnginePpTiny;
+            if (LocalReady(AppConfig.EnginePpRapid)) return AppConfig.EnginePpRapid;
             return AppConfig.EngineSystem;
         }
 
-        // 实际可用引擎的显示名：本地档位必须显示 PP-OCR 极速/标准/高精，
-        // 之前所有非微信的分支都写成“Windows 内置 OCR”，选了 PP-OCR 也这么提示，纯属说错
+        // 实际可用引擎的显示名：本地档位只显示 RapidOCR
+        // 之前所有非微信的分支都写成“Windows 内置 OCR”，选了本地引擎也这么提示，纯属说错
         public static string EffectiveName()
         {
             string e = EffectiveEngine();
@@ -3018,7 +2959,7 @@ namespace QRSnap
             {
                 if (_local != null && AppConfig.IsLocalEngine(_localEngine)) return _local;
             }
-            string[] tiers = new string[] { AppConfig.EnginePpMedium, AppConfig.EnginePpTiny };
+            string[] tiers = new string[] { AppConfig.EnginePpRapid };
             for (int i = 0; i < tiers.Length; i++)
             {
                 if (!LocalReady(tiers[i])) continue;
@@ -6810,8 +6751,7 @@ namespace QRSnap
             {
                 AppConfig.Load();
                 bool aiReady = JadeHost.AiVerifySync(12000);
-                string ppTier = string.Equals(tier, "pptiny", StringComparison.OrdinalIgnoreCase)
-                    ? AppConfig.EnginePpTiny : AppConfig.EnginePpMedium;
+                string ppTier = AppConfig.EnginePpRapid;
                 PpOcr pp = Ocr.LocalFor(ppTier);
                 if (pp == null) { File.WriteAllText(Path.ChangeExtension(outputPng, ".txt"), "ERROR: PP-OCR 模型缺失"); return; }
 
@@ -6968,9 +6908,8 @@ namespace QRSnap
             {
                 AppConfig.Load();
                 if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
-                else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
-                else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
-                else if (mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
+                else if (mode == "pptiny" || mode == "ppmed" || mode == "ppmedium"
+                    || mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
                 else if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
 
                 Bitmap bmp = LoadBitmap(imagePath);
@@ -7015,10 +6954,8 @@ namespace QRSnap
                 AppConfig.Load();
                 if (mode == "system") AppConfig.Engine = AppConfig.EngineSystem;
                 else if (mode == "wechat") AppConfig.Engine = AppConfig.EngineWeChat;
-                else if (mode == "pptiny") AppConfig.Engine = AppConfig.EnginePpTiny;
-                else if (mode == "ppsmall") AppConfig.Engine = AppConfig.EnginePpTiny;   // 标准档已下线，并入极速
-                else if (mode == "ppmed" || mode == "ppmedium") AppConfig.Engine = AppConfig.EnginePpMedium;
-                else if (mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
+                else if (mode == "pptiny" || mode == "ppsmall" || mode == "ppmed" || mode == "ppmedium"
+                    || mode == "pprapid" || mode == "rapid" || mode == "rapidocr") AppConfig.Engine = AppConfig.EnginePpRapid;
 
                 EngineProbe probe = Ocr.Probe();
                 Bitmap bmp = LoadBitmap(imagePath);

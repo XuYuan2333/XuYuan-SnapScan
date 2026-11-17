@@ -775,7 +775,7 @@ namespace QRSnap
                                 didOcr = true;
                                 _layoutObstacles = obs;
                                 _layoutLines = ls.Count;
-                                recEngine = AppConfig.OcrFusion ? "PP+微信 · 融合版面" : "PP-OCR 极速 · 版面";
+                                recEngine = AppConfig.OcrFusion ? "RapidOCR+微信 · 融合版面" : "RapidOCR · 版面";
                                 recDetail = "layout";
                                 recMs = swL.ElapsedMilliseconds;
                                 // 离线翻译时 AI 识字强化作用在版面分段上（AI 翻译接管时由翻译提示词纠错）
@@ -2176,22 +2176,15 @@ namespace QRSnap
         internal static string EngineLabel(string e)
         {
             if (e == AppConfig.EngineWeChat) return "微信 OCR";
-            if (e == AppConfig.EnginePpTiny) return "PP-OCR 极速";
-            if (e == AppConfig.EnginePpMedium) return "PP-OCR 高精";
-            if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
             if (e == AppConfig.EnginePpRapid) return "RapidOCR";
             return "Windows OCR";
         }
 
         // 设置里选项后面的括号说明，短到不会撑破界面
-        // 注意：微信 OCR 也是本地模型、不联网，所以不再给 PP-OCR 单独标“离线”
         internal static string EngineNote(string e)
         {
-            if (e == AppConfig.EngineWeChat) return "推荐";
-            if (e == AppConfig.EnginePpTiny) return "轻量 · 快";
-            if (e == AppConfig.EnginePpMedium) return "高精度";
-            if (e == AppConfig.EnginePpJapan) return "日文专用 · 假名";
-            if (e == AppConfig.EnginePpRapid) return "社区方案 · 新";
+            if (e == AppConfig.EngineWeChat) return "通用 · 高兼容";
+            if (e == AppConfig.EnginePpRapid) return "游戏模式推荐";
             return "系统兜底";
         }
 
@@ -2681,7 +2674,7 @@ namespace QRSnap
             sb.Append(",\"list\":[");
             bool firstOpt = true;
             string[] keys = new string[] {
-                AppConfig.EngineWeChat, AppConfig.EnginePpTiny, AppConfig.EnginePpRapid, AppConfig.EnginePpJapan, AppConfig.EngineSystem };
+                AppConfig.EngineWeChat, AppConfig.EnginePpRapid };
             for (int i = 0; i < keys.Length; i++)
             {
                 string k = keys[i];
@@ -2761,7 +2754,7 @@ namespace QRSnap
             sb.Append(",\"roi\":").Append(J.B(AppConfig.GameRoi));
             sb.Append(",\"dwell\":").Append(J.B(AppConfig.GameDwellOn));
             sb.Append(",\"dwellMs\":").Append(AppConfig.GameDwellMs);
-            sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.GameModel)));
+            sb.Append(",\"profile\":").Append(J.S(AppConfig.NormalizeMtProfile(AppConfig.MtProfile)));
             sb.Append(",\"mask\":").Append(J.S(AppConfig.NormalizeMtMode(AppConfig.MtMode)));
             sb.Append(",\"toastOn\":").Append(J.B(AppConfig.GameToastOn));
             sb.Append(",\"auto\":").Append(J.B(AppConfig.GameAutoMode));
@@ -2771,7 +2764,7 @@ namespace QRSnap
             sb.Append(",\"maskConfirm\":").Append(AppConfig.GameMaskConfirmMs);
             sb.Append(",\"transActive\":").Append(J.B(AppConfig.GameOn && GameRuntime.TranslateActive));
             sb.Append(",\"transHotkey\":").Append(J.S(AppConfig.HotkeyGameTrans));
-            string gp = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
+            string gp = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
             bool gready = (gp == AppConfig.MtProfileEfficiency || gp == AppConfig.MtProfileTurbo) ? MtRunner.GameReadyFor(gp) : MtRunner.Ready;
             int gregionN = gregions.Count;
             string gmsg =
@@ -3006,10 +2999,6 @@ namespace QRSnap
                     {
                         AppConfig.OcrGpu = v == "true" || v == "1";
                     }
-                    else if (k == "ocrfusion")
-                    {
-                        AppConfig.OcrFusion = v == "true" || v == "1";
-                    }
                     else if (k == "shotcache")
                     {
                         AppConfig.ShotCacheEnabled = v == "true" || v == "1";
@@ -3215,22 +3204,6 @@ namespace QRSnap
                         int gv;
                         if (int.TryParse(v, out gv)) AppConfig.GameSensitivity = Math.Max(0, Math.Min(4, gv));
                         GameRuntime.Reconfigure();
-                    }
-                    else if (k == "gamemodel")
-                    {
-                        AppConfig.GameModel = AppConfig.NormalizeMtProfile(v);
-                        if (AppConfig.GameOn)
-                        {
-                            AppConfig.MtProfile = AppConfig.GameModel;
-                            MtRunner.Invalidate();
-                            try { LlamaMt.Shutdown(); } catch (Exception) { }
-                            GameRuntime.Reconfigure();
-                        }
-                    }
-                    else if (k == "gamemask")
-                    {
-                        AppConfig.MtMode = AppConfig.NormalizeMtMode(v);
-                        try { TransOverlay.Repaint(); } catch (Exception) { }
                     }
                     else if (k == "gametoaston")
                     {
@@ -3507,8 +3480,8 @@ namespace QRSnap
                 string pp = Path.Combine(src, "PP-OCR");
                 if (Directory.Exists(pp))
                 {
-                    string[] tiers = new string[] { "tiny", "medium" };
-                    string[] labels = new string[] { "PP-OCR 极速", "PP-OCR 高精" };
+                    string[] tiers = new string[] { "rapid" };
+                    string[] labels = new string[] { "RapidOCR" };
                     for (int i = 0; i < tiers.Length; i++)
                     {
                         string t = Path.Combine(pp, tiers[i]);
@@ -3740,8 +3713,8 @@ namespace QRSnap
                     try
                     {
                         Ocr.Warmup(AppConfig.Engine);
-                        // 融合识字还要 PP-OCR 的检测模型，一起提前拉起
-                        if (AppConfig.OcrFusion) Ocr.Warmup(AppConfig.EnginePpTiny);
+                        // 融合识字还要 RapidOCR 的检测模型，一起提前拉起
+                        if (AppConfig.OcrFusion) Ocr.Warmup(AppConfig.EnginePpRapid);
                         Log("[ocrwarm] " + AppConfig.Engine);
                     }
                     catch (Exception) { }
@@ -3783,11 +3756,11 @@ namespace QRSnap
             {
                 try
                 {
-                    // 融合模式要两套引擎都起来（PP 出框 + 微信出字）
+                    // 融合模式要两套引擎都起来（RapidOCR 出框 + 微信出字）
                     if (AppConfig.OcrFusion)
                     {
                         Ocr.Warmup(AppConfig.EngineWeChat);
-                        Ocr.Warmup(AppConfig.EnginePpTiny);
+                        Ocr.Warmup(AppConfig.EnginePpRapid);
                     }
                     else Ocr.Warmup(AppConfig.Engine);
                 }

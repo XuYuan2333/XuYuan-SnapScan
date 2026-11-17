@@ -166,10 +166,6 @@
         <div class="engine-desc" id="engineDesc">—</div>
         <div class="group-note" id="engineNote">只读取本软件自己的「OCR Model」目录；灰掉的是该目录里没找到模型的。</div>
         <div class="group-note">截图按彩色原尺寸直接送识别，不做缩放或灰度预处理（检测端自己会把长边统一到 1280，外面再缩一遍只会多插值一次）。</div>
-        <label class="switch-row">
-          <div><b>融合模式（PP 框 + 微信字）</b><i>PP 出更细的框、微信出文字；纯识字会慢一点，翻译链路基本不增加时间。需要两个引擎都装好。</i></div>
-          <input type="checkbox" id="swOcrFusion"><span class="sw"></span>
-        </label>
         <div class="row-btns">
           <button class="btn ghost" id="btnRecheck2">重新检测</button>
           <button class="btn" id="btnImportModel">导入模型包</button>
@@ -443,26 +439,8 @@
       <input type="checkbox" id="gameBlockDebug"><span class="sw"></span>
     </label>
 
-    <div class="sub-title">手动翻译</div>
-    <div class="group-note">按「<span data-hk="mt"></span>」翻一次；画面变化后遮罩自动消失，再按一次翻新的画面。</div>
-    <div class="field-grid">
-      <label class="field">
-        <span>游戏模型</span>
-        <select id="gameModel">
-          <option value="efficiency">效率 · PLaMo Q4_K_M · 546 MB · 占用约 1 GB（推荐）</option>
-          <option value="turbo">极速 · PLaMo Q2_K · 391 MB · 占用约 0.8 GB</option>
-          <option value="standard">HyMT1.5 · 1080 MB · 占用约 2 GB（较慢）</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>遮罩模式</span>
-        <select id="gameMask">
-          <option value="efficiency">效率 · 遮罩块盖住原文</option>
-          <option value="realistic">拟真 · 擦掉原字再重绘</option>
-        </select>
-      </label>
-    </div>
-
+    <div class="sub-title">遮罩</div>
+    <div class="group-note">游戏模式直接使用「设置」里的翻译模型档位和遮罩模式，不再单独配置。</div>
     <div class="mask-preview" id="gameMaskPreview">
       <div class="mask-demo" id="gameMaskDemo">我喜欢尼娅，还有大家！</div>
     </div>

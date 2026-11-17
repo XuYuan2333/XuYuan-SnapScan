@@ -255,7 +255,7 @@ namespace QRSnap
                 _pendingRun = false;
                 _overlayClosed = false;
                 ResetAutoImageCache();
-                string profile = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
+                string profile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
                 WarmModel(profile);
                 StartAutoResume();
                 JadeHost.GameDone("游戏翻译已启动", AppConfig.HotkeyGameTrans + " 可暂停", true);
@@ -289,7 +289,7 @@ namespace QRSnap
                 return false;
             }
 
-            string profile = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
+            string profile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
             // 在线翻译接管时不需要本地模型，跳过所有“模型没装”的拦截
             bool online = AppConfig.AliMt || AppConfig.AiMt;
             if (!online && profile == AppConfig.MtProfileEfficiency && !MtRunner.GameReadyFor("efficiency"))
@@ -312,7 +312,6 @@ namespace QRSnap
             }
             _prevProfile = AppConfig.NormalizeMtProfile(AppConfig.MtProfile);
             AppConfig.MtProfile = profile;
-            AppConfig.GameModel = profile;
             AppConfig.GameTrigger = 2;   // 只保留手动快捷键翻译
             AppConfig.GameOn = true;
             LastError = "";
@@ -2176,7 +2175,7 @@ namespace QRSnap
                 }
 
                 // —— 每块独立翻译、独立上屏：一个区变了只重画它自己那个遮罩窗口 ——
-                JadeHost.GameBusy("翻译中", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel));
+                JadeHost.GameBusy("翻译中", "模型 · " + JadeHost.ModelLabel(AppConfig.MtProfile));
                 int totalLines = 0, totalBlocks = 0;
                 for (int i = 0; i < _slots.Count; i++)
                 {
@@ -2284,13 +2283,13 @@ namespace QRSnap
                         + " dirty=" + dirtyCount + "/" + _slots.Count);
                     try { TransOverlay.HideOverlay(); } catch (Exception) { }   // 没结果就别留旧译文
                     if (AppConfig.GameAutoMode) StartAutoResume();               // 空帧也马上接着盯，别等 2 秒
-                    JadeHost.GameDone("没有识别到字幕", "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel), false);
+                    JadeHost.GameDone("没有识别到字幕", "模型 · " + JadeHost.ModelLabel(AppConfig.MtProfile), false);
                     return;
                 }
                 _emptyStreak = 0;
                 _autoHoldUntil = 0;
                 JadeHost.GameDone(totalLines > 0 ? "翻译完成" : (JadeHost.GameSkipShort ?? "没有识别到字幕"),
-                    "模型 · " + JadeHost.ModelLabel(AppConfig.GameModel) + (totalLines > 0 ? " · " + totalLines + " 行" : ""),
+                    "模型 · " + JadeHost.ModelLabel(AppConfig.MtProfile) + (totalLines > 0 ? " · " + totalLines + " 行" : ""),
                     totalLines > 0);
                 if (_overlayClosed) { try { TransOverlay.HideOverlay(); } catch (Exception) { } }
                 else if (totalLines > 0 && TransOverlay.IsShowing) StartMaskWatch();
