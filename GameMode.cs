@@ -199,6 +199,8 @@ namespace QRSnap
         // 游戏「翻译服务」运行态：和「游戏模式开没开」分开。
         // false = 只做准备（自动识别区域照常找字、界面照常显示区域），不 OCR、不翻译、不上遮罩。
         public static bool TranslateActive { get; private set; }
+        // 上次退出游戏模式时翻译是开是关：再次启动游戏模式要恢复，而不是每次都退回「只准备」。
+        private static bool _translateWanted;
 
         // 每游戏缓存命名空间：用遮罩下面那个窗口的进程名做身份，换游戏自动换缓存桶。
         // 只取进程名不取标题（标题经常带章节/关卡名，会一直变，缓存全被拆散）。
@@ -232,7 +234,13 @@ namespace QRSnap
             if (TranslateActive)
             {
                 TranslateActive = false;
+                _translateWanted = false;
+                _gen++;
+                _busy = false;
+                _pendingRun = false;
+                StopAuto();                 // 暂停服务就真的停采样，别让它在后台把当前帧缓存成「已识字」
                 StopMaskWatch();
+                ResetAutoImageCache();
                 try { TransOverlay.HideOverlay(); } catch (Exception) { }
                 try { TransOverlay.ClearZones(); } catch (Exception) { }
                 JadeHost.GameDone("游戏翻译已暂停", AppConfig.HotkeyGameTrans + " 再次启动", true);
@@ -241,7 +249,12 @@ namespace QRSnap
             else
             {
                 TranslateActive = true;
+                _translateWanted = true;
+                _gen++;
+                _busy = false;
+                _pendingRun = false;
                 _overlayClosed = false;
+                ResetAutoImageCache();
                 string profile = AppConfig.NormalizeMtProfile(AppConfig.GameModel);
                 WarmModel(profile);
                 StartAutoResume();
@@ -256,6 +269,7 @@ namespace QRSnap
         {
             if (!AppConfig.GameOn) { JadeHost.GameDone("先开启游戏模式", false); return; }
             TranslateActive = true;
+            _translateWanted = true;
             _overlayClosed = false;
             JadeHost.GameDone("正在翻译当前画面", AppConfig.HotkeyMt + " 再按一次重翻", true);
             Thread th = new Thread(delegate() { try { Trigger(true); } catch (Exception) { } });
@@ -310,17 +324,18 @@ namespace QRSnap
             // 选区要是和主窗口重叠，是选区该挪，不该每轮去动窗口（那会一直在屏幕上晃）
             _prevSig = null;
             StartTimer();
+            // 重新开游戏模式必须从零认：旧的逐槽 Segs/RoiGray/遮罩编号全部作废，
+            // 否则同一句字幕会命中「clean (roi)」直接 continue，遮罩已经 ClearZones 了却再也不重画。
+            ResetAutoState();
             // 游戏模式只做「准备」：不再自动预热模型、不自动开翻译。
             // 真正开始/暂停翻译由专用快捷键（默认 Ctrl+Alt+T）或界面开关决定。
             // QRSNAP_GAME_TRANS=1 仅供自动化测试：启动即处于「翻译已启动」状态。
-            TranslateActive = Environment.GetEnvironmentVariable("QRSNAP_GAME_TRANS") == "1";
+            TranslateActive = Environment.GetEnvironmentVariable("QRSNAP_GAME_TRANS") == "1" || _translateWanted;
             if (TranslateActive) WarmModel(profile);
             _autoLastText = "";
+            _autoLastGray = null;
             _autoBaseReady = false;
-            _freeZid.Clear();
-            _zidNext = 0;
 
-            try { TransOverlay.ClearZones(); } catch (Exception) { }
             StartAuto();   // 开跑高频自动监听（画面定住才识字）
             JadeHost.Log("[game] start regions=" + rs.Count
                 + " profile=" + profile
@@ -339,6 +354,7 @@ namespace QRSnap
             _busy = false;
             _paused = false;
             _overlayClosed = false;
+            _translateWanted = TranslateActive;
             TranslateActive = false;
             _autoLastText = "";
             _autoBaseReady = false;
@@ -367,8 +383,13 @@ namespace QRSnap
             _prevSig = null;
             StopMaskWatch();
             StopAuto();
+            _gen++;
+            _busy = false;
+            _pendingRun = false;
+            ResetAutoImageCache();
             StartTimer();
             StartAuto();
+            if (TranslateActive && TransOverlay.GameShowing) StartMaskWatch();
             JadeHost.Log("[game] reconfigure trigger=" + AppConfig.GameTrigger + " interval=" + AppConfig.GameIntervalMs
                 + " auto=" + (AppConfig.GameAutoMode ? 1 : 0));
         }
@@ -382,8 +403,23 @@ namespace QRSnap
                 if (_watch != null) { try { _watch.Dispose(); } catch (Exception) { } _watch = null; }
                 StopMaskWatch();
                 StopAuto();
+                _gen++;
+                _busy = false;
+                _pendingRun = false;
+                ResetAutoImageCache();
             }
-            else if (AppConfig.GameOn) { StartTimer(); StartAuto(); }
+            else if (AppConfig.GameOn)
+            {
+                _overlayClosed = false;
+                ResetAutoImageCache();
+                StartTimer();
+                if (TranslateActive)
+                {
+                    // 暂停前遮罩还在屏上：恢复时优先接回遮罩期监听；否则重新开自动采样。
+                    if (TransOverlay.GameShowing) StartMaskWatch();
+                    else StartAuto();
+                }
+            }
         }
 
         // 游戏模式下只有「隐藏遮罩」快捷键和遮罩上的关闭按钮能关遮罩
@@ -744,6 +780,35 @@ namespace QRSnap
             }
         }
 
+        // 翻译开/关、暂停恢复、改选区之后，画面像素没变但「上一次识字的基准」还停在旧帧；
+        // 不清掉它，AutoTick 会一直命中 sameimg，表现为「重新打开翻译却再也不出字」。
+        private static void ResetAutoImageCache()
+        {
+            _autoLastGray = null;
+            _autoLastBaseGray = null;
+            _autoBaseReady = false;
+            _autoOcrSkip = 0;
+            _autoTextSkip = 0;
+            _autoHoldUntil = 0;
+            _autoStableAt = Environment.TickCount;
+            // 逐槽基线也必须一起清：暂停时遮罩被收掉，底层画面和「贴着遮罩那一帧」的像素差很大，
+            // 留着旧 RoiGray/Sig 会让 MotionScore 一直报 moving=88，稳定判定永远不成立 → 再也不 OCR。
+            for (int i = 0; i < _slots.Count; i++)
+            {
+                RegionSlot sl = _slots[i];
+                sl.RoiGray = null;
+                sl.RoiNew = null;
+                sl.RoiBands = null;
+                sl.Sig = null;
+                sl.HasSegs = false;
+                sl.Segs = new List<OcrSegment>();
+                sl.PrevSegs = null;
+                sl.LastText = null;
+                sl.Lines = 0;
+                sl.ShownRect = Rectangle.Empty;
+            }
+        }
+
         // 鼠标停稳：同一位置停够 GameDwellMs，且离上一次真正扫描的锚点至少 30px，
         // 才认为用户「停下来看字幕了」。遮罩显示期间的自动更新也走这一条。
         private static bool DwellStill()
@@ -770,6 +835,9 @@ namespace QRSnap
         private static void AutoTick(object state)
         {
             if (!AppConfig.GameOn || _paused || _overlayClosed) { StopAuto(); return; }
+            // 翻译服务没开时只让定时器空转：千万别抓图识字，否则会先把当前画面缓存成「已处理」，
+            // 等用户再按 Ctrl+Alt+T 打开翻译，sameimg 直接跳过，看起来就是「怎么都不翻」。
+            if (!TranslateActive) return;
             if (TransOverlay.GameShowing || TransOverlay.Sampling) return;      // 遮罩真的画着东西（含采样掐图的几十毫秒），这段交给 MaskTick
             if (_busy) return;
             if (_maskClosing) { AutoNote("closing"); return; }
