@@ -12,7 +12,7 @@ Windows 截图 OCR / 翻译工具：二维码、文字识别、截图翻译、�
 - **游戏翻译开关**：`Ctrl+Alt+T`。手动模式按一次翻译一次；自适应模式在新字幕出现时自动翻译
 - **灵敏度四档**：低 / 中 / 高 / 极高
 - **分块框调试**：打开后，屏幕上用矩形标出自动分割出来的文字块，方便检查区域和合块
-- **OCR 引擎**：微信 OCR（通用）、RapidOCR（游戏模式推荐）
+- **OCR 引擎**：微信 OCR（通用）、RapidOCR（游戏模式推荐）、PP-OCR 日文（片假名）
 - **翻译档位**：标准 HyMT1.5 1.8B、效率 PLaMo Q4_K_M、极速 PLaMo Q2_K
 - **模型包导入**：设置 → 识别引擎 / 翻译 → 导入模型包，选 zip 即可，不用手动解压
 
@@ -22,12 +22,12 @@ Windows 截图 OCR / 翻译工具：二维码、文字识别、截图翻译、�
 
 <https://github.com/XuYuan2333/XuYuan-SnapScan/releases>
 
-Gitee 仓库同步源码和 tag；Gitee 附件容量放不下 110 MB 左右的本体包，下载请用 GitHub Releases。
+Gitee 仓库同步源码和 tag；Gitee 附件容量放不下 120 MB 左右的本体包，下载请用 GitHub Releases。
 
 | 文件 | 大小 | 内容 | 下载后怎么用 |
 |---|---:|---|---|
-| `SnapScan-v1.4.17-Body.zip` | 110.4 MB | 本体 + 微信 OCR + RapidOCR + 运行库 + WebView2 引导 | 解压到任意目录，运行 `QRSnap.exe`；只识字的话下这个就够 |
-| `SnapScan-Model-OCR-v1.4.1.zip` | 35.9 MB | 微信 OCR + RapidOCR 模型备份 | 本体已内置；只有模型目录丢失时才需要在「设置 → 识别引擎」导入 |
+| `SnapScan-v1.4.18-Body.zip` | 120.5 MB | 本体 + 微信 OCR + RapidOCR + PP-OCR 日文 + 运行库 + WebView2 引导 | 解压到任意目录，运行 `QRSnap.exe`；只识字的话下这个就够 |
+| `SnapScan-Model-OCR-v1.4.1.zip` | 46.1 MB | 微信 OCR + RapidOCR + PP-OCR 日文模型备份 | 本体已内置；只有模型目录丢失时才需要在「设置 → 识别引擎」导入 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q4_K_M-v1.4.2.zip` | 573 MB | 效率档 PLaMo Q4_K_M | 「设置 → 翻译 → 导入模型包」，档位选「效率」 |
 | `SnapScan-Model-PLaMo3-Translate-0.8B-Q2_K-v1.4.2.zip` | 410 MB | 极速档 PLaMo Q2_K | 「设置 → 翻译 → 导入模型包」，档位选「极速」 |
 | `SnapScan-Model-Pro-HyMT1.5-1.8B-v1.4.1.zip` | 1.1 GB | 标准档 HyMT1.5 1.8B | 「设置 → 翻译 → 导入模型包」，档位选「标准」 |

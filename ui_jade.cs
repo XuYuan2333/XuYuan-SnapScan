@@ -747,7 +747,7 @@ namespace QRSnap
                 long recMs = 0;
                 bool preLayout = false;
                 bool didOcr = false;
-                Log("ocr cfg fusion=" + (AppConfig.OcrFusion ? "1" : "0") + " layout=" + (AppConfig.AiLayout ? "1" : "0")
+                Log("ocr cfg layout=" + (AppConfig.AiLayout ? "1" : "0")
                     + " ready=" + (MtRunner.Ready ? "1" : "0"));
 
                 // 翻译 + 版面强化：直接跑「版面识字」，不要再先跑一遍普通识字。
@@ -764,9 +764,7 @@ namespace QRSnap
                             List<Rectangle> obs;
                             string llog;
                             System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
-                            List<OcrSegment> ls = AppConfig.OcrFusion
-                                ? Ocr.LayoutSegmentsFused(crop, out obs, out llog)
-                                : Ocr.LayoutSegments(crop, out obs, out llog);
+                            List<OcrSegment> ls = Ocr.LayoutSegments(crop, out obs, out llog);
                             swL.Stop();
                             if (ls != null && ls.Count >= 3)
                             {
@@ -775,7 +773,7 @@ namespace QRSnap
                                 didOcr = true;
                                 _layoutObstacles = obs;
                                 _layoutLines = ls.Count;
-                                recEngine = AppConfig.OcrFusion ? "RapidOCR+微信 · 融合版面" : "RapidOCR · 版面";
+                                recEngine = "RapidOCR · 版面";
                                 recDetail = "layout";
                                 recMs = swL.ElapsedMilliseconds;
                                 // 离线翻译时 AI 识字强化作用在版面分段上（AI 翻译接管时由翻译提示词纠错）
@@ -790,35 +788,6 @@ namespace QRSnap
                         catch (Exception exPre)
                         {
                             Log("prelayout fail " + exPre.Message);
-                        }
-                    }, 650);
-                }
-
-                // 纯识字 + 融合：PP 出框、微信出字；会比微信单引擎慢，开关默认关
-                if (!didOcr && mode == "ocr" && AppConfig.OcrFusion)
-                {
-                    RunPumped(delegate()
-                    {
-                        try
-                        {
-                            List<Rectangle> obs;
-                            string llog;
-                            System.Diagnostics.Stopwatch swL = System.Diagnostics.Stopwatch.StartNew();
-                            List<OcrSegment> ls = Ocr.LayoutSegmentsFused(crop, out obs, out llog);
-                            swL.Stop();
-                            if (ls != null && ls.Count > 0)
-                            {
-                                segs = ls;
-                                didOcr = true;
-                                recEngine = "PP+微信 · 融合识字";
-                                recDetail = llog;
-                                recMs = swL.ElapsedMilliseconds;
-                                recText = JoinSegText(segs);
-                            }
-                        }
-                        catch (Exception exFuse)
-                        {
-                            Log("ocr fusion fail " + exFuse.Message);
                         }
                     }, 650);
                 }
@@ -2176,6 +2145,7 @@ namespace QRSnap
         internal static string EngineLabel(string e)
         {
             if (e == AppConfig.EngineWeChat) return "微信 OCR";
+            if (e == AppConfig.EnginePpJapan) return "PP-OCR 日文";
             if (e == AppConfig.EnginePpRapid) return "RapidOCR";
             return "Windows OCR";
         }
@@ -2184,6 +2154,7 @@ namespace QRSnap
         internal static string EngineNote(string e)
         {
             if (e == AppConfig.EngineWeChat) return "通用 · 高兼容";
+            if (e == AppConfig.EnginePpJapan) return "日文专用 · 片假名";
             if (e == AppConfig.EnginePpRapid) return "游戏模式推荐";
             return "系统兜底";
         }
@@ -2649,11 +2620,6 @@ namespace QRSnap
             string effective = Ocr.EffectiveEngine();
             string engineName = EngineLabel(effective);
             string cn = EngineNote(effective);
-            if (AppConfig.OcrFusion)
-            {
-                engineName = "融合识字";
-                cn = "PP 框 + 微信字";
-            }
             bool verified = p != null && p.WeChatVerified;
 
             StringBuilder sb = new StringBuilder();
@@ -2674,7 +2640,7 @@ namespace QRSnap
             sb.Append(",\"list\":[");
             bool firstOpt = true;
             string[] keys = new string[] {
-                AppConfig.EngineWeChat, AppConfig.EnginePpRapid };
+                AppConfig.EngineWeChat, AppConfig.EnginePpRapid, AppConfig.EnginePpJapan };
             for (int i = 0; i < keys.Length; i++)
             {
                 string k = keys[i];
@@ -2702,7 +2668,6 @@ namespace QRSnap
             sb.Append(",\"mtperf\":").Append(J.S(AppConfig.MtPerf));
             sb.Append(",\"mtgpu\":").Append(J.S(AppConfig.MtGpu));
             sb.Append(",\"ocrgpu\":").Append(J.B(AppConfig.OcrGpu));
-            sb.Append(",\"ocrfusion\":").Append(J.B(AppConfig.OcrFusion));
             sb.Append(",\"shotcache\":").Append(J.B(AppConfig.ShotCacheEnabled));
             sb.Append(",\"hotstart\":").Append(J.B(AppConfig.HotStart));
             sb.Append(",\"ocrwarming\":").Append(J.B(Ocr.Warming));
@@ -3480,8 +3445,8 @@ namespace QRSnap
                 string pp = Path.Combine(src, "PP-OCR");
                 if (Directory.Exists(pp))
                 {
-                    string[] tiers = new string[] { "rapid" };
-                    string[] labels = new string[] { "RapidOCR" };
+                    string[] tiers = new string[] { "rapid", "japan" };
+                    string[] labels = new string[] { "RapidOCR", "PP-OCR 日文" };
                     for (int i = 0; i < tiers.Length; i++)
                     {
                         string t = Path.Combine(pp, tiers[i]);
@@ -3713,8 +3678,6 @@ namespace QRSnap
                     try
                     {
                         Ocr.Warmup(AppConfig.Engine);
-                        // 融合识字还要 RapidOCR 的检测模型，一起提前拉起
-                        if (AppConfig.OcrFusion) Ocr.Warmup(AppConfig.EnginePpRapid);
                         Log("[ocrwarm] " + AppConfig.Engine);
                     }
                     catch (Exception) { }
@@ -3746,8 +3709,7 @@ namespace QRSnap
             return true;
         }
 
-        // 点「加载」：后台线程起服务，立刻返回；前端靠轮询 state 判断完成
-        // 手动预热：打开热启动开关、打开融合模式时用，前端据此显示进度遮罩
+        // 手动预热：打开热启动开关时用，前端据此显示进度遮罩
         private static IntPtr OnOcrWarm(uint win, IntPtr msg)
         {
             if (Ocr.Warming) return Reply("{\"ok\":true,\"already\":true,\"state\":" + BuildState() + "}");
@@ -3756,20 +3718,14 @@ namespace QRSnap
             {
                 try
                 {
-                    // 融合模式要两套引擎都起来（RapidOCR 出框 + 微信出字）
-                    if (AppConfig.OcrFusion)
-                    {
-                        Ocr.Warmup(AppConfig.EngineWeChat);
-                        Ocr.Warmup(AppConfig.EnginePpRapid);
-                    }
-                    else Ocr.Warmup(AppConfig.Engine);
+                    Ocr.Warmup(AppConfig.Engine);
                 }
                 catch (Exception) { }
                 finally { Ocr.Warming = false; }
             });
             t.IsBackground = true;
             t.Start();
-            Log("[ocrwarm] fusion=" + (AppConfig.OcrFusion ? "1" : "0") + " engine=" + AppConfig.Engine);
+            Log("[ocrwarm] engine=" + AppConfig.Engine);
             return Reply("{\"ok\":true,\"state\":" + BuildState() + "}");
         }
 

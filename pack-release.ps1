@@ -57,7 +57,7 @@ $start = @(
 '- 建议 .NET Framework 4.8（Win10 21H2 / Win11 一般自带）。',
 '',
 '模型包（按需导入，光本体不会翻译）',
-'- OCR 包：微信 OCR + RapidOCR，导入后识字可用。',
+'- OCR 包：微信 OCR + RapidOCR + PP-OCR 日文（片假名），导入后识字可用。',
 '- PLaMo 包：PLaMo 3 Translate 0.8B Q4_K_M（效率）和 Q2_K（极速），导入后两档翻译可用。',
 '- 标准包：HyMT1.5 1.8B，导入后标准档可用（所有语种）。',
 '导入方式：设置 → 识别引擎 / 翻译 → 导入模型包，选择 zip 即可。',
@@ -76,6 +76,7 @@ $ocr = Stage 'ocr'
 $ocrModel = Join-Path $ocr 'OCR Model'
 New-Item -ItemType Directory -Force -Path (Join-Path $ocrModel 'PP-OCR') | Out-Null
 Copy-Item (Join-Path $root 'OCR Model\PP-OCR\rapid') (Join-Path $ocrModel 'PP-OCR\rapid') -Recurse -Force
+Copy-Item (Join-Path $root 'OCR Model\PP-OCR\japan') (Join-Path $ocrModel 'PP-OCR\japan') -Recurse -Force
 Copy-Item (Join-Path $root 'OCR Model\WeChat') (Join-Path $ocrModel 'WeChat') -Recurse -Force
 ZipDir $ocr (Join-Path $rel "SnapScan-Model-OCR-$modelVer.zip")
 

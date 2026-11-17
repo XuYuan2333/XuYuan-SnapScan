@@ -341,6 +341,9 @@
       if (e.verified) t += "（实测可用）";
       return t;
     }
+    if (e.effective === "ppjapan") {
+      return "本地日文 OCR 模型，带日文字典，片假名 / 平假名单独识别。";
+    }
     if (e.effective && e.effective.indexOf("pp") === 0) {
       return "本地 RapidOCR 模型，已从「OCR Model」目录加载，不需要额外装任何软件。";
     }

@@ -110,7 +110,7 @@ namespace QRSnap
                 + (AppConfig.AiMt ? "1" : "0") + (AppConfig.AiOcr ? "1" : "0")
                 + (AppConfig.AliMt ? "tmt" : "lc")
                 + (AppConfig.AiLayout ? "1" : "0") + "|" + AppConfig.MtMaskAlpha
-                + "|" + AppConfig.AiModel + (AppConfig.OcrFusion ? "|fuse" : "") + "|fv2";
+                + "|" + AppConfig.AiModel + "|fv2";
         }
 
         // 指纹取自「送 OCR 的那张灰度图」这条链路：先整体缩到 9x8，再按 BT.601 转亮度、

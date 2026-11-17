@@ -5,13 +5,13 @@
 #   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only models # 只打模型包
 #   powershell -ExecutionPolicy Bypass -File pack.ps1 -Only body -NoOcr   # 本体不带 OCR 模型（精简版，需要自己导入 OCR 包）
 # 结构必须和程序导入逻辑对上：
-#   OCR 包 = OCR Model\WeChat + OCR Model\PP-OCR\rapid
+#   OCR 包 = OCR Model\WeChat + OCR Model\PP-OCR\rapid + OCR Model\PP-OCR\japan
 #   翻译包 = MT Model\<*.gguf>（≥50MB 才会被识别）
 
 param(
     [ValidateSet('all','body','models')]
     [string]$Only = 'all',
-    # 本体包默认把 OCR 模型一起打进去（微信 OCR + RapidOCR），装上就能识字，不必再导入 OCR 包
+    # 本体包默认把 OCR 模型一起打进去（微信 OCR + RapidOCR + 日文），装上就能识字，不必再导入 OCR 包
     # 想发精简本体时加 -NoOcr
     [switch]$NoOcr,
     # 兼容旧用法：显式要求带 OCR（现在默认就带，传不传都一样）
@@ -25,7 +25,7 @@ $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outDir = Join-Path $root 'out'
 $dist   = Join-Path $root 'dist'
 $stage  = Join-Path $root '_packtmp'
-$ver    = 'v1.4.17'
+$ver    = 'v1.4.18'
 
 if (-not (Test-Path -LiteralPath $outDir)) { throw "找不到构建产物目录：$outDir，先跑 build19.ps1" }
 if (-not (Test-Path -LiteralPath $dist))   { New-Item -ItemType Directory -Path $dist | Out-Null }
@@ -77,11 +77,11 @@ if ($Only -eq 'all' -or $Only -eq 'body') {
         else { Write-Host ("  缺少 " + $f) -ForegroundColor Yellow }
     }
 
-    # OCR 模型默认跟着本体一起走（目录结构要和导入逻辑一致：OCR Model\WeChat、OCR Model\PP-OCR\rapid）
-    # 只保留微信 OCR 与 RapidOCR；日文专用、极速档已下线，不再随包分发。
+    # OCR 模型默认跟着本体一起走（目录结构要和导入逻辑一致：OCR Model\WeChat、OCR Model\PP-OCR\rapid、OCR Model\PP-OCR\japan）
+    # 保留微信 OCR、RapidOCR 和日文专用档（片假名）。
     $includeOcr = -not $NoOcr
     if ($includeOcr) {
-        Write-Host '[本体] 附带 OCR 模型（微信 OCR + RapidOCR）...'
+        Write-Host '[本体] 附带 OCR 模型（微信 OCR + RapidOCR + 日文）...'
         $ocrDst = Join-Path $stage 'OCR Model'
         New-Item -ItemType Directory -Path $ocrDst | Out-Null
         $wx = Join-Path (Join-Path $root 'OCR Model') 'WeChat'
@@ -89,9 +89,11 @@ if ($Only -eq 'all' -or $Only -eq 'body') {
         else { Write-Host '  缺少 OCR Model\WeChat' -ForegroundColor Yellow }
         $pp = Join-Path $stage 'OCR Model\PP-OCR'
         New-Item -ItemType Directory -Path $pp | Out-Null
-        $rapid = Join-Path (Join-Path (Join-Path $root 'OCR Model') 'PP-OCR') 'rapid'
-        if (Test-Path -LiteralPath $rapid) { Copy-Item -LiteralPath $rapid -Destination $pp -Recurse -Force }
-        else { Write-Host '  缺少 OCR Model\PP-OCR\rapid' -ForegroundColor Yellow }
+        foreach ($tier in @('rapid','japan')) {
+            $srcTier = Join-Path (Join-Path (Join-Path $root 'OCR Model') 'PP-OCR') $tier
+            if (Test-Path -LiteralPath $srcTier) { Copy-Item -LiteralPath $srcTier -Destination $pp -Recurse -Force }
+            else { Write-Host "  缺少 OCR Model\PP-OCR\$tier" -ForegroundColor Yellow }
+        }
     }
 
     $bodyName = if ($includeOcr) { "SnapScan-$ver-Body.zip" } else { "SnapScan-$ver-Body-Slim.zip" }
@@ -102,7 +104,7 @@ if ($Only -eq 'all' -or $Only -eq 'body') {
 if ($Only -eq 'all' -or $Only -eq 'models') {
     Write-Host '[模型包] 组装中...'
 
-    # OCR：微信 OCR + RapidOCR（结构 = OCR Model\WeChat、OCR Model\PP-OCR\rapid）
+    # OCR：微信 OCR + RapidOCR + 日文（结构 = OCR Model\WeChat、OCR Model\PP-OCR\rapid、OCR Model\PP-OCR\japan）
     Reset-Stage $stage
     $ocrDst = Join-Path $stage 'OCR Model'
     New-Item -ItemType Directory -Path $ocrDst | Out-Null
@@ -111,9 +113,11 @@ if ($Only -eq 'all' -or $Only -eq 'models') {
     else { Write-Host '  缺少 OCR Model\WeChat' -ForegroundColor Yellow }
     $pp = Join-Path $stage 'OCR Model\PP-OCR'
     New-Item -ItemType Directory -Path $pp | Out-Null
-    $rapid = Join-Path (Join-Path (Join-Path $root 'OCR Model') 'PP-OCR') 'rapid'
-    if (Test-Path -LiteralPath $rapid) { Copy-Item -LiteralPath $rapid -Destination $pp -Recurse -Force }
-    else { Write-Host '  缺少 OCR Model\PP-OCR\rapid' -ForegroundColor Yellow }
+    foreach ($tier in @('rapid','japan')) {
+        $srcTier = Join-Path (Join-Path (Join-Path $root 'OCR Model') 'PP-OCR') $tier
+        if (Test-Path -LiteralPath $srcTier) { Copy-Item -LiteralPath $srcTier -Destination $pp -Recurse -Force }
+        else { Write-Host "  缺少 OCR Model\PP-OCR\$tier" -ForegroundColor Yellow }
+    }
     New-Zip -StageDir $stage -ZipPath (Join-Path $dist 'SnapScan-Model-OCR-v1.4.1.zip') -Level 'Optimal'
 
     # 翻译：每个 gguf 一个包（结构 = MT Model\<gguf>）
