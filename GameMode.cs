@@ -1093,7 +1093,7 @@ namespace QRSnap
                             }
                         }
                     }
-                    if (zpx >= 80 || zsig >= 2 || zd >= 3)
+                    if (zpx >= 80 || (zpx < 0 && zsig >= 2) || zd >= 3)
                     {
                         JadeHost.Log("[game] zone " + (i + 1) + " pixel-change dist=" + zd + " px=" + zpx + " sig=" + zsig + "（待重扫）");
                         zoneHit = true;
